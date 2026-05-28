@@ -22,6 +22,7 @@ Raspberry Pi (172.16.10.136, user gduthie)
   ├── transport-proxy.py   port 5001  (0.0.0.0) — API proxy + static file server
   ├── dashboard.html, icons/, hls.min.js — served as static files by transport-proxy
   ├── hive-tokens.json, hive-credentials.json (mode 600)
+  ├── .env  — BODS_API_KEY + LASTFM_API_KEY (mode 600)
   └── logos/, aircraft-info/, bus-stops.json, bus-route-stops.json (runtime caches)
 
 O2 Joggler (172.16.10.168, user of)
@@ -127,10 +128,20 @@ exec chromium \
   --disable-sync --disable-background-networking \
   --disable-default-apps --single-process \
   --disable-dev-shm-usage \
+  --disk-cache-dir=/tmp/chromium-cache \
+  --disk-cache-size=52428800 \
   --js-flags="--max-old-space-size=80" \
   --window-position=0,0 --window-size=800,480 \
   http://172.16.10.136:5001/
 ```
+
+`/tmp` on openframe-linux is a tmpfs (RAM-backed, 246 MB). Redirecting Chromium's HTTP disk
+cache there eliminates USB I/O for cached resources. Without this, every page fetch causes USB
+writes at ~24 MB/s and drive wear. `fix-oom.sh` sets this up on a fresh or repaired system.
+
+**`vm.swappiness = 10`** (set in `/etc/sysctl.d/99-joggler.conf`) — reduces kernel eagerness to
+swap under memory pressure. Default is 100 on this distro. Lower values keep hot Chromium pages
+in RAM longer, reducing I/O wait spikes. Applied by `fix-oom.sh`.
 
 ### Pi (systemd)
 
@@ -183,7 +194,7 @@ hls.min.js                  # HLS.js library (served statically to browser)
 
 hive-tokens.json            # Hive/Cognito auth tokens + home_id (mode 600)
 hive-credentials.json       # Hive login credentials for auto-reauth (mode 600)
-.env                        # BODS_API_KEY (mode 600)
+.env                        # BODS_API_KEY + LASTFM_API_KEY (mode 600)
 
 icons/
   wsymbol_*.png             # 92 PNG weather icons (MAm TV set, 128×128)
@@ -380,6 +391,12 @@ Paradise, FIP, and local/independent stations.
 - Show info: `https://episodes.marlowfm.co.uk:3009/sse-json`
 - Marlow FM stream is HTTP only (no HTTPS on server) — must use `http://`.
 
+**Last.fm track info:** When now-playing updates with an artist+title, the proxy fetches
+`/api/radio/track-info?artist=…&title=…` → Last.fm `track.getInfo` (falls back to
+`artist.getInfo` for bio/image if track has no bio). Returns `{image, album, bio, listeners}`.
+Displayed below now-playing: album name in blue, then an expandable artist bio strip with
+listener count. API key stored as `LASTFM_API_KEY` in the Pi's `.env`. TTL: 1 hour.
+
 **Tile display:**
 - No track playing: logo · show name · presenter
 - Track playing: logo + album artwork · **track title** (bold) · artist · show name · presenter
@@ -502,6 +519,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
 | `GET /api/radio/nowplaying?url=…` | ICY stream metadata | 25 s | StreamTitle from ICY |
 | `GET /api/radio/nowplaying-rp?chan=N` | Radio Paradise API | 20 s | |
+| `GET /api/radio/track-info?artist=…&title=…` | Last.fm API | 3600 s | Bio, album, listeners, artwork |
 | `GET /health` | — | — | Returns `ok` |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
@@ -572,6 +590,7 @@ other device.
 | Overpass API | Proxy | Once ever | File-cached | ~0 | Fair use |
 | adsbdb.com routes | Browser | Flights view, per callsign | Once per callsign | Low | None |
 | FlightAware scrape | Proxy | Flights view, per callsign | 4 h TTL | Low | Fair use |
+| Last.fm API | Proxy | Radio, on track change | 3600 s TTL | Low | Fair use |
 | OpenSky aircraft metadata | Proxy | Once per hex code | File-cached | ~0 | Fair use |
 | Hive Beekeeper API | Proxy | Weather view (5 min) | 300 s TTL | ~288 | None |
 
@@ -831,7 +850,9 @@ Everything working as of 2026-05-28.
 - [x] Joggler: Boot, WiFi, SSH
 - [x] Autologin → X → Openbox → kiosk chain (Chromium → Pi)
 - [x] Touchscreen tap (touch-bridge.py)
-- [x] sshd OOM-protected
+- [x] sshd OOM-protected (OOMScoreAdjust=-1000)
+- [x] Chromium HTTP disk cache on tmpfs (/tmp/chromium-cache) to eliminate USB I/O
+- [x] vm.swappiness=10 (/etc/sysctl.d/99-joggler.conf)
 - [x] Pi: transport-proxy.py serving dashboard + all API endpoints
 - [x] Home screen: 6-tile grid (Weather, Radio, WagtailCam, Trains, Aircraft, Buses)
 - [x] Responsive design: Joggler / phone portrait / phone landscape / card profiles
@@ -839,6 +860,7 @@ Everything working as of 2026-05-28.
 - [x] Tile timers pause when any view is open
 - [x] Weather: NOW/TODAY/WEEK tabs, sun arc, wind compass, AQI, pressure trend, indoor temps
 - [x] Radio: 30+ stations, station picker, now-playing (SSE + ICY + RP API), Chromecast
+- [x] Radio: Last.fm artist bio, album name, listener count, artwork via /api/radio/track-info
 - [x] WagtailCam: live MJPEG, timelapse, fullscreen
 - [x] Transport: trains (5 departures, calling points)
 - [x] Flights: draggable Leaflet map, canvas overlay, Airlines/Other/LHR filter buttons,
