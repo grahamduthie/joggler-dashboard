@@ -855,9 +855,9 @@ def _fetch_rp_nowplaying(chan):
 
 
 def _fetch_lastfm_track_info(artist, title):
-    """Fetch track + artist info from Last.fm. Returns dict with image, album, bio, listeners."""
+    """Fetch track + artist info from Last.fm. Returns dict with image, album, bio, listeners, tags."""
     import urllib.parse
-    result = {'image': '', 'album': '', 'bio': '', 'listeners': ''}
+    result = {'image': '', 'album': '', 'bio': '', 'listeners': '', 'tags': []}
     if not LASTFM_API_KEY:
         return result
 
@@ -894,6 +894,9 @@ def _fetch_lastfm_track_info(artist, title):
         wiki = t.get('wiki', {})
         if wiki.get('summary'):
             result['bio'] = _strip_html(wiki['summary'])
+        tags = [tag['name'] for tag in t.get('toptags', {}).get('tag', []) if tag.get('name')]
+        if tags:
+            result['tags'] = tags[:4]
     except Exception:
         pass
 

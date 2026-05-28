@@ -620,11 +620,21 @@
     background: linear-gradient(160deg, #0c1f38 0%, #102c4e 50%, #091c30 100%);
     display: flex;
     flex-direction: column;
+    align-items: stretch;
+    padding: 0;
+  }
+
+  /* ── Idle zone: full station identity, hidden when track is playing ── */
+  #radio-idle {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0;
-    padding: 10px 24px 12px;
+    padding: 12px 60px;
+    min-height: 0;
   }
+  #view-radio.has-track #radio-idle { display: none; }
 
   #radio-logo {
     display: block;
@@ -633,7 +643,6 @@
     object-fit: contain;
     margin-bottom: 6px;
   }
-
   #radio-station-name {
     font-size: 38px;
     font-weight: bold;
@@ -663,7 +672,6 @@
     min-height: 18px;
     font-style: italic;
   }
-
   #radio-visual {
     font-size: 42px;
     color: #1e3f60;
@@ -682,66 +690,81 @@
     50%       { opacity: 0.6; }
   }
 
-  #play-btn {
-    width: 92px;
-    height: 92px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #00aaee 0%, #0077bb 100%);
-    border: 2px solid rgba(0,200,255,0.35);
-    box-shadow: 0 0 22px rgba(0,158,221,0.5), 0 4px 14px rgba(0,0,0,0.6);
-    cursor: none;
-    font-size: 34px;
-    color: #fff;
+  /* ── Playing zone: compact strip + artwork + bio ── */
+  #radio-track {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #view-radio.has-track #radio-track { display: flex; }
+
+  /* Compact station strip */
+  #radio-strip {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 58px;
+    border-bottom: 1px solid rgba(0,158,221,0.15);
+    background: rgba(0,0,0,0.2);
+    overflow: hidden;
+  }
+  #radio-logo-sm {
+    height: 26px;
+    max-width: 56px;
+    object-fit: contain;
     flex-shrink: 0;
-    -webkit-tap-highlight-color: transparent;
-    transition: box-shadow 0.3s, background 0.2s;
-    margin: 6px 0;
-  }
-  #play-btn:active {
-    background: linear-gradient(135deg, #0077bb 0%, #005588 100%);
-    box-shadow: 0 0 10px rgba(0,158,221,0.3);
-  }
-
-  #radio-status {
-    font-size: 12px;
-    margin-top: 4px;
-    height: 18px;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-  }
-  #radio-status.live      { color: #00ee88; }
-  #radio-status.buffering { color: #ffaa22; }
-  #radio-status.stopped   { color: #2a4a60; }
-  #radio-status.error     { color: #ff4444; }
-
-  #now-playing {
     display: none;
-    align-items: center;
-    gap: 14px;
-    margin: 6px 0;
-    max-width: 520px;
-    width: 100%;
-    background: rgba(0,158,221,0.08);
-    border: 1px solid rgba(0,158,221,0.2);
-    border-radius: 8px;
-    padding: 10px 14px;
-    box-sizing: border-box;
   }
-  #now-playing.active { display: flex; }
-  #now-playing.has-bio { border-radius: 8px 8px 0 0; border-bottom-color: transparent; }
+  #radio-strip-name {
+    font-size: 14px;
+    font-weight: bold;
+    color: #cce6f5;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #radio-strip-sep {
+    color: rgba(255,255,255,0.2);
+    flex-shrink: 0;
+  }
+  #radio-strip-tag {
+    font-size: 11px;
+    color: #4a7a99;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex: 1;
+  }
+
+  /* Artwork + track details row */
+  #radio-track-main {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+    padding: 14px 16px 8px;
+    align-items: flex-start;
+  }
   #now-playing-art {
-    width: 72px;
-    height: 72px;
-    border-radius: 6px;
+    width: 150px;
+    height: 150px;
+    border-radius: 8px;
     object-fit: cover;
     flex-shrink: 0;
     background: #0d2035;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    display: none;
   }
-  #now-playing-text { flex: 1; min-width: 0; }
+  #now-playing-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
   #now-playing-artist {
     font-size: 12px;
     color: #00c4f0;
@@ -752,42 +775,131 @@
     letter-spacing: 1px;
   }
   #now-playing-title {
-    font-size: 18px;
+    font-size: 22px;
     font-weight: bold;
     color: #ffffff;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
-    margin-top: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    margin-top: 5px;
     line-height: 1.2;
   }
   #now-playing-album {
-    font-size: 11px;
+    font-size: 12px;
     color: #5a8fad;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-top: 3px;
+    margin-top: 5px;
+  }
+  #now-playing-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 10px;
+  }
+  .np-tag {
+    font-size: 11px;
+    color: #4ad4a0;
+    background: rgba(74,212,160,0.1);
+    border: 1px solid rgba(74,212,160,0.22);
+    border-radius: 10px;
+    padding: 2px 9px;
+    white-space: nowrap;
+    text-transform: capitalize;
+    letter-spacing: 0.3px;
   }
 
+  /* Bio fills all remaining space with a fade at the bottom */
   #track-bio {
-    display: none;
-    max-width: 520px;
-    width: 100%;
-    font-size: 12px;
+    flex: 1;
+    min-height: 0;
+    font-size: 13px;
     color: #7fb3d3;
-    line-height: 1.5;
-    text-align: left;
-    padding: 8px 14px;
-    background: rgba(0,158,221,0.05);
-    border: 1px solid rgba(0,158,221,0.12);
-    border-top: none;
-    border-radius: 0 0 8px 8px;
-    box-sizing: border-box;
-    margin-top: -6px;
+    line-height: 1.55;
+    padding: 2px 16px 0;
     overflow: hidden;
+    position: relative;
   }
-  #track-bio.active { display: block; }
+  #track-bio::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 44px;
+    background: linear-gradient(transparent, #091c30);
+    pointer-events: none;
+  }
+
+  /* ── Controls zone: always at bottom ── */
+  #radio-controls {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px 10px;
+    border-top: 1px solid rgba(0,158,221,0.12);
+  }
+  #play-btn {
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #00aaee 0%, #0077bb 100%);
+    border: 2px solid rgba(0,200,255,0.35);
+    box-shadow: 0 0 22px rgba(0,158,221,0.5), 0 4px 14px rgba(0,0,0,0.6);
+    cursor: none;
+    font-size: 28px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+    transition: box-shadow 0.3s, background 0.2s;
+  }
+  #play-btn:active {
+    background: linear-gradient(135deg, #0077bb 0%, #005588 100%);
+    box-shadow: 0 0 10px rgba(0,158,221,0.3);
+  }
+  #radio-status {
+    flex-shrink: 0;
+    font-size: 12px;
+    height: 18px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  #radio-status.live      { color: #00ee88; }
+  #radio-status.buffering { color: #ffaa22; }
+  #radio-status.stopped   { color: #2a4a60; }
+  #radio-status.error     { color: #ff4444; }
+  #vol-control {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #vol-label { font-size: 13px; color: #4a7a99; width: 28px; letter-spacing: 1px; }
+  #vol-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: #1a3a55;
+    outline: none;
+    cursor: none;
+  }
+  #vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #00aaee;
+    cursor: none;
+    box-shadow: 0 0 8px rgba(0,158,221,0.6);
+  }
+  #vol-pct { font-size: 13px; color: #4a7a99; width: 36px; text-align: right; }
 
   /* ════════════════════════════════
      STATION PICKER
@@ -1029,35 +1141,6 @@
   }
   .cast-vol-btn:active { background: #2a6a9a; }
   #cast-cancel-btn:active { background: #1a3a5a; }
-
-  #vol-control {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 12px;
-  }
-  #vol-label { font-size: 13px; color: #4a7a99; width: 28px; letter-spacing: 1px; }
-  #vol-slider {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 260px;
-    height: 6px;
-    border-radius: 3px;
-    background: #1a3a55;
-    outline: none;
-    cursor: none;
-  }
-  #vol-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: #00aaee;
-    cursor: none;
-    box-shadow: 0 0 8px rgba(0,158,221,0.6);
-  }
-  #vol-pct { font-size: 13px; color: #4a7a99; width: 36px; text-align: right; }
 
   /* ════════════════════════════════
      WAGTAILCAM VIEW
@@ -2394,8 +2477,9 @@
 
   <!-- Radio view -->
   <div id="view-radio" class="view">
-    <button id="station-btn" onmousedown="openStationPicker()">&#9776;</button>
-    <button id="cast-btn" onmousedown="castOpenPanel()">
+    <!-- Floating controls — absolutely positioned, always accessible -->
+    <button id="station-btn" onmousedown="openStationPicker()" ontouchstart="openStationPicker()">&#9776;</button>
+    <button id="cast-btn" onmousedown="castOpenPanel()" ontouchstart="castOpenPanel()">
       <svg viewBox="0 0 24 24" width="28" height="28">
         <path fill="currentColor" d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
         <path fill="currentColor" d="M1 18v3h3c0-1.66-1.34-3-3-3z"/>
@@ -2403,27 +2487,46 @@
         <path fill="currentColor" d="M1 10v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/>
       </svg>
     </button>
-    <img id="radio-logo" src="" alt="" onerror="this.style.display='none';document.getElementById('radio-station-name').style.display=''">
-    <div id="radio-station-name">MARLOW FM</div>
-    <div id="radio-station-freq">97.5 FM</div>
-    <div id="radio-tagline">Community Radio</div>
-    <div id="radio-show"></div>
-    <div id="radio-visual">&#9834; &#9834; &#9834;</div>
-    <div id="now-playing">
-      <img id="now-playing-art" src="" alt="">
-      <div id="now-playing-text">
-        <div id="now-playing-artist"></div>
-        <div id="now-playing-title"></div>
-        <div id="now-playing-album"></div>
-      </div>
+
+    <!-- Zone 1: Idle — full station identity, hidden when track is playing -->
+    <div id="radio-idle">
+      <img id="radio-logo" src="" alt="" onerror="this.style.display='none';document.getElementById('radio-station-name').style.display=''">
+      <div id="radio-station-name">MARLOW FM</div>
+      <div id="radio-station-freq">97.5 FM</div>
+      <div id="radio-tagline">Community Radio</div>
+      <div id="radio-show"></div>
+      <div id="radio-visual">&#9834; &#9834; &#9834;</div>
     </div>
-    <div id="track-bio"></div>
-    <button id="play-btn" onmousedown="togglePlay()">&#9654;</button>
-    <div id="radio-status" class="stopped"></div>
-    <div id="vol-control">
-      <span id="vol-label">VOL</span>
-      <input type="range" id="vol-slider" min="0" max="100" value="80" oninput="setVolume(this.value)">
-      <span id="vol-pct">80%</span>
+
+    <!-- Zone 2: Playing — compact strip + large artwork + details + bio -->
+    <div id="radio-track">
+      <div id="radio-strip">
+        <img id="radio-logo-sm" src="" alt="">
+        <span id="radio-strip-name"></span>
+        <span id="radio-strip-sep">·</span>
+        <span id="radio-strip-tag"></span>
+      </div>
+      <div id="radio-track-main">
+        <img id="now-playing-art" src="" alt="">
+        <div id="now-playing-text">
+          <div id="now-playing-artist"></div>
+          <div id="now-playing-title"></div>
+          <div id="now-playing-album"></div>
+          <div id="now-playing-tags"></div>
+        </div>
+      </div>
+      <div id="track-bio"></div>
+    </div>
+
+    <!-- Zone 3: Controls — always at bottom -->
+    <div id="radio-controls">
+      <button id="play-btn" onmousedown="togglePlay()" ontouchstart="togglePlay()">&#9654;</button>
+      <div id="radio-status" class="stopped"></div>
+      <div id="vol-control">
+        <span id="vol-label">VOL</span>
+        <input type="range" id="vol-slider" min="0" max="100" value="80" oninput="setVolume(this.value)">
+        <span id="vol-pct">80%</span>
+      </div>
     </div>
 
     <!-- Station picker overlay -->
@@ -3718,8 +3821,7 @@
   var _trackBioKey = '';
 
   function clearNowPlaying() {
-    document.getElementById('now-playing').classList.remove('active');
-    document.getElementById('radio-visual').style.display = '';
+    document.getElementById('view-radio').classList.remove('has-track');
     var npArt = document.getElementById('now-playing-art');
     npArt.src = ''; npArt.style.display = 'none';
     var tileArt = document.getElementById('tile-radio-art');
@@ -3727,28 +3829,28 @@
     tileArt.src = '';
     document.getElementById('tile-info-radio-artist').style.display = 'none';
     document.getElementById('tile-info-radio-title').style.display = 'none';
+    document.getElementById('now-playing-artist').textContent = '';
+    document.getElementById('now-playing-title').textContent = '';
     document.getElementById('now-playing-album').textContent = '';
-    var bio = document.getElementById('track-bio');
-    bio.textContent = ''; bio.classList.remove('active');
-    document.getElementById('now-playing').classList.remove('has-bio');
+    document.getElementById('now-playing-tags').innerHTML = '';
+    document.getElementById('track-bio').textContent = '';
     _trackBioKey = '';
   }
 
   function updateNowPlaying(data) {
     var hasTrack = !!(data.artist || data.title);
     if (hasTrack) {
-      document.getElementById('radio-visual').style.display = 'none';
+      document.getElementById('view-radio').classList.add('has-track');
       var npArt = document.getElementById('now-playing-art');
       if (data.coverArtURL) {
         npArt.src = data.coverArtURL;
-        npArt.style.display = '';
+        npArt.style.display = 'block';
       } else {
         npArt.src = ''; npArt.style.display = 'none';
       }
       document.getElementById('now-playing-artist').textContent = data.artist || '';
       document.getElementById('now-playing-title').textContent = data.title || '';
       document.getElementById('now-playing-album').textContent = data.album || '';
-      document.getElementById('now-playing').classList.add('active');
       var tileArt = document.getElementById('tile-radio-art');
       tileArt.src = data.coverArtURL || '';
       tileArt.style.display = data.coverArtURL ? 'block' : 'none';
@@ -3756,10 +3858,11 @@
       document.getElementById('tile-info-radio-artist').style.display = '';
       document.getElementById('tile-info-radio-title').textContent = data.title || '';
       document.getElementById('tile-info-radio-title').style.display = '';
-      // Fetch Last.fm track info (bio, better artwork) if artist+title changed
       var bioKey = (data.artist || '') + '|' + (data.title || '');
       if (bioKey !== _trackBioKey) {
         _trackBioKey = bioKey;
+        document.getElementById('now-playing-tags').innerHTML = '';
+        document.getElementById('track-bio').textContent = '';
         _fetchTrackBio(data.artist || '', data.title || '', data.coverArtURL || '');
       }
     } else {
@@ -3768,30 +3871,27 @@
   }
 
   function _fetchTrackBio(artist, title, existingArt) {
-    var bio = document.getElementById('track-bio');
-    bio.textContent = ''; bio.classList.remove('active');
     if (!artist && !title) return;
     fetch('/api/radio/track-info?artist=' + encodeURIComponent(artist) +
                                '&title='  + encodeURIComponent(title))
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        // Use Last.fm artwork if we don't already have cover art
         if (d.image && !existingArt) {
           var npArt = document.getElementById('now-playing-art');
-          npArt.src = d.image; npArt.style.display = '';
+          npArt.src = d.image; npArt.style.display = 'block';
           var tileArt = document.getElementById('tile-radio-art');
           tileArt.src = d.image; tileArt.style.display = 'block';
         }
-        // Show album if RP didn't supply one
         if (d.album && !document.getElementById('now-playing-album').textContent) {
           document.getElementById('now-playing-album').textContent = d.album;
         }
-        // Bio strip
+        if (d.tags && d.tags.length) {
+          document.getElementById('now-playing-tags').innerHTML =
+            d.tags.map(function(t) { return '<span class="np-tag">' + t + '</span>'; }).join('');
+        }
         if (d.bio) {
           var listeners = d.listeners ? ' · ' + parseInt(d.listeners, 10).toLocaleString() + ' listeners' : '';
-          bio.textContent = d.bio + listeners;
-          bio.classList.add('active');
-          document.getElementById('now-playing').classList.add('has-bio');
+          document.getElementById('track-bio').textContent = d.bio + listeners;
         }
       })
       .catch(function() {});
@@ -4050,6 +4150,15 @@
       mainLogo.src = '';
       nameEl.style.display = '';
     }
+    // Populate compact strip for when track info is shown
+    var smLogo = document.getElementById('radio-logo-sm');
+    if (st.logoUrl) {
+      smLogo.src = st.logoUrl; smLogo.alt = st.name; smLogo.style.display = 'block';
+    } else {
+      smLogo.src = ''; smLogo.style.display = 'none';
+    }
+    document.getElementById('radio-strip-name').textContent = st.name;
+    document.getElementById('radio-strip-tag').textContent = st.tagline || '';
     var tileLogo = document.getElementById('tile-radio-logo');
     if (st.logoUrl) {
       tileLogo.src = st.logoUrl;
