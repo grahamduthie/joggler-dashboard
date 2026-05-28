@@ -716,6 +716,7 @@
     flex: 1;
     flex-direction: column;
     min-height: 0;
+    margin-bottom: 64px; /* leave room for the absolutely-pinned controls bar */
   }
   #view-radio.has-track #radio-track { display: flex; }
 
@@ -869,7 +870,11 @@
     pointer-events: none;
   }
 
-  /* Controls bar — same height as the station strip */
+  /* Controls bar — pinned to the bottom of the view in playing state */
+  #view-radio.has-track #radio-controls {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+  }
   #radio-controls {
     flex-shrink: 0;
     display: flex;
