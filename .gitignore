@@ -1,0 +1,22 @@
+# Credentials and API keys — never commit these
+hive-tokens.json
+hive-credentials.json
+.env
+
+# Runtime caches — generated automatically, not source files
+bus-stops.json
+bus-route-stops.json
+logos/
+aircraft-info/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude project settings
+.claude/
+
+# Raw photos (keep JPGs for README, exclude HEIC originals and zip)
+*.HEIC
+MAm-WeatherIcons-TV01e.zip
