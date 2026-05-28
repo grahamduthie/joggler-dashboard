@@ -624,15 +624,17 @@
     padding: 0;
   }
 
-  /* ── Idle zone: full station identity, hidden when track is playing ── */
+  /* ══ IDLE STATE: original centred layout, no track info ══ */
+  #view-radio.active:not(.has-track) {
+    align-items: center;
+    justify-content: center;
+    padding: 10px 24px 12px;
+  }
   #radio-idle {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 12px 60px;
-    min-height: 0;
   }
   #view-radio.has-track #radio-idle { display: none; }
 
@@ -690,7 +692,25 @@
     50%       { opacity: 0.6; }
   }
 
-  /* ── Playing zone: compact strip + artwork + bio ── */
+  /* Controls: column + original sizes when idle */
+  #view-radio.active:not(.has-track) #radio-controls {
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    border-top: none;
+    height: auto;
+  }
+  #view-radio.active:not(.has-track) #play-btn {
+    width: 92px; height: 92px; font-size: 34px; margin: 6px 0;
+  }
+  #view-radio.active:not(.has-track) #radio-status { margin-top: 4px; }
+  #view-radio.active:not(.has-track) #vol-control {
+    flex: 0 0 auto; margin-top: 12px; gap: 12px;
+  }
+  #view-radio.active:not(.has-track) #vol-slider { width: 260px; flex: 0 0 260px; }
+
+  /* ══ PLAYING STATE: strip + content + controls ══ */
   #radio-track {
     display: none;
     flex: 1;
@@ -699,39 +719,51 @@
   }
   #view-radio.has-track #radio-track { display: flex; }
 
-  /* Compact station strip */
+  /* Station strip — sized to match the controls bar */
   #radio-strip {
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
-    height: 40px;
-    padding: 0 58px;
-    border-bottom: 1px solid rgba(0,158,221,0.15);
-    background: rgba(0,0,0,0.2);
+    gap: 10px;
+    height: 64px;
+    padding: 0 72px;
+    border-bottom: 1px solid rgba(0,158,221,0.18);
+    background: rgba(0,0,0,0.25);
     overflow: hidden;
   }
+  /* Buttons span full strip height so they centre vertically within it */
+  #view-radio.has-track #station-btn {
+    top: 0; bottom: auto;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+  }
+  #view-radio.has-track #cast-btn {
+    top: 0; bottom: auto;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+  }
   #radio-logo-sm {
-    height: 26px;
-    max-width: 56px;
+    height: 36px;
+    max-width: 80px;
     object-fit: contain;
     flex-shrink: 0;
     display: none;
   }
   #radio-strip-name {
-    font-size: 14px;
+    font-size: 18px;
     font-weight: bold;
-    color: #cce6f5;
+    color: #e8f4fc;
     white-space: nowrap;
     flex-shrink: 0;
   }
-  #radio-strip-sep {
-    color: rgba(255,255,255,0.2);
-    flex-shrink: 0;
-  }
+  #radio-strip-sep { color: rgba(255,255,255,0.25); flex-shrink: 0; }
   #radio-strip-tag {
-    font-size: 11px;
-    color: #4a7a99;
+    font-size: 12px;
+    color: #5a8fad;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -740,13 +772,14 @@
     flex: 1;
   }
 
-  /* Artwork + track details row */
+  /* Artwork + details: fills all space between strip and controls */
   #radio-track-main {
-    flex-shrink: 0;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: row;
     gap: 16px;
-    padding: 14px 16px 8px;
+    padding: 12px 16px 10px;
     align-items: flex-start;
   }
   #now-playing-art {
@@ -762,10 +795,13 @@
   #now-playing-text {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
   #now-playing-artist {
+    flex-shrink: 0;
     font-size: 12px;
     color: #00c4f0;
     white-space: nowrap;
@@ -775,6 +811,7 @@
     letter-spacing: 1px;
   }
   #now-playing-title {
+    flex-shrink: 0;
     font-size: 22px;
     font-weight: bold;
     color: #ffffff;
@@ -786,6 +823,7 @@
     line-height: 1.2;
   }
   #now-playing-album {
+    flex-shrink: 0;
     font-size: 12px;
     color: #5a8fad;
     white-space: nowrap;
@@ -794,10 +832,11 @@
     margin-top: 5px;
   }
   #now-playing-tags {
+    flex-shrink: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
-    margin-top: 10px;
+    margin-top: 8px;
   }
   .np-tag {
     font-size: 11px;
@@ -810,15 +849,14 @@
     text-transform: capitalize;
     letter-spacing: 0.3px;
   }
-
-  /* Bio fills all remaining space with a fade at the bottom */
+  /* Bio: immediately follows tags/album, fills remaining column height */
   #track-bio {
     flex: 1;
     min-height: 0;
     font-size: 13px;
     color: #7fb3d3;
     line-height: 1.55;
-    padding: 2px 16px 0;
+    margin-top: 8px;
     overflow: hidden;
     position: relative;
   }
@@ -826,29 +864,30 @@
     content: '';
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    height: 44px;
-    background: linear-gradient(transparent, #091c30);
+    height: 40px;
+    background: linear-gradient(transparent, #0c1f38);
     pointer-events: none;
   }
 
-  /* ── Controls zone: always at bottom ── */
+  /* Controls bar — same height as the station strip */
   #radio-controls {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 16px 10px;
-    border-top: 1px solid rgba(0,158,221,0.12);
+    height: 64px;
+    padding: 0 16px;
+    border-top: 1px solid rgba(0,158,221,0.15);
   }
   #play-btn {
-    width: 68px;
-    height: 68px;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
     background: linear-gradient(135deg, #00aaee 0%, #0077bb 100%);
     border: 2px solid rgba(0,200,255,0.35);
-    box-shadow: 0 0 22px rgba(0,158,221,0.5), 0 4px 14px rgba(0,0,0,0.6);
+    box-shadow: 0 0 18px rgba(0,158,221,0.5), 0 3px 10px rgba(0,0,0,0.6);
     cursor: none;
-    font-size: 28px;
+    font-size: 20px;
     color: #fff;
     display: flex;
     align-items: center;
@@ -859,7 +898,7 @@
   }
   #play-btn:active {
     background: linear-gradient(135deg, #0077bb 0%, #005588 100%);
-    box-shadow: 0 0 10px rgba(0,158,221,0.3);
+    box-shadow: 0 0 8px rgba(0,158,221,0.3);
   }
   #radio-status {
     flex-shrink: 0;
@@ -2513,9 +2552,9 @@
           <div id="now-playing-title"></div>
           <div id="now-playing-album"></div>
           <div id="now-playing-tags"></div>
+          <div id="track-bio"></div>
         </div>
       </div>
-      <div id="track-bio"></div>
     </div>
 
     <!-- Zone 3: Controls — always at bottom -->
