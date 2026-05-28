@@ -731,6 +731,7 @@
     box-sizing: border-box;
   }
   #now-playing.active { display: flex; }
+  #now-playing.has-bio { border-radius: 8px 8px 0 0; border-bottom-color: transparent; }
   #now-playing-art {
     width: 72px;
     height: 72px;
@@ -760,6 +761,33 @@
     margin-top: 4px;
     line-height: 1.2;
   }
+  #now-playing-album {
+    font-size: 11px;
+    color: #5a8fad;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 3px;
+  }
+
+  #track-bio {
+    display: none;
+    max-width: 520px;
+    width: 100%;
+    font-size: 12px;
+    color: #7fb3d3;
+    line-height: 1.5;
+    text-align: left;
+    padding: 8px 14px;
+    background: rgba(0,158,221,0.05);
+    border: 1px solid rgba(0,158,221,0.12);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    box-sizing: border-box;
+    margin-top: -6px;
+    overflow: hidden;
+  }
+  #track-bio.active { display: block; }
 
   /* ════════════════════════════════
      STATION PICKER
@@ -2386,8 +2414,10 @@
       <div id="now-playing-text">
         <div id="now-playing-artist"></div>
         <div id="now-playing-title"></div>
+        <div id="now-playing-album"></div>
       </div>
     </div>
+    <div id="track-bio"></div>
     <button id="play-btn" onmousedown="togglePlay()">&#9654;</button>
     <div id="radio-status" class="stopped"></div>
     <div id="vol-control">
@@ -3654,7 +3684,9 @@
     fetch('/api/radio/nowplaying-rp?chan=' + chan)
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        updateNowPlaying({ artist: d.artist || '', title: d.title || '', coverArtURL: d.cover_small || '' });
+        updateNowPlaying({ artist: d.artist || '', title: d.title || '',
+                           album: (d.album ? d.album + (d.year ? '  (' + d.year + ')' : '') : ''),
+                           coverArtURL: d.cover_med || d.cover_small || '' });
         var delay = Math.max(15, d.time || 30) * 1000;
         nowPlayingTimer = setTimeout(function() { _pollRadioParadise(chan); }, delay);
       })
@@ -3683,6 +3715,8 @@
       });
   }
 
+  var _trackBioKey = '';
+
   function clearNowPlaying() {
     document.getElementById('now-playing').classList.remove('active');
     document.getElementById('radio-visual').style.display = '';
@@ -3693,6 +3727,11 @@
     tileArt.src = '';
     document.getElementById('tile-info-radio-artist').style.display = 'none';
     document.getElementById('tile-info-radio-title').style.display = 'none';
+    document.getElementById('now-playing-album').textContent = '';
+    var bio = document.getElementById('track-bio');
+    bio.textContent = ''; bio.classList.remove('active');
+    document.getElementById('now-playing').classList.remove('has-bio');
+    _trackBioKey = '';
   }
 
   function updateNowPlaying(data) {
@@ -3708,6 +3747,7 @@
       }
       document.getElementById('now-playing-artist').textContent = data.artist || '';
       document.getElementById('now-playing-title').textContent = data.title || '';
+      document.getElementById('now-playing-album').textContent = data.album || '';
       document.getElementById('now-playing').classList.add('active');
       var tileArt = document.getElementById('tile-radio-art');
       tileArt.src = data.coverArtURL || '';
@@ -3716,9 +3756,45 @@
       document.getElementById('tile-info-radio-artist').style.display = '';
       document.getElementById('tile-info-radio-title').textContent = data.title || '';
       document.getElementById('tile-info-radio-title').style.display = '';
+      // Fetch Last.fm track info (bio, better artwork) if artist+title changed
+      var bioKey = (data.artist || '') + '|' + (data.title || '');
+      if (bioKey !== _trackBioKey) {
+        _trackBioKey = bioKey;
+        _fetchTrackBio(data.artist || '', data.title || '', data.coverArtURL || '');
+      }
     } else {
       clearNowPlaying();
     }
+  }
+
+  function _fetchTrackBio(artist, title, existingArt) {
+    var bio = document.getElementById('track-bio');
+    bio.textContent = ''; bio.classList.remove('active');
+    if (!artist && !title) return;
+    fetch('/api/radio/track-info?artist=' + encodeURIComponent(artist) +
+                               '&title='  + encodeURIComponent(title))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        // Use Last.fm artwork if we don't already have cover art
+        if (d.image && !existingArt) {
+          var npArt = document.getElementById('now-playing-art');
+          npArt.src = d.image; npArt.style.display = '';
+          var tileArt = document.getElementById('tile-radio-art');
+          tileArt.src = d.image; tileArt.style.display = 'block';
+        }
+        // Show album if RP didn't supply one
+        if (d.album && !document.getElementById('now-playing-album').textContent) {
+          document.getElementById('now-playing-album').textContent = d.album;
+        }
+        // Bio strip
+        if (d.bio) {
+          var listeners = d.listeners ? ' · ' + parseInt(d.listeners, 10).toLocaleString() + ' listeners' : '';
+          bio.textContent = d.bio + listeners;
+          bio.classList.add('active');
+          document.getElementById('now-playing').classList.add('has-bio');
+        }
+      })
+      .catch(function() {});
   }
 
   // ── Chromecast ──

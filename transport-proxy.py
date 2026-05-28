@@ -99,8 +99,9 @@ _cache = {}
 _lock  = threading.Lock()
 
 # ── Bus: BODS (Bus Open Data Service) ────────────────────────────────────────
-BODS_ENV_FILE  = '/home/gduthie/twyford-dashboard/.env'
-BODS_API_KEY   = ''   # loaded from BODS_ENV_FILE at startup
+BODS_ENV_FILE   = '/home/gduthie/twyford-dashboard/.env'
+BODS_API_KEY    = ''   # loaded from BODS_ENV_FILE at startup
+LASTFM_API_KEY  = ''   # loaded from BODS_ENV_FILE at startup
 BODS_URL       = ('https://data.bus-data.dft.gov.uk/api/v1/datafeed/'
                   '?api_key={key}&operatorRef={op}')
 BODS_OPERATORS = ['RBUS', 'CSLB', 'CTNY']
@@ -553,15 +554,18 @@ def _hive_fetch_temps():
 # ── BODS helpers ─────────────────────────────────────────────────────────────
 
 def _load_env():
-    global BODS_API_KEY
+    global BODS_API_KEY, LASTFM_API_KEY
     try:
         with open(BODS_ENV_FILE) as f:
             for line in f:
                 line = line.strip()
                 if '=' in line and not line.startswith('#'):
                     k, v = line.split('=', 1)
-                    if k.strip() == 'BODS_API_KEY':
-                        BODS_API_KEY = v.strip()
+                    k, v = k.strip(), v.strip()
+                    if k == 'BODS_API_KEY':
+                        BODS_API_KEY = v
+                    elif k == 'LASTFM_API_KEY':
+                        LASTFM_API_KEY = v
     except Exception:
         pass
 
@@ -838,6 +842,9 @@ def _resolve_stream_url(playlist_url):
 RP_API_URL = 'https://api.radioparadise.com/api/now_playing?chan={chan}'
 RP_TTL = 20  # seconds — short so we pick up new tracks quickly after the timer fires
 
+LASTFM_URL     = 'https://ws.audioscrobbler.com/2.0/'
+LASTFM_TTL     = 3600  # 1 hour — track info doesn't change
+
 
 def _fetch_rp_nowplaying(chan):
     """Fetch Radio Paradise now-playing JSON for the given channel."""
@@ -845,6 +852,68 @@ def _fetch_rp_nowplaying(chan):
     req = urllib.request.Request(url, headers={'User-Agent': 'Joggler/1.0'})
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())
+
+
+def _fetch_lastfm_track_info(artist, title):
+    """Fetch track + artist info from Last.fm. Returns dict with image, album, bio, listeners."""
+    import urllib.parse
+    result = {'image': '', 'album': '', 'bio': '', 'listeners': ''}
+    if not LASTFM_API_KEY:
+        return result
+
+    def _lfm(params):
+        params['api_key'] = LASTFM_API_KEY
+        params['format']  = 'json'
+        url = LASTFM_URL + '?' + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={'User-Agent': 'Joggler/1.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+
+    def _strip_html(s):
+        s = re.sub(r'<[^>]+>', '', s)
+        s = re.sub(r'\s+', ' ', s).strip()
+        # Last.fm summaries end with "Read more on Last.fm" link; remove it
+        s = re.sub(r'\s*Read more on Last\.fm\s*\.?\s*$', '', s, flags=re.IGNORECASE)
+        return s
+
+    def _best_image(images):
+        for size in ('extralarge', 'large', 'medium', 'small'):
+            for img in images:
+                if img.get('size') == size and img.get('#text'):
+                    return img['#text']
+        return ''
+
+    # Try track.getInfo first
+    try:
+        d = _lfm({'method': 'track.getInfo', 'artist': artist, 'track': title, 'autocorrect': '1'})
+        t = d.get('track', {})
+        al = t.get('album', {})
+        result['album']     = al.get('title', '')
+        result['listeners'] = t.get('listeners', '')
+        result['image']     = _best_image(al.get('image', []))
+        wiki = t.get('wiki', {})
+        if wiki.get('summary'):
+            result['bio'] = _strip_html(wiki['summary'])
+    except Exception:
+        pass
+
+    # Fill missing bio/image/listeners from artist.getInfo
+    if not result['bio'] or not result['listeners']:
+        try:
+            d = _lfm({'method': 'artist.getInfo', 'artist': artist, 'autocorrect': '1'})
+            a = d.get('artist', {})
+            if not result['listeners']:
+                result['listeners'] = a.get('stats', {}).get('listeners', '')
+            if not result['bio']:
+                bio = a.get('bio', {}).get('summary', '')
+                if bio:
+                    result['bio'] = _strip_html(bio)
+            if not result['image']:
+                result['image'] = _best_image(a.get('image', []))
+        except Exception:
+            pass
+
+    return result
 
 
 def _fetch_icy_nowplaying(stream_url):
@@ -915,6 +984,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._radio_nowplaying(qs)
         elif parsed.path == '/api/radio/nowplaying-rp':
             self._radio_nowplaying_rp(qs)
+        elif parsed.path == '/api/radio/track-info':
+            self._radio_track_info(qs)
         elif parsed.path == '/health':
             self._respond(200, 'text/plain', b'ok')
         else:
@@ -1393,6 +1464,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data = {'streamTitle': title or ''}
         except Exception:
             data = {'streamTitle': ''}
+        with _lock:
+            _cache[key] = (now, data)
+        self._json(data)
+
+    def _radio_track_info(self, qs):
+        artist = qs.get('artist', [''])[0].strip()
+        title  = qs.get('title',  [''])[0].strip()
+        if not artist and not title:
+            self._json({'image': '', 'album': '', 'bio': '', 'listeners': ''})
+            return
+        key = ('lastfm_track', artist.lower(), title.lower())
+        now = time.time()
+        with _lock:
+            if key in _cache and now - _cache[key][0] < LASTFM_TTL:
+                self._json(_cache[key][1])
+                return
+        data = _fetch_lastfm_track_info(artist, title)
         with _lock:
             _cache[key] = (now, data)
         self._json(data)

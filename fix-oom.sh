@@ -17,6 +17,7 @@ echo "sshd OOM protection set"
 # Update kiosk.sh with better memory management
 cat > /home/of/kiosk.sh << 'EOF'
 #!/bin/bash
+export DISPLAY=:0
 pkill -f chromium 2>/dev/null
 
 # Wait for network (up to 60s)
@@ -28,11 +29,14 @@ done
 # Let system memory settle after network comes up
 sleep 5
 
-DISPLAY=:0 xset s off
-DISPLAY=:0 xset -dpms
-DISPLAY=:0 xset s noblank
+xset s off
+xset -dpms
+xset s noblank
 
-exec DISPLAY=:0 chromium \
+# Redirect Chromium disk cache to tmpfs (RAM) to avoid USB I/O
+mkdir -p /tmp/chromium-cache
+
+exec chromium \
   --kiosk \
   --no-first-run \
   --disable-infobars \
@@ -44,12 +48,14 @@ exec DISPLAY=:0 chromium \
   --disable-default-apps \
   --single-process \
   --disable-dev-shm-usage \
+  --disk-cache-dir=/tmp/chromium-cache \
+  --disk-cache-size=52428800 \
   --js-flags="--max-old-space-size=80" \
   --window-position=0,0 \
   --window-size=800,480 \
   http://172.16.10.136:5001/
 EOF
 chmod +x /home/of/kiosk.sh
-echo "kiosk.sh updated with OOM-safe flags"
+echo "kiosk.sh updated with tmpfs disk cache"
 
 echo "Done. Reboot to apply."
