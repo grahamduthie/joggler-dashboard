@@ -862,6 +862,14 @@
     border-top: 1px solid rgba(255,255,255,0.07);
   }
   #now-playing-similar.has-similar { display: flex; }
+  .similar-label {
+    font-size: 11px;
+    color: rgba(255,255,255,0.40);
+    white-space: nowrap;
+    align-self: center;
+    margin-right: 2px;
+    letter-spacing: 0.3px;
+  }
   .similar-tag {
     font-size: 11px;
     color: #c4a0e8;
@@ -3953,9 +3961,10 @@
         }
         if (d.similar && d.similar.length) {
           var simDiv = document.getElementById('now-playing-similar');
-          simDiv.innerHTML = d.similar.map(function(s) {
-            return '<span class="similar-tag">' + s + '</span>';
-          }).join('');
+          simDiv.innerHTML = '<span class="similar-label">Similar Artists:</span>' +
+            d.similar.map(function(s) {
+              return '<span class="similar-tag">' + s + '</span>';
+            }).join('');
           simDiv.classList.add('has-similar');
         }
       })
