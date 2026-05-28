@@ -393,9 +393,11 @@ Paradise, FIP, and local/independent stations.
 
 **Last.fm track info:** When now-playing updates with an artist+title, the proxy fetches
 `/api/radio/track-info?artist=…&title=…` → Last.fm `track.getInfo` (falls back to
-`artist.getInfo` for bio/image if track has no bio). Returns `{image, album, bio, listeners}`.
-Displayed below now-playing: album name in blue, then an expandable artist bio strip with
-listener count. API key stored as `LASTFM_API_KEY` in the Pi's `.env`. TTL: 1 hour.
+`artist.getInfo` for bio/image if track has no bio) + `artist.getSimilar` (up to 5 names).
+Returns `{image, album, bio, listeners, tags, similar}`. Displayed in the playing screen:
+album name, genre tags (green chips), artist bio with listener count, then similar artists
+(purple chips with "Similar Artists:" label). API key stored as `LASTFM_API_KEY` in `.env`.
+TTL: 1 hour.
 
 **Tile display:**
 - No track playing: logo · show name · presenter
@@ -519,7 +521,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
 | `GET /api/radio/nowplaying?url=…` | ICY stream metadata | 25 s | StreamTitle from ICY |
 | `GET /api/radio/nowplaying-rp?chan=N` | Radio Paradise API | 20 s | |
-| `GET /api/radio/track-info?artist=…&title=…` | Last.fm API | 3600 s | Bio, album, listeners, artwork |
+| `GET /api/radio/track-info?artist=…&title=…` | Last.fm API | 3600 s | Bio, album, listeners, artwork, tags, similar artists |
 | `GET /health` | — | — | Returns `ok` |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
@@ -715,10 +717,11 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
   images or frequently-repainted elements
 - **`text-align: center` unreliable on flex items in Chromium 148** — use
   `display: flex; justify-content: center` instead
-- **`#view-radio { position: relative }`** — required so the absolutely-positioned `#station-btn`
-  and `#cast-btn` have a positioning context. The phone portrait profile sets views to
-  `position: static`, but the radio view overrides back to `position: relative` using an ID
-  selector (higher specificity)
+- **`#view-radio { position: relative }` must NOT exist** — this rule was removed because it
+  overrides `.view { position: absolute; inset: 0 }` (ID specificity 1,0,0 beats class 0,1,0),
+  making the radio view content-sized rather than filling the screen. `#station-btn` and
+  `#cast-btn` are positioned correctly as long as `#view-radio.active { position: absolute }`
+  is in effect (which it is via `.view` and the explicit `#view-radio.active` rule)
 - **Responsive CSS specificity:** `html.profile-X .class` = (0,2,1), `#id` = (1,0,0),
   `html.profile-X #id` = (1,1,0). General profile rules (e.g. `html.profile-phone-portrait
   img.tile-icon { height: 48px }`) can override element-specific rules if they have higher
@@ -860,7 +863,7 @@ Everything working as of 2026-05-28.
 - [x] Tile timers pause when any view is open
 - [x] Weather: NOW/TODAY/WEEK tabs, sun arc, wind compass, AQI, pressure trend, indoor temps
 - [x] Radio: 30+ stations, station picker, now-playing (SSE + ICY + RP API), Chromecast
-- [x] Radio: Last.fm artist bio, album name, listener count, artwork via /api/radio/track-info
+- [x] Radio: Last.fm artist bio, album name, listener count, genre tags, artwork, similar artists via /api/radio/track-info
 - [x] WagtailCam: live MJPEG, timelapse, fullscreen
 - [x] Transport: trains (5 departures, calling points)
 - [x] Flights: draggable Leaflet map, canvas overlay, Airlines/Other/LHR filter buttons,
