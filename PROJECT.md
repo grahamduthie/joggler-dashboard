@@ -20,7 +20,6 @@ that handles all API proxying and serves the dashboard.
 Raspberry Pi (172.16.10.136, user gduthie)
   /home/gduthie/twyford-dashboard/
   ├── transport-proxy.py   port 5001  (0.0.0.0) — API proxy + static file server
-  ├── cast-server.py       port 9998  (127.0.0.1) — Chromecast discovery/control
   ├── dashboard.html, icons/, hls.min.js — served as static files by transport-proxy
   ├── hive-tokens.json, hive-credentials.json (mode 600)
   └── logos/, aircraft-info/, bus-stops.json, bus-route-stops.json (runtime caches)
@@ -28,6 +27,7 @@ Raspberry Pi (172.16.10.136, user gduthie)
 O2 Joggler (172.16.10.168, user of)
   /home/of/
   ├── Chromium kiosk → http://172.16.10.136:5001/
+  ├── cast-server.py       port 9998  (0.0.0.0) — Chromecast discovery/control
   ├── shutdown-server.py   port 9999  (127.0.0.1) — graceful poweroff via power button
   └── touch-bridge.py — raw touchscreen events → X11 mouse via XTest
 ```
@@ -35,12 +35,10 @@ O2 Joggler (172.16.10.168, user of)
 The dashboard is served from the Pi. All `/api/…` calls in the HTML are relative URLs and
 resolve to the Pi automatically from any browser on the LAN.
 
-**Chromecast note:** `CAST_BASE = 'http://localhost:9998'` in `dashboard.html`. Because
-cast-server.py is bound to `127.0.0.1` on the Pi, Chromecast control only works from a browser
-running on the Pi itself (i.e. browsing `http://localhost:5001/` locally). The Joggler's kiosk
-browser resolves `localhost` to the Joggler, where no cast-server runs. To enable casting from
-the Joggler, change `CAST_BASE` to `http://172.16.10.136:9998` and update cast-server.py to
-bind on `0.0.0.0`.
+**Chromecast note:** `CAST_BASE = 'http://localhost:9998'` in `dashboard.html`. The Joggler's
+kiosk browser resolves `localhost` to the Joggler itself, so cast-server.py runs **on the Joggler**
+(not the Pi) at port 9998. Casting therefore works from the Joggler's kiosk. It will not work from
+a Mac/phone browser because `localhost:9998` resolves to the client machine, not the Joggler.
 
 **Power button note:** `JOGGLER_SHUTDOWN = 'http://localhost:9999/shutdown'` — resolves to the
 Joggler's own shutdown-server.py (127.0.0.1:9999), so the power button only works from the
@@ -107,12 +105,18 @@ tty1 autologin as 'of'
       → .config/openbox/autostart:
           python3 touch-bridge.py &
           python3 shutdown-server.py &
+          python3 cast-server.py &
+          unclutter -idle 0.1 -root &
           kiosk.sh &
             → chromium --kiosk http://172.16.10.136:5001/
 ```
 
-Only `touch-bridge.py` and `shutdown-server.py` run on the Joggler. The transport proxy and
-cast server are on the Pi.
+`touch-bridge.py`, `shutdown-server.py`, and `cast-server.py` run on the Joggler. The transport
+proxy runs on the Pi.
+
+**Why cast-server.py runs on the Joggler:** `dashboard.html` calls `http://localhost:9998` from
+JavaScript. Since JS runs in the Joggler's browser, `localhost` resolves to the Joggler — not
+the Pi. cast-server.py must therefore run on the Joggler to be reachable.
 
 ### kiosk.sh (key flags)
 
@@ -197,8 +201,9 @@ bus-route-stops.json        # Bus route timetable stop lists (built progressivel
 kiosk.sh                    # Launches Chromium in kiosk mode
 touch-bridge.py             # Raw touchscreen → X11 pointer events via XTest
 shutdown-server.py          # HTTP :9999 → graceful poweroff (Joggler-local only)
+cast-server.py              # Chromecast discovery/control (port 9998, 0.0.0.0)
 
-.config/openbox/autostart   # Starts touch-bridge.py, shutdown-server.py, and kiosk.sh
+.config/openbox/autostart   # Starts touch-bridge, shutdown-server, cast-server, kiosk.sh
 .local/bin/pip              # pip installed via get-pip.py (not in apt on Trixie)
 ```
 
@@ -270,6 +275,12 @@ coordinates, which finger drift prevents. `onmousedown` fires on first contact r
 where the finger lifts. This applies to all HTML attributes AND JS-assigned handlers (e.g.
 dynamically created cast device buttons, wcam date buttons, weather hour columns). Canvas
 handlers (`wxCanvas.onclick`, flight radar `canvas.onclick`) deliberately keep `onclick`.
+
+**Touch support for mobile browsers:** All buttons also carry `ontouchstart` handlers matching
+their `onmousedown`. The flight map canvas has explicit `touchstart`/`touchmove`/`touchend`
+listeners with `{passive: false}` on `touchmove` so `preventDefault()` can suppress page
+scrolling. The canvas also has `touch-action: none` CSS. Without these iOS Safari intercepts all
+touch events as page scroll gestures.
 
 **Tile timer behaviour:** All tile `setInterval` timers are stopped when any full view is opened
 and restarted (with an immediate fetch) when returning to the home screen. This prevents
@@ -409,12 +420,21 @@ Departure status: `On time` → `OT` · `Delayed` → `D` · `Cancelled` → `C`
 Leaflet.js OSM map + canvas overlay. Aircraft triangles rotated by heading.
 
 - ADS-B data via `/api/flights` → adsb.lol API (proxied — adsb.lol dropped direct CORS support)
-- Route data from `https://api.adsbdb.com/v0/callsign/{cs}` (direct HTTPS fetch from browser,
-  has CORS). Results cached in `flightRouteCache` (persisted to `localStorage`)
-- Tap aircraft → detail panel + trail; zoom cycling 100 nm → 50 nm → 25 nm
+- Route data via `/api/flight-route?cs=CALLSIGN` → Pi scrapes FlightAware. Results cached in
+  `flightRouteCache` (localStorage). **TTL: 6 hours** — low-cost carriers reuse flight numbers
+  daily on different routes, so long TTLs show stale destinations.
+- Map is **draggable** — canvas intercepts mouse/touch drag gestures and calls `flightMap.panBy()`.
+  Aircraft list shows up to 7 aircraft closest to the map centre that are within the visible bounds.
+- **Filter buttons:** Airlines (commercial callsigns in AIRLINES table) / Other / LHR only.
+  `flightPassesFilter()` is used for both the canvas draw loop and the list — single source of truth.
+- **Map controls:** ⌂ home (re-centres on Twyford), + / − zoom buttons (zoom 6–12, default 9 ≈ 21 nm)
+- **Performance (Atom Z520 critical):** Tile layer uses `updateWhenIdle:true, updateWhenZooming:false`
+  so tiles only load after drag/zoom ends, not on every `panBy`. Canvas `mousemove`/`touchmove`
+  accumulate pan deltas and flush once per rAF frame. `flightOnMoveEnd` debounces data fetches
+  by 800 ms to prevent rapid zoom taps each firing a fetch.
+- **Cache key normalisation:** `lat`/`lon` rounded to 2 dp, `dist` snapped to nearest 10 nm so
+  different screen sizes share the same Pi-side cache entry.
 - Twyford coordinates: lat=51.4741, lon=**-0.8647** (not -0.9752 which is Reading/Caversham)
-- IATA flight numbers: always use `callsign_iata` from adsbdb response; strip non-numeric suffixes
-  with `/^[A-Z]{2}\d+/`
 
 **Config defaults** (localStorage `transConfig`):
 ```json
@@ -469,7 +489,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | Endpoint | Upstream | Proxy TTL | Notes |
 |----------|----------|-----------|-------|
 | `GET /api/departures?station=CRS&rows=N[&platform=P]` | National Rail SOAP ldb12.asmx | 90 s | |
-| `GET /api/flights?lat=…&lon=…&dist=…` | adsb.lol `/v2/lat/{}/lon/{}/dist/{}` | 60 s | Raw JSON pass-through |
+| `GET /api/flights?lat=…&lon=…&dist=…` | adsb.lol `/v2/lat/{}/lon/{}/dist/{}` | 60 s | lat/lon rounded to 2 dp, dist snapped to 10 nm — nearby viewports share cache |
 | `GET /api/bods/departures?stop=ATCO` | Passenger platform scrape (parallel per operator) | 30 s | |
 | `GET /api/bods/buses` | BODS SIRI-VM (all operators in parallel) | 30 s | Full bus list |
 | `GET /api/buses/vehicles` | BODS (filtered to tracked routes, GeoJSON) | 30 s | |
@@ -478,7 +498,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/hive` | Hive Beekeeper API (via Cognito tokens) | 300 s | Auto-refreshes tokens |
 | `GET /api/flight-route?cs=CALLSIGN` | FlightAware HTML scrape | 4 h | Route, times, aircraft type |
 | `GET /api/airline-logo?iata=XX` | pics.avs.io (file-cached) | File permanent | |
-| `GET /api/aircraft-info?hex=XXXXXX` | OpenSky metadata (file-cached) | File permanent | |
+| `GET /api/aircraft-info?hex=XXXXXX` | OpenSky metadata (file-cached) | 30 days (mtime check) | |
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
 | `GET /api/radio/nowplaying?url=…` | ICY stream metadata | 25 s | StreamTitle from ICY |
 | `GET /api/radio/nowplaying-rp?chan=N` | Radio Paradise API | 20 s | |
@@ -696,7 +716,9 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
 - **Bauer PLS streams** — must call `/api/radio/resolve` each time to get a fresh `skey` token.
   Never cache or hardcode the resolved stream URL
 - **Magic Classical Bauer station key is `scala-mp3`** (not `magicclassical-mp3`)
-- **adsbdb IATA** — use `callsign_iata` field; strip non-numeric suffixes with `/^[A-Z]{2}\d+/`
+- **Route cache TTL is 6 hours** — low-cost carriers (Ryanair, easyJet, Wizz Air etc.) reuse
+  flight numbers daily on completely different routes. A longer TTL shows stale/wrong destinations.
+  To clear immediately: `localStorage.removeItem('flightRouteCache')` in browser console
 - **Twyford coordinates** — lat=51.4741, lon=**-0.8647** (not -0.9752 which is Reading/Caversham)
 - **OSM bus route data quality** — routes 127/128/129 relations have geometry only (no node
   members); route 12 has no OSM relation. The `route_ref` tag on individual stop nodes is
@@ -813,14 +835,19 @@ Everything working as of 2026-05-28.
 - [x] Pi: transport-proxy.py serving dashboard + all API endpoints
 - [x] Home screen: 6-tile grid (Weather, Radio, WagtailCam, Trains, Aircraft, Buses)
 - [x] Responsive design: Joggler / phone portrait / phone landscape / card profiles
+- [x] Touch support: ontouchstart on all buttons; canvas touch drag with passive:false
 - [x] Tile timers pause when any view is open
 - [x] Weather: NOW/TODAY/WEEK tabs, sun arc, wind compass, AQI, pressure trend, indoor temps
 - [x] Radio: 30+ stations, station picker, now-playing (SSE + ICY + RP API), Chromecast
 - [x] WagtailCam: live MJPEG, timelapse, fullscreen
-- [x] Transport: trains (5 departures, calling points), flights (Leaflet map, route details)
+- [x] Transport: trains (5 departures, calling points)
+- [x] Flights: draggable Leaflet map, canvas overlay, Airlines/Other/LHR filter buttons,
+      aircraft detail panel, 6-hour route cache, rAF-throttled drag, debounced fetch
 - [x] Buses: Passenger platform departure board, BODS live vehicle map, stop markers
 - [x] Bus stop data file-cached (Overpass, run once)
 - [x] Bus timetable route data building progressively (Transport API, file-cached)
-- [x] Aircraft route cache persisted to localStorage
+- [x] Aircraft route cache persisted to localStorage (6-hour TTL)
+- [x] Aircraft info disk-cached on Pi (30-day mtime expiry)
 - [x] Hive indoor temperatures in Weather view
 - [x] Graceful shutdown via power button (Joggler only)
+- [x] Chromecast from Joggler (cast-server.py on Joggler, port 9998)

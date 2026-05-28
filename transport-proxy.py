@@ -955,6 +955,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (ValueError, KeyError):
             self._respond(400, 'text/plain', b'Bad params')
             return
+        # Snap lat/lon to 2 dp and dist to nearest 10nm so nearby viewports share a cache entry
+        lat  = round(lat, 2)
+        lon  = round(lon, 2)
+        dist = max(10, round(dist / 10) * 10)
         key = ('flights', lat, lon, dist)
         now = time.time()
         with _lock:
@@ -964,7 +968,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         url = ADSB_URL.format(lat=lat, lon=lon, dist=dist)
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Joggler/1.0'})
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=12) as resp:
                 body = resp.read()
         except Exception as e:
             self._respond(502, 'text/plain', str(e).encode())
@@ -1302,9 +1306,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         cache_path = os.path.join(cache_dir, hex_code + '.json')
         if os.path.exists(cache_path):
             try:
-                with open(cache_path) as f:
-                    self._json(json.load(f))
-                return
+                age = time.time() - os.path.getmtime(cache_path)
+                if age < 30 * 86400:
+                    with open(cache_path) as f:
+                        self._json(json.load(f))
+                    return
             except Exception:
                 pass
         result = {}
