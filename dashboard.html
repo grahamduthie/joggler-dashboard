@@ -851,6 +851,28 @@
     text-transform: capitalize;
     letter-spacing: 0.3px;
   }
+  /* Similar artists — shown below bio, flex-shrink so bio keeps priority */
+  #now-playing-similar {
+    flex-shrink: 0;
+    display: none;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  #now-playing-similar.has-similar { display: flex; }
+  .similar-tag {
+    font-size: 11px;
+    color: #c4a0e8;
+    background: rgba(196,160,232,0.10);
+    border: 1px solid rgba(196,160,232,0.22);
+    border-radius: 10px;
+    padding: 2px 9px;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+  }
+
   /* Bio: immediately follows tags/album, fills remaining column height */
   #track-bio {
     flex: 1;
@@ -2545,6 +2567,7 @@
           <div id="now-playing-album"></div>
           <div id="now-playing-tags"></div>
           <div id="track-bio"></div>
+          <div id="now-playing-similar"></div>
         </div>
       </div>
     </div>
@@ -3865,6 +3888,8 @@
     document.getElementById('now-playing-album').textContent = '';
     document.getElementById('now-playing-tags').innerHTML = '';
     document.getElementById('track-bio').textContent = '';
+    var simDiv = document.getElementById('now-playing-similar');
+    simDiv.innerHTML = ''; simDiv.classList.remove('has-similar');
     _trackBioKey = '';
   }
 
@@ -3894,6 +3919,8 @@
         _trackBioKey = bioKey;
         document.getElementById('now-playing-tags').innerHTML = '';
         document.getElementById('track-bio').textContent = '';
+        var simDiv = document.getElementById('now-playing-similar');
+        simDiv.innerHTML = ''; simDiv.classList.remove('has-similar');
         _fetchTrackBio(data.artist || '', data.title || '', data.coverArtURL || '');
       }
     } else {
@@ -3923,6 +3950,13 @@
         if (d.bio) {
           var listeners = d.listeners ? ' · ' + parseInt(d.listeners, 10).toLocaleString() + ' listeners' : '';
           document.getElementById('track-bio').textContent = d.bio + listeners;
+        }
+        if (d.similar && d.similar.length) {
+          var simDiv = document.getElementById('now-playing-similar');
+          simDiv.innerHTML = d.similar.map(function(s) {
+            return '<span class="similar-tag">' + s + '</span>';
+          }).join('');
+          simDiv.classList.add('has-similar');
         }
       })
       .catch(function() {});

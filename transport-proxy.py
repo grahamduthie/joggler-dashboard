@@ -857,7 +857,7 @@ def _fetch_rp_nowplaying(chan):
 def _fetch_lastfm_track_info(artist, title):
     """Fetch track + artist info from Last.fm. Returns dict with image, album, bio, listeners, tags."""
     import urllib.parse
-    result = {'image': '', 'album': '', 'bio': '', 'listeners': '', 'tags': []}
+    result = {'image': '', 'album': '', 'bio': '', 'listeners': '', 'tags': [], 'similar': []}
     if not LASTFM_API_KEY:
         return result
 
@@ -915,6 +915,14 @@ def _fetch_lastfm_track_info(artist, title):
                 result['image'] = _best_image(a.get('image', []))
         except Exception:
             pass
+
+    # Get similar artists
+    try:
+        d = _lfm({'method': 'artist.getSimilar', 'artist': artist, 'limit': '5', 'autocorrect': '1'})
+        similar = d.get('similarartists', {}).get('artist', [])
+        result['similar'] = [a['name'] for a in similar[:5] if a.get('name')]
+    except Exception:
+        pass
 
     return result
 
@@ -1475,7 +1483,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         artist = qs.get('artist', [''])[0].strip()
         title  = qs.get('title',  [''])[0].strip()
         if not artist and not title:
-            self._json({'image': '', 'album': '', 'bio': '', 'listeners': ''})
+            self._json({'image': '', 'album': '', 'bio': '', 'listeners': '', 'similar': []})
             return
         key = ('lastfm_track', artist.lower(), title.lower())
         now = time.time()
