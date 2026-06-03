@@ -4915,15 +4915,19 @@
     'BAW':{iata:'BA', name:'British Airways',      bg:'#002157',fg:'#ffffff'},
     'SHT':{iata:'BA', name:'BA Shuttle',           bg:'#002157',fg:'#ffffff'},
     'CFE':{iata:'BA', name:'BA CityFlyer',         bg:'#002157',fg:'#ffffff'},
+    'EFW':{iata:'A0', name:'BA Euroflyer',         bg:'#002157',fg:'#ffffff'},
     'EZY':{iata:'U2', name:'easyJet',              bg:'#f37029',fg:'#ffffff'},
     'EJU':{iata:'U2', name:'easyJet Europe',       bg:'#f37029',fg:'#ffffff'},
     'EZS':{iata:'DS', name:'easyJet Switzerland',  bg:'#f37029',fg:'#ffffff'},
     'EIN':{iata:'EI', name:'Aer Lingus',           bg:'#00693e',fg:'#ffffff'},
+    'EAI':{iata:'EI', name:'Emerald Airlines',     bg:'#00693e',fg:'#ffffff'},
     'RYR':{iata:'FR', name:'Ryanair',              bg:'#073da4',fg:'#ffffff'},
     'VIR':{iata:'VS', name:'Virgin Atlantic',      bg:'#e20026',fg:'#ffffff'},
     'TOM':{iata:'BY', name:'TUI Airways',          bg:'#e20026',fg:'#ffffff'},
+    'TFL':{iata:'OR', name:'TUI fly Netherlands',  bg:'#e20026',fg:'#ffffff'},
     'EXS':{iata:'LS', name:'Jet2',                 bg:'#00418b',fg:'#ffffff'},
     'DLH':{iata:'LH', name:'Lufthansa',            bg:'#05164d',fg:'#f9c901'},
+    'LHX':{iata:'VL', name:'Lufthansa City',       bg:'#05164d',fg:'#f9c901'},
     'AFR':{iata:'AF', name:'Air France',           bg:'#002395',fg:'#ffffff'},
     'KLM':{iata:'KL', name:'KLM',                  bg:'#00a1de',fg:'#ffffff'},
     'SWR':{iata:'LX', name:'Swiss',                bg:'#e30613',fg:'#ffffff'},
@@ -4942,6 +4946,8 @@
     'FIN':{iata:'AY', name:'Finnair',              bg:'#003580',fg:'#ffffff'},
     'NOR':{iata:'DY', name:'Norwegian',            bg:'#d40e14',fg:'#ffffff'},
     'WZZ':{iata:'W6', name:'Wizz Air',             bg:'#c6007e',fg:'#ffffff'},
+    'WMT':{iata:'W4', name:'Wizz Air Malta',       bg:'#c6007e',fg:'#ffffff'},
+    'HYS':{iata:'H4', name:'HiSky Europe',         bg:'#6e1e78',fg:'#ffffff'},
     'TAP':{iata:'TP', name:'TAP Air Portugal',     bg:'#004d40',fg:'#ffffff'},
     'CPA':{iata:'CX', name:'Cathay Pacific',       bg:'#003f5c',fg:'#7ab2a2'},
     'SIA':{iata:'SQ', name:'Singapore Airlines',   bg:'#1c3a6b',fg:'#f0c040'},
@@ -5022,6 +5028,21 @@
     'NBT':{iata:'N0', name:'Norse Atlantic',       bg:'#001933',fg:'#f97316'},
     'AVA':{iata:'AV', name:'Avianca',              bg:'#bc0029',fg:'#ffffff'},
     'LAN':{iata:'LA', name:'LATAM Airlines',       bg:'#e5001b',fg:'#ffffff'},
+    'TAM':{iata:'JJ', name:'LATAM Brasil',         bg:'#e5001b',fg:'#ffffff'},
+    'UPS':{iata:'5X', name:'UPS Airlines',         bg:'#351c15',fg:'#ffb500', cargo:true},
+    'GTI':{iata:'5Y', name:'Atlas Air',            bg:'#002d6e',fg:'#ffffff', cargo:true},
+    'DHK':{iata:'D0', name:'DHL Air UK',           bg:'#ffcc00',fg:'#cc0000', cargo:true},
+    'BCS':{iata:'QY', name:'EAT Leipzig',          bg:'#ffcc00',fg:'#cc0000', cargo:true},
+    'BOX':{iata:'3S', name:'AeroLogic',            bg:'#003366',fg:'#ffffff', cargo:true},
+    'SRR':{iata:'DJ', name:'Maersk Air Cargo',     bg:'#42b0d5',fg:'#ffffff', cargo:true},
+    'FDX':{iata:'FX', name:'FedEx Express',        bg:'#4d148c',fg:'#ff6600', cargo:true},
+    'ABV':{iata:'ABV',name:'ASL Airlines UK',      bg:'#0a1f3c',fg:'#ffffff', cargo:true},
+    'NPT':{iata:'NPT',name:'West Atlantic UK',     bg:'#003366',fg:'#ffffff', cargo:true},
+    'TAY':{iata:'3V', name:'ASL Airlines Belgium', bg:'#0a1f3c',fg:'#ffffff', cargo:true},
+    'FPO':{iata:'5O', name:'ASL Airlines France',  bg:'#0a1f3c',fg:'#ffffff', cargo:true},
+    'RCH':{iata:'MC', name:'USAF Air Mobility',    bg:'#003087',fg:'#ffffff', cargo:true},
+    'HLE':{iata:'HLE',name:'UK HEMS',              bg:'#cc0000',fg:'#ffffff', cargo:true},
+    'SRG':{iata:'SRG',name:'RAF Search & Rescue',  bg:'#003380',fg:'#ffffff', cargo:true},
   };
 
   var AIRPORTS = {
@@ -5557,7 +5578,8 @@
 
   function flightAcIsCommercial(ac) {
     var cs = (ac.flight || '').trim();
-    return cs.length >= 4 && !!AIRLINES[cs.substring(0, 3)];
+    var al = cs.length >= 4 && AIRLINES[cs.substring(0, 3)];
+    return !!al && !al.cargo;
   }
 
   function flightPassesFilter(ac) {
