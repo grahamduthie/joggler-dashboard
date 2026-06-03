@@ -109,7 +109,8 @@ tty1 autologin as 'of'
           python3 cast-server.py &
           unclutter -idle 0.1 -root &
           kiosk.sh &
-            → chromium --kiosk http://172.16.10.136:5001/
+            → chromium --start-fullscreen http://172.16.10.136:5001/
+            (watchdog loop — auto-restarts on crash)
 ```
 
 `touch-bridge.py`, `shutdown-server.py`, and `cast-server.py` run on the Joggler. The transport
@@ -119,11 +120,20 @@ proxy runs on the Pi.
 JavaScript. Since JS runs in the Joggler's browser, `localhost` resolves to the Joggler — not
 the Pi. cast-server.py must therefore run on the Joggler to be reachable.
 
-### kiosk.sh (key flags)
+### kiosk.sh
+
+kiosk.sh runs a `while true` watchdog loop. On each iteration it clears stale Chromium singleton
+locks, resets the profile's `exit_type` to `Normal` (prevents the "Restore pages?" dialog after a
+crash), then launches Chromium. When Chromium exits for any reason it restarts automatically after
+5 seconds. Crash history is logged to `/tmp/kiosk-watchdog.log`.
+
+Key Chromium flags:
 
 ```bash
-exec chromium \
-  --kiosk --no-first-run --disable-infobars \
+chromium \
+  --start-fullscreen \   # replaces --kiosk (which creates a stuck 10×10 window on this Xorg setup)
+  --test-type \          # suppresses the --no-sandbox warning banner
+  --no-first-run --disable-infobars \
   --no-sandbox --disable-gpu --disable-extensions \
   --disable-sync --disable-background-networking \
   --disable-default-apps --single-process \
@@ -134,6 +144,13 @@ exec chromium \
   --window-position=0,0 --window-size=800,480 \
   http://172.16.10.136:5001/
 ```
+
+**`--kiosk` is broken on this system** (Chromium 148 + Openbox + EMGD framebuffer): it creates a
+10×10 window that never expands. `--start-fullscreen` uses the standard `_NET_WM_STATE_FULLSCREEN`
+mechanism that Openbox handles correctly.
+
+**`--single-process` requires `--no-sandbox`**, which triggers a Chromium warning banner. `--test-type`
+suppresses it without affecting page behaviour.
 
 `/tmp` on openframe-linux is a tmpfs (RAM-backed, 246 MB). Redirecting Chromium's HTTP disk
 cache there eliminates USB I/O for cached resources. Without this, every page fetch causes USB
