@@ -964,3 +964,4 @@ Everything working as of 2026-06-23.
 - [x] aircraft.html: location settings modal with Nominatim forward geocoding
 - [x] aircraft.html: route not-found state cached to avoid stuck "loading" display
 - [x] aircraft.html: responsive layout — portrait/narrow stacks map above list; clamp() font sizes ensure readability on phones (390 px); compact topbar ≤600 px; landscape phone reduces focus view spacing
+- [x] aircraft.html: focus view heading card — space between direction letters and rotating arrow
