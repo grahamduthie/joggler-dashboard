@@ -204,6 +204,7 @@ Host 172.16.10.179
 
 ```
 dashboard.html              # The kiosk SPA (single file, all views)
+aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
 transport-proxy.py          # API proxy + static file server (port 5001)
 cast-server.py              # Chromecast discovery/control (port 9998)
 hive-setup.py               # Interactive Hive auth setup (run once to obtain tokens)
@@ -219,6 +220,7 @@ icons/
 
 logos/                      # Airline logos cached from pics.avs.io (created at runtime)
 aircraft-info/              # Aircraft year/reg from OpenSky (created at runtime)
+airport-names.json          # IATA→name map from OurAirports CSV (downloaded on first run)
 bus-stops.json              # OSM bus stop locations (created on first bus map load)
 bus-route-stops.json        # Bus route timetable stop lists (built progressively)
 ```
@@ -239,6 +241,7 @@ cast-server.py              # Chromecast discovery/control (port 9998, 0.0.0.0)
 
 ```
 dashboard.html              # Source (deploy to Pi with scp)
+aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
 transport-proxy.py          # Source
 cast-server.py              # Source
 shutdown-server.py          # Source
@@ -477,6 +480,52 @@ Leaflet.js OSM map + canvas overlay. Aircraft triangles rotated by heading.
 { "station": "TWY", "platform": "4", "flightLat": 51.4741, "flightLon": -0.8647, "flightRadius": 100 }
 ```
 
+### aircraft.html — Standalone Full-Screen Aircraft SPA
+
+Served at `GET /aircraft` — a separate page from `dashboard.html`, optimised for large-screen
+display at a distance (all text sized in `vw` units). Designed to be used in a browser on a PC
+or TV alongside the main Joggler kiosk.
+
+**List mode (default):**
+- Leaflet.js map (top half) + Leaflet canvas radar overlay with aircraft triangles
+- Scrollable list of up to 7 nearest commercial aircraft (ICAO airline prefix in AIRLINES dict)
+- Each row: airline logo badge, IATA flight number, origin→destination, aircraft type/reg, stats
+- Tap/click a row → **Detail view**
+
+**Detail view (tap any aircraft):**
+- Airline logo header (brand background colour)
+- Vertical route layout: origin city → arrow → destination city, with dep/arr times
+- Aircraft type, registration, and manufacture year
+- Live stat cards: altitude (m), speed (km/h), heading (with rotating arrow), distance
+- "Back" button returns to list; selected aircraft highlighted orange on radar with trail
+
+**Focus mode ("Focus" button in topbar):**
+- Full-screen view of the single closest commercial aircraft, auto-updating
+- Airline header: logo (left) + airline name (right) in brand colours
+- Large flight number + IATA code centred
+- Aircraft type/registration in top-right
+- Vertical origin→destination route with dep/arr times (left column) + flight duration/distance (right column)
+- Four stat cards below: altitude, speed, heading, distance
+- Sends `&focus=1` on ADS-B fetch so proxy uses 20 s TTL instead of 60 s
+
+**Airport name resolution:**
+- Static AIRPORTS dict in JS covers ~80 common codes
+- On cache miss: calls `/api/airport-name?iata=XXX` → proxy reads `airport-names.json`
+  (populated from OurAirports CSV, ~10 k IATA codes, downloaded once on proxy startup)
+- Result stored in `extraAirports` dict and triggers re-render
+
+**Route data:**
+- `fetchRoute(cs)` calls `/api/flight-route?cs=CALLSIGN` (same FlightAware scrape as dashboard)
+- Results cached in `routeCache` (also persisted to localStorage)
+- Negative results (no orig/dest) cached as `_notFound: true` → shows "No route information
+  available" instead of looping on "Route information loading…"
+
+**Location settings:**
+- "⚙ Location" button opens modal; location persists to localStorage and can be overridden with
+  `?lat=…&lon=…&name=…` URL params
+- Uses Nominatim forward geocoding (place-name search) — geolocation API is blocked on HTTP
+  origins; Nominatim HTTPS calls work fine from HTTP pages
+
 ### Buses View
 
 Two tabs: **Departures** and **Map**. The Buses tile opens on Departures.
@@ -525,7 +574,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | Endpoint | Upstream | Proxy TTL | Notes |
 |----------|----------|-----------|-------|
 | `GET /api/departures?station=CRS&rows=N[&platform=P]` | National Rail SOAP ldb12.asmx | 90 s | |
-| `GET /api/flights?lat=…&lon=…&dist=…` | adsb.lol `/v2/lat/{}/lon/{}/dist/{}` | 60 s | lat/lon rounded to 2 dp, dist snapped to 10 nm — nearby viewports share cache |
+| `GET /api/flights?lat=…&lon=…&dist=…[&focus=1]` | adsb.lol `/v2/lat/{}/lon/{}/dist/{}` | 60 s (20 s with `focus=1`) | lat/lon rounded to 2 dp, dist snapped to 10 nm; `focus=1` sent by aircraft.html focus mode for faster refresh |
 | `GET /api/bods/departures?stop=ATCO` | Passenger platform scrape (parallel per operator) | 30 s | |
 | `GET /api/bods/buses` | BODS SIRI-VM (all operators in parallel) | 30 s | Full bus list |
 | `GET /api/buses/vehicles` | BODS (filtered to tracked routes, GeoJSON) | 30 s | |
@@ -535,11 +584,13 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/flight-route?cs=CALLSIGN` | FlightAware HTML scrape | 4 h | Route, times, aircraft type |
 | `GET /api/airline-logo?iata=XX` | pics.avs.io (file-cached) | File permanent | |
 | `GET /api/aircraft-info?hex=XXXXXX` | OpenSky metadata (file-cached) | 30 days (mtime check) | |
+| `GET /api/airport-name?iata=XXX` | `airport-names.json` (OurAirports CSV, downloaded once) | In-memory for life of process | Returns `{"name": "…"}` or `{"name": null}` |
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
 | `GET /api/radio/nowplaying?url=…` | ICY stream metadata | 25 s | StreamTitle from ICY |
 | `GET /api/radio/nowplaying-rp?chan=N` | Radio Paradise API | 20 s | |
 | `GET /api/radio/track-info?artist=…&title=…` | Last.fm API | 3600 s | Bio, album, listeners, artwork, tags, similar artists |
 | `GET /health` | — | — | Returns `ok` |
+| `GET /aircraft` | Static — aircraft.html | — | Standalone full-screen aircraft SPA |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
 **National Rail SOAP details:**
@@ -865,7 +916,7 @@ ssh of@172.16.10.168 'sudo of-expand'
 
 ## Current Status
 
-Everything working as of 2026-05-28.
+Everything working as of 2026-06-23.
 
 - [x] Joggler: Boot, WiFi, SSH
 - [x] Autologin → X → Openbox → kiosk chain (Chromium → Pi)
@@ -893,3 +944,9 @@ Everything working as of 2026-05-28.
 - [x] Hive indoor temperatures in Weather view
 - [x] Graceful shutdown via power button (Joggler only)
 - [x] Chromecast from Joggler (cast-server.py on Joggler, port 9998)
+- [x] aircraft.html: standalone full-screen aircraft SPA at /aircraft
+- [x] aircraft.html: click-to-detail view with airline header, route, live stats
+- [x] aircraft.html: Focus mode — full-screen closest commercial aircraft, 20s refresh
+- [x] aircraft.html: dynamic airport name lookup via /api/airport-name (OurAirports CSV)
+- [x] aircraft.html: location settings modal with Nominatim forward geocoding
+- [x] aircraft.html: route not-found state cached to avoid stuck "loading" display

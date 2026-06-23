@@ -90,13 +90,54 @@ TRACKED_ROUTES  = frozenset({'850', '127', '128', '129', '12'})
 BUS_STOPS_FILE  = '/home/gduthie/twyford-dashboard/bus-stops.json'  # persisted across reboots
 BUS_STOPS_TTL   = 14400  # 4-hour in-memory cache; file reused indefinitely
 
-APP_DIR = '/home/gduthie/twyford-dashboard'
+APP_DIR            = '/home/gduthie/twyford-dashboard'
+AIRPORT_NAMES_FILE = os.path.join(APP_DIR, 'airport-names.json')
 MIME    = {'.html': 'text/html', '.js': 'application/javascript',
            '.png':  'image/png',  '.svg': 'image/svg+xml',
            '.json': 'application/json', '.css': 'text/css'}
 
-_cache = {}
-_lock  = threading.Lock()
+_cache         = {}
+_lock          = threading.Lock()
+_airport_names = {}
+
+def _clean_airport_name(raw):
+    for suffix in [' International Airport', ' National Airport', ' Regional Airport',
+                   ' Airport', ' International', ' Regional', ' Airfield', ' Aerodrome']:
+        if raw.endswith(suffix):
+            return raw[:-len(suffix)].strip()
+    return raw.strip()
+
+def _load_airport_names():
+    global _airport_names
+    if os.path.exists(AIRPORT_NAMES_FILE):
+        try:
+            with open(AIRPORT_NAMES_FILE) as f:
+                _airport_names = json.load(f)
+            print(f'Airport names loaded: {len(_airport_names)} entries')
+            return
+        except Exception as e:
+            print(f'Airport names cache read error: {e}')
+    try:
+        import csv, io
+        print('Downloading airport names from OurAirports...')
+        req = urllib.request.Request(
+            'https://davidmegginson.github.io/ourairports-data/airports.csv',
+            headers={'User-Agent': 'Joggler-Dashboard/1.0'})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            content = resp.read().decode('utf-8')
+        names = {}
+        for row in csv.DictReader(io.StringIO(content)):
+            iata = row.get('iata_code', '').strip()
+            if iata and len(iata) == 3:
+                names[iata] = _clean_airport_name(row.get('name', iata))
+        _airport_names = names
+        with open(AIRPORT_NAMES_FILE, 'w') as f:
+            json.dump(names, f)
+        print(f'Airport names cached: {len(names)} entries')
+    except Exception as e:
+        print(f'Airport names download failed: {e}')
+
+threading.Thread(target=_load_airport_names, daemon=True).start()
 
 # ── Bus: BODS (Bus Open Data Service) ────────────────────────────────────────
 BODS_ENV_FILE   = '/home/gduthie/twyford-dashboard/.env'
@@ -989,6 +1030,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._airline_logo(qs)
         elif parsed.path == '/api/aircraft-info':
             self._aircraft_info(qs)
+        elif parsed.path == '/api/airport-name':
+            self._airport_name(qs)
         elif parsed.path == '/api/radio/resolve':
             self._radio_resolve(qs)
         elif parsed.path == '/api/radio/nowplaying':
@@ -999,6 +1042,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._radio_track_info(qs)
         elif parsed.path == '/health':
             self._respond(200, 'text/plain', b'ok')
+        elif parsed.path == '/aircraft':
+            self._static('/aircraft.html')
         else:
             self._static(parsed.path)
 
@@ -1041,10 +1086,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         lat  = round(lat, 2)
         lon  = round(lon, 2)
         dist = max(10, round(dist / 10) * 10)
+        focus = qs.get('focus', ['0'])[0] == '1'
+        ttl   = 20 if focus else FLIGHT_TTL
         key = ('flights', lat, lon, dist)
         now = time.time()
         with _lock:
-            if key in _cache and now - _cache[key][0] < FLIGHT_TTL:
+            if key in _cache and now - _cache[key][0] < ttl:
                 self._respond(200, 'application/json', _cache[key][1])
                 return
         url = ADSB_URL.format(lat=lat, lon=lon, dist=dist)
@@ -1421,6 +1468,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
         self._json(result)
+
+    def _airport_name(self, qs):
+        iata = qs.get('iata', [''])[0].strip().upper()
+        if not re.match(r'^[A-Z]{3,4}$', iata):
+            self._json({'name': None})
+            return
+        self._json({'name': _airport_names.get(iata)})
 
     def _radio_resolve(self, qs):
         url = qs.get('url', [''])[0]

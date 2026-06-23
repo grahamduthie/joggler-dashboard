@@ -27,6 +27,7 @@ USB stick, and repurposes the device as a persistent household display.
 | **WagtailCam** | Live MJPEG stream and dated timelapse from a garden wildlife camera. |
 | **Trains** | Next 5 departures from Twyford station (National Rail live feed). Tap for calling points. |
 | **Flights** | Leaflet.js radar map with ADS-B live positions, airline logos, and FlightAware route details. |
+| **Aircraft detail** (`/aircraft`) | Standalone full-screen aircraft SPA. Tap any aircraft for detail view; Focus mode shows a single large display of the closest commercial aircraft with live stats — designed to identify overhead aircraft at a glance. |
 | **Buses** | Live departure board for Twyford stops (routes 850, 127, 128, 129, 12). Leaflet.js map with live vehicle positions. |
 
 The dashboard is a single-file SPA (`dashboard.html`) — no framework, no build step.
@@ -75,6 +76,7 @@ proxying and data fetching happen on the Pi. The Pi serves the dashboard HTML di
 
 ```
 dashboard.html          Single-file SPA — all views, CSS, JS
+aircraft.html           Standalone full-screen aircraft SPA (served at /aircraft)
 transport-proxy.py      Pi backend: all API proxying + static file serving
 cast-server.py          Pi: Chromecast discovery and control (port 9998)
 shutdown-server.py      Joggler: graceful power-off via power button (port 9999)
@@ -91,7 +93,7 @@ icons/                  Weather icons (MAm TV set, 92 PNGs) + station/camera log
 - `hive-tokens.json`, `hive-credentials.json` — Hive/Cognito auth tokens (mode 600)
 - `.env` — BODS API key
 - `bus-stops.json`, `bus-route-stops.json` — cached from Overpass/Transport API
-- `logos/`, `aircraft-info/` — downloaded and cached airline logos / aircraft metadata
+- `logos/`, `aircraft-info/`, `airport-names.json` — downloaded and cached airline logos, aircraft metadata, and airport names
 
 ---
 
