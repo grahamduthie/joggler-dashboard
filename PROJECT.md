@@ -526,6 +526,19 @@ or TV alongside the main Joggler kiosk.
 - Uses Nominatim forward geocoding (place-name search) — geolocation API is blocked on HTTP
   origins; Nominatim HTTPS calls work fine from HTTP pages
 
+**Responsive design:**
+- Portrait orientation or viewport ≤640 px wide: map stacks above list (38% height for map,
+  remainder for list). The existing `window.resize` handler already calls
+  `flightMap.invalidateSize()` + redraws the canvas, so orientation changes are handled.
+- All `vw`-based font sizes in the focus view and detail view use `clamp(min, Xvw, max)` so
+  they floor at readable minimums on phones (e.g. stat values ≥26 px, airport names ≥22 px).
+- Viewport ≤600 px: topbar compacted to 52 px, count text hidden, clock shrunk, buttons smaller.
+  Altitude-colour legend hidden. Settings modal padding reduced.
+- Viewport ≤420 px: title text hidden to avoid overflow (clock + two buttons still fit).
+- Landscape phones (height ≤480 px): focus view logo, header, and route padding reduced so stat
+  cards still have adequate space.
+- All interactive elements carry `touch-action: manipulation` for instant tap response.
+
 ### Buses View
 
 Two tabs: **Departures** and **Map**. The Buses tile opens on Departures.
@@ -950,3 +963,4 @@ Everything working as of 2026-06-23.
 - [x] aircraft.html: dynamic airport name lookup via /api/airport-name (OurAirports CSV)
 - [x] aircraft.html: location settings modal with Nominatim forward geocoding
 - [x] aircraft.html: route not-found state cached to avoid stuck "loading" display
+- [x] aircraft.html: responsive layout — portrait/narrow stacks map above list; clamp() font sizes ensure readability on phones (390 px); compact topbar ≤600 px; landscape phone reduces focus view spacing

@@ -381,6 +381,7 @@
   }
   .cv-logo {
     height: 16vh;
+    max-height: 110px;
     max-width: 28vw;
     object-fit: contain;
     background: #ffffff;
@@ -590,6 +591,105 @@
     color: #a8c8e0;
     line-height: 1.3;
   }
+
+  /* ── Responsive ─────────────────────────────────────────────
+     All vw font sizes need clamp() minimums — on a 390 px phone
+     2 vw = 7.8 px which is completely illegible.
+  ─────────────────────────────────────────────────────────── */
+
+  /* Focus view: minimum readable sizes for every vw font */
+  .cv-back          { font-size: clamp(15px, 2vw,   28px); }
+  .cv-updated       { font-size: clamp(12px, 1.4vw, 20px); }
+  .cv-flight-num    { font-size: clamp(36px, 7.5vw, 120px); }
+  .cv-airline-name  { font-size: clamp(20px, 4vw,   60px); }
+  .cv-airport       { font-size: clamp(22px, 5vw,   80px); }
+  .cv-route-arrow   { font-size: clamp(14px, 2vw,   32px); }
+  .cv-iata          { font-size: clamp(12px, 2.2vw, 36px); }
+  .cv-terminal      { font-size: clamp(11px, 1.6vw, 26px); }
+  .cv-times         { font-size: clamp(13px, 2.2vw, 36px); }
+  .cv-route-loading { font-size: clamp(14px, 2vw,   28px); }
+  .cv-stat-label    { font-size: clamp(12px, 1.4vw, 22px); }
+  .cv-stat-value    { font-size: clamp(26px, 4vw,   64px); }
+  .cv-stat-unit     { font-size: clamp(12px, 1.6vw, 26px); }
+  .cv-heading-arrow { font-size: clamp(26px, 5vw,   80px); }
+  .cv-ac-info-right { font-size: clamp(15px, 2.8vw, 44px); }
+  .cv-ac-row        { font-size: clamp(13px, 2vw,   28px); }
+  .cv-flight-info   { font-size: clamp(13px, 2.2vw, 36px); }
+
+  /* Detail view: minimum readable sizes */
+  .det-back         { font-size: clamp(15px, 2vw,   28px); }
+  .det-flight-num   { font-size: clamp(26px, 5vw,   72px); }
+  .det-airline-name { font-size: clamp(13px, 2vw,   32px); }
+  .det-airport      { font-size: clamp(16px, 2.8vw, 44px); }
+  .det-arrow        { font-size: clamp(12px, 1.8vw, 28px); }
+  .det-terminal     { font-size: clamp(11px, 1.4vw, 20px); }
+  .det-times        { font-size: clamp(13px, 1.8vw, 28px); }
+  .det-ac-row       { font-size: clamp(13px, 1.8vw, 28px); }
+  .det-stat         { font-size: clamp(15px, 2.8vw, 44px); }
+  .det-no-route     { font-size: clamp(13px, 1.6vw, 24px); }
+
+  /* Fast touch response on all interactive elements */
+  .ac-row, .map-btn, .topbar-btn, .cv-back, .det-back,
+  #loc-search-btn, #loc-cancel, #loc-apply {
+    touch-action: manipulation;
+  }
+
+  /* ── Portrait / narrow: stack map above list ── */
+  @media (orientation: portrait), (max-width: 640px) {
+    #main {
+      flex-direction: column;
+    }
+    #map-side {
+      flex: 0 0 38%;
+      min-height: 150px;
+      border-right: none;
+      border-bottom: 2px solid #1e3a5a;
+    }
+  }
+
+  /* ── Small screens: compact topbar and list rows ── */
+  @media (max-width: 600px) {
+    #topbar     { height: 52px; padding: 0 12px; gap: 8px; }
+    #main       { height: calc(100vh - 52px); }
+    #ac-title   { font-size: 18px; letter-spacing: 1px; }
+    #ac-count   { display: none; }
+    #ac-clock   { font-size: 28px; letter-spacing: 2px; }
+    .topbar-btn { font-size: 14px; padding: 6px 11px; }
+
+    .ac-row      { padding: 0 12px; gap: 10px; }
+    .ac-badge    { width: 70px; height: 46px; }
+    .ac-badge-logo img { width: 62px; height: 38px; }
+    .ac-flight   { font-size: 16px; }
+    .ac-route    { font-size: 13px; }
+    .ac-stats    { font-size: 11px; }
+    .ac-dist     { font-size: 16px; }
+    .ac-dist-unit { font-size: 10px; }
+    .ac-dist-wrap { min-width: 58px; }
+
+    .cv-bar      { height: 52px; }
+    .det-back    { height: 52px; }
+    #alt-legend  { display: none; }
+
+    #settings-panel { padding: 22px 18px; max-height: 85vh; overflow-y: auto; }
+    .loc-field input, .loc-search-row input { font-size: 17px; padding: 9px 12px; }
+    #loc-search-btn, #loc-cancel, #loc-apply { font-size: 16px; padding: 9px 16px; }
+  }
+
+  /* ── Very small: hide title text to free topbar space ── */
+  @media (max-width: 420px) {
+    #ac-title { display: none; }
+  }
+
+  /* ── Landscape phone (short screen): compact focus view ── */
+  @media (max-height: 480px) and (orientation: landscape) {
+    .cv-bar     { height: 46px; }
+    .cv-logo    { height: 9vh; max-width: 18vw; }
+    .cv-header  { padding: 1vh 2vw; gap: 2vw; }
+    .cv-route   { padding: 1vh 2vw; }
+    .cv-stat-card { padding: 1vh 1vw; gap: 0.3vh; }
+    .cv-stat-label { letter-spacing: 1px; }
+    .cv-flight-num { font-size: clamp(32px, 9vw, 140px); }
+  }
 </style>
 </head>
 <body>
@@ -607,9 +707,9 @@
     <div id="flight-map"></div>
     <div id="flight-map-overlay"></div>
     <canvas id="flight-radar"></canvas>
-    <div class="map-btn" id="map-home-btn"    onclick="mapHome()">&#8962;</div>
-    <div class="map-btn" id="map-zoomin-btn"  onclick="mapZoomIn()">+</div>
-    <div class="map-btn" id="map-zoomout-btn" onclick="mapZoomOut()">&minus;</div>
+    <div class="map-btn" id="map-home-btn"    onmousedown="mapHome()">&#8962;</div>
+    <div class="map-btn" id="map-zoomin-btn"  onmousedown="mapZoomIn()">+</div>
+    <div class="map-btn" id="map-zoomout-btn" onmousedown="mapZoomOut()">&minus;</div>
     <div id="alt-legend">
       <div><span class="leg-dot" style="background:#c0d8ff"></span>&gt; 35,000 ft</div>
       <div><span class="leg-dot" style="background:#40c8ff"></span>25&ndash;35,000 ft</div>
