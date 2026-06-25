@@ -420,7 +420,8 @@ html, body {
     <table id="train-table">
       <thead>
         <tr>
-          <th>Time</th>
+          <th>Sched</th>
+          <th>Actual</th>
           <th>HC</th>
           <th>Operator</th>
           <th>From → To</th>
@@ -479,6 +480,8 @@ var currentMode    = 'next';
 var trainsData     = null;
 var pollTimer      = null;
 var countdownTimer = null;
+var tickTimer      = null;
+var nextFetchAt    = 0;   // Date.now() ms when next fetch is due
 
 /* ── Mode switching ──────────────────────────────────────── */
 function setMode(mode) {
@@ -490,13 +493,26 @@ function setMode(mode) {
 }
 
 /* ── Polling ─────────────────────────────────────────────── */
+var POLL_INTERVAL = 15000;  // ms between proxy polls (proxy caches RTT at 30s TTL)
+
 function startPoll() {
   fetchTrains();
-  pollTimer      = setInterval(fetchTrains, 30000);
-  countdownTimer = setInterval(render, 15000);  // re-render for countdown updates (no fetch)
+  pollTimer      = setInterval(fetchTrains, POLL_INTERVAL);
+  countdownTimer = setInterval(render, POLL_INTERVAL);   // re-render between fetches
+  tickTimer      = setInterval(tickTopbar, 1000);         // topbar countdown every second
+}
+
+function tickTopbar() {
+  var secs = Math.max(0, Math.round((nextFetchAt - Date.now()) / 1000));
+  var updEl = document.getElementById('updated');
+  // Replace just the countdown suffix, keep the HH:MM:SS prefix
+  var base = updEl.dataset.base || updEl.textContent;
+  updEl.dataset.base = base;
+  updEl.textContent = base + '  ·  ' + secs + 's';
 }
 
 function fetchTrains() {
+  nextFetchAt = Date.now() + POLL_INTERVAL;
   fetch('/api/trains')
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -505,7 +521,9 @@ function fetchTrains() {
     })
     .catch(function(e) {
       console.error(e);
-      document.getElementById('updated').textContent = 'Error';
+      var el = document.getElementById('updated');
+      el.dataset.base = 'Error';
+      el.textContent  = 'Error';
     });
 }
 
@@ -567,8 +585,10 @@ function render() {
   var now = Date.now();
 
   var ts = trainsData.ts ? new Date(trainsData.ts * 1000) : new Date();
-  document.getElementById('updated').textContent =
-    ts.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  var baseText = ts.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  var el = document.getElementById('updated');
+  el.dataset.base = baseText;
+  el.textContent  = baseText;   // tickTopbar() will append the countdown
 
   var trains = trainsData.trains || [];
   document.getElementById('no-data').style.display = 'none';
@@ -795,17 +815,23 @@ function renderMulti(targets, now) {
 function renderList(trains, now) {
   var tb = document.getElementById('train-tbody');
   if (!trains.length) {
-    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#4a7a9a;padding:30px">No trains</td></tr>';
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#4a7a9a;padding:30px">No trains</td></tr>';
     return;
   }
   var html = '';
   trains.forEach(function(t) {
-    var ms    = trainMs(t);
+    var ms     = trainMs(t);
     var isPast = ms < now - 90000;
     var isEst  = !t.confirmed;
     var late   = lateStr(t);
     var op     = opStyle(t.op_code, t.passenger);
-    var timeStr = isEst ? '~' + fmtTimeMs(ms) : (ms ? fmtTimeMs(ms) : fmtTime(t.twy_sched));
+
+    // Scheduled time — always show the WTT/estimated sched; prefix ~ if estimated
+    var schedDisp = isEst ? '~' + fmtTime(t.twy_sched) : fmtTime(t.twy_sched);
+
+    // Actual time — only set once TRUST confirms
+    var actualDisp = t.twy_actual ? fmtTime(t.twy_actual) : '—';
+
     var lateClass = t.cancelled ? 'tr-cancel'
                   : isEst ? 'tr-est'
                   : (t.late_min && t.late_min > 0) ? 'tr-late' : 'tr-ontime';
@@ -815,7 +841,8 @@ function renderList(trains, now) {
       : (t.origin || '—') + ' → ' + (t.dest || '—');
 
     html += '<tr class="tr-row' + (isPast ? ' past' : '') + '" onmousedown="rowTap(this)" data-uid="' + esc(t.uid) + '">' +
-      '<td class="tr-time ' + lateClass + '">' + esc(timeStr) + '</td>' +
+      '<td class="tr-time ' + lateClass + '">' + esc(schedDisp) + '</td>' +
+      '<td class="tr-time ' + (t.twy_actual ? (lateClass || 'tr-ontime') : '') + '">' + esc(actualDisp) + '</td>' +
       '<td class="tr-hc">' + esc(t.headcode) + '</td>' +
       '<td><span class="tr-op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</span></td>' +
       '<td class="tr-route">' + esc(routeStr) + '</td>' +

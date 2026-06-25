@@ -1281,6 +1281,7 @@ class _NRListener:
         self._conn_ref = conn
 
     def on_message(self, frame):
+        global _rtt_trains_ts
         try:
             msgs = json.loads(frame.body)
             if not isinstance(msgs, list):
@@ -1290,6 +1291,13 @@ class _NRListener:
                 if msg.get('header', {}).get('msg_type') != '0003':
                     continue
                 stanox = body.get('loc_stanox', '')
+                # Twyford station (stopping trains). Invalidate RTT cache immediately
+                # so the next /api/trains request fetches fresh data with twy_actual,
+                # without waiting out the remaining 30s TTL.
+                if stanox == '87014':
+                    with _lock:
+                        _rtt_trains_ts = 0
+                    continue
                 if stanox not in _NR_STANOX_WATCH:
                     continue
                 hc = body.get('train_id', '')
