@@ -139,19 +139,29 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
     <line x1="469" y1="58" x2="469" y2="137" stroke="#1a2a3a" stroke-width="1" stroke-dasharray="2,4"/>
     <text x="469" y="200" fill="#1e3a55" font-size="8" font-family="Arial" text-anchor="middle">Ruscombe</text>
 
-    <!-- Signal indicators (positioned at known signal locations) -->
-    <!-- D6:12 — Down Relief signal, protects Twyford approach from east (~berth 549) -->
-    <g id="sig-D6-12" transform="translate(395, 65)">
+    <!-- Signal indicators — positions confirmed by td_correlate.py run 2026-06-25 -->
+    <!-- D6:12 — DOWN approach signal, fires at station entry berth ~545 -->
+    <g id="sig-D6-12" transform="translate(416, 57)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="4" fill="#2a4a6a" font-size="7" font-family="Arial" text-anchor="middle">S</text>
     </g>
-    <!-- D6:15 — Up Main signal through Twyford (~berth 570) -->
-    <g id="sig-D6-15" transform="translate(284, 130)">
+    <!-- D6:19 — DOWN signal at house/crossover, fires at berth ~574 -->
+    <g id="sig-D6-19" transform="translate(263, 57)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="4" fill="#2a4a6a" font-size="7" font-family="Arial" text-anchor="middle">S</text>
     </g>
-    <!-- D6:1B — Up Relief/bidirectional near station (~berth 554) -->
-    <g id="sig-D6-1B" transform="translate(350, 130)">
+    <!-- D6:15 — UP station departure signal, west end of Twyford platform, berth ~594 -->
+    <g id="sig-D6-15" transform="translate(158, 138)">
+      <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
+      <text y="4" fill="#2a4a6a" font-size="7" font-family="Arial" text-anchor="middle">S</text>
+    </g>
+    <!-- D6:1C — UP signal station east / house level, berth ~574 -->
+    <g id="sig-D6-1C" transform="translate(263, 138)">
+      <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
+      <text y="4" fill="#2a4a6a" font-size="7" font-family="Arial" text-anchor="middle">S</text>
+    </g>
+    <!-- D6:1B — UP signal east of house toward Maidenhead, berth ~541 -->
+    <g id="sig-D6-1B" transform="translate(437, 138)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="4" fill="#2a4a6a" font-size="7" font-family="Arial" text-anchor="middle">S</text>
     </g>
@@ -241,9 +251,11 @@ var ASPECT_COLOUR = {
 // ── Key signal addresses to display ───────────────────────────────────────
 // Identified from correlator run 2026-06-25
 var KEY_SIGNALS = {
-  'D6:12': 'sig-D6-12',   // Down Relief approach to Twyford
-  'D6:15': 'sig-D6-15',   // Up Main through Twyford
-  'D6:1B': 'sig-D6-1B',   // Up Relief / bidirectional
+  'D6:12': 'sig-D6-12',   // DOWN approach signal, berth ~545
+  'D6:19': 'sig-D6-19',   // DOWN at house/crossover, berth ~574
+  'D6:15': 'sig-D6-15',   // UP station departure (west end), berth ~594
+  'D6:1C': 'sig-D6-1C',   // UP station east / house level, berth ~574
+  'D6:1B': 'sig-D6-1B',   // UP east toward Maidenhead, berth ~541
 };
 
 // ── Time formatting ────────────────────────────────────────────────────────
