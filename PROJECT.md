@@ -207,6 +207,7 @@ Host 172.16.10.179
 dashboard.html              # The kiosk SPA (single file, all views)
 aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
 trains.html                 # Standalone trains SPA (served at /trains)
+lineside.html               # Standalone visual track display SPA (served at /lineside)
 transport-proxy.py          # API proxy + static file server (port 5001)
 cast-server.py              # Chromecast discovery/control (port 9998)
 hive-setup.py               # Interactive Hive auth setup (run once to obtain tokens)
@@ -245,6 +246,7 @@ cast-server.py              # Chromecast discovery/control (port 9998, 0.0.0.0)
 dashboard.html              # Source (deploy to Pi with scp)
 aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
 trains.html                 # Standalone trains SPA (served at /trains)
+lineside.html               # Standalone lineside visual track display (served at /lineside)
 transport-proxy.py          # Source
 cast-server.py              # Source
 shutdown-server.py          # Source
@@ -719,6 +721,8 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /health` | — | — | Returns `ok` |
 | `GET /aircraft` | Static — aircraft.html | — | Standalone full-screen aircraft SPA |
 | `GET /trains` | Static — trains.html | — | Standalone full-screen trains SPA |
+| `GET /lineside` | Static — lineside.html | — | Standalone visual track display SPA |
+| `GET /api/td-live` | In-memory TD/SF state | — | Live berth positions + signal aspects from NR TD feed. No TTL — returns current state. Positions expire after 10 min of inactivity. |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
 **National Rail SOAP details:**
@@ -1144,13 +1148,12 @@ scp dashboard.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
   ssh -i ~/.ssh/id_ed25519 of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
 # Use ctrl+shift+r (hard reload), NOT F5 — F5 may serve cached CSS
 
-# Deploy and restart transport-proxy on Pi
-# Note: must use -u (unbuffered) so stdout flushes to log; proxy runs as root via sudo bash
+# Deploy and restart transport-proxy on Pi (systemd service)
 scp transport-proxy.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
-  ssh gduthie@172.16.10.136 \
-    'sudo kill $(pgrep -f transport-proxy.py) 2>/dev/null; sleep 1; \
-     sudo bash -c "nohup python3 -u /home/gduthie/twyford-dashboard/transport-proxy.py \
-       >> /home/gduthie/twyford-dashboard/proxy.log 2>&1 & disown"'
+  ssh gduthie@172.16.10.136 'sudo systemctl restart twyford-dashboard'
+
+# Deploy lineside.html (no service restart needed — served as static file)
+scp lineside.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
 
 # Deploy and restart cast-server on Pi
 scp cast-server.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
@@ -1410,7 +1413,13 @@ Everything working as of 2026-06-25.
 - [x] trains.html: multi-train NEXT view redesigned — each card mirrors single focus view (header + horizontal route band + 4 stat cards)
 - [x] trains.html: RECENT/NEXT mutual exclusion — grace period inverted so same train cannot appear in both modes
 - [x] transport-proxy.py: TD buffer filter — only D1/D4/D6 (Thames Valley SC) stored; _TD_BUF_MAX raised 300→3000; discards all other UK areas immediately on receipt
-- [x] td_correlate.py: diagnostic script — connects to TD_ALL_SIG_AREA, logs CA+SF events for D1/D4/D6 with ms timestamps, post-run analysis correlates which SF signal addresses consistently fire alongside each CA berth transition; house-zone berths (D6 0x0540–0x0600) highlighted live; run with `python3 td_correlate.py [minutes]`, re-analyse saved log with `--analyse`
+- [x] td_correlate.py: diagnostic script — connects to TD_ALL_SIG_AREA, logs CA+SF events for D1/D4/D6 with ms timestamps, post-run analysis correlates which SF signal addresses consistently fire alongside each CA berth transition; house-zone berths (D6 0540–0600) highlighted live; run with `python3 td_correlate.py [minutes]`, re-analyse saved log with `--analyse`; HOUSE_ZONE bug fixed (was hex literals 0x540=1344, now decimal 540)
+- [x] transport-proxy.py: SF signal state tracking — `_sf_state` dict stores latest aspect per (area, address); updated by `_handle_td()` alongside CA berth steps; persists for life of process
+- [x] transport-proxy.py: `/api/td-live` endpoint — returns current berth positions (headcode→{area,berth,age_s}) + signal aspects (D6:12 etc → {data, aspect}) as JSON; polled by lineside.html every 5 s
+- [x] transport-proxy.py: on-demand STOMP — TD/SF feed only connects when trains pages are active (`_nr_touch()` on every `/api/trains` poll); auto-disconnects after 90 s idle (`_nr_idle_watcher`); `_nr_running=False` set before `disconnect()` to suppress reconnect loop
+- [x] lineside.html: standalone visual track display SPA at `/lineside` — 800×480 dark layout showing Reading→Maidenhead track strip with live train dots (operator colours) from `/api/td-live`; estimated positions from schedule when no TD data; signal aspect dots; house marker (★) at berth 571; next-train panel with ETA countdown; recent and also-coming strips
+- [x] lineside.html: signal positions updated from td_correlate.py empirical data (2 runs) — D6:12 x=416 (DOWN approach), D6:19 x=263 (DOWN at house), D6:15 x=158 (UP station departure), D6:1C x=263 (UP at house), D6:1B x=437 (UP east toward Maidenhead)
+- [ ] lineside.html: visual polish — text contrast too low on some elements; track diagram needs redesign for clarity; needs rework in next session
 - [ ] transport-proxy.py: switch TRUST watch from STANOX 74005 (Maidenhead, no freight) → 74023 (Twyford, freight)
-- [ ] trains.html: TD berth position tracking — use CA steps in D6 to show live train position between Maidenhead and Reading; real-time speed-based ETA to house (berths ~0x0540–0x0600 in D6); replaces fixed-offset Main Line estimation
-- [ ] trains.html: SF signal integration — once signal addresses mapped (via td_correlate.py), show "clear road" / "signals ahead at caution" for approaching trains; requires address→location mapping built from CA/SF correlation
+- [ ] trains.html / lineside.html: run td_correlate.py again during busy morning service to confirm signal address mapping with more trains; update KEY_SIGNALS positions if needed
+- [ ] lineside.html: use SF signal aspects to indicate "clear road" / "signals at caution" for approaching trains once mapping is fully confirmed
