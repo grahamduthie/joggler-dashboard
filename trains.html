@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trains — Twyford</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; width: 100%;
+  background: #0d1b2a;
+  color: #e8eaf0;
+  font-family: 'DejaVu Sans', 'Segoe UI', Arial, sans-serif;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+@media (hover: hover) and (pointer: fine) { * { cursor: none; } }
+
+/* ── Top bar ─────────────────────────────────────────────── */
+#topbar {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #111e2e;
+  border-bottom: 2px solid #1e3a5a;
+  padding: 0 20px;
+  flex-shrink: 0;
+}
+#back-btn {
+  font-size: clamp(14px, 2vw, 26px);
+  font-weight: bold;
+  color: #7fb3d3;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+#back-btn:hover, #back-btn:active { color: #ffffff; }
+#mode-btns {
+  display: flex;
+  gap: 6px;
+}
+.mode-btn {
+  padding: 5px 16px;
+  border-radius: 20px;
+  font-size: clamp(12px, 1.6vw, 22px);
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: #5a8fad;
+  border: 1.5px solid #1e3a5a;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background 0.1s;
+}
+.mode-btn:hover { background: rgba(30,58,90,0.5); color: #a0c8e8; }
+.mode-btn.active { background: #1e3a5a; color: #ffffff; border-color: #4a7aaa; }
+#updated {
+  font-size: clamp(11px, 1.3vw, 18px);
+  color: #4a7a9a;
+  text-align: right;
+}
+
+/* ── Page layout ─────────────────────────────────────────── */
+#page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  overflow: hidden;
+}
+
+/* ── No-data / error state ───────────────────────────────── */
+#no-data {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(16px, 2.5vw, 36px);
+  color: #4a7a9a;
+  font-style: italic;
+}
+
+/* ── Focus view ──────────────────────────────────────────── */
+#focus-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header: operator colour band */
+.fv-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 2vw, 28px);
+  padding: clamp(10px, 2vh, 20px) clamp(14px, 2.5vw, 32px);
+  border-bottom: 2px solid rgba(255,255,255,0.12);
+}
+.fv-op-badge {
+  flex-shrink: 0;
+  width: clamp(56px, 9vw, 120px);
+  height: clamp(56px, 9vw, 120px);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(18px, 3.5vw, 52px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+.fv-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fv-headcode {
+  font-size: clamp(34px, 8vw, 110px);
+  font-weight: bold;
+  line-height: 1;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+}
+.fv-op-name {
+  font-size: clamp(16px, 3vw, 44px);
+  opacity: 0.85;
+}
+.fv-right {
+  flex-shrink: 0;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: clamp(3px, 0.8vh, 10px);
+}
+.fv-track-badge {
+  font-size: clamp(12px, 2vw, 28px);
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 4px 14px;
+  border-radius: 20px;
+  border: 1.5px solid rgba(255,255,255,0.3);
+  white-space: nowrap;
+}
+.fv-call-badge {
+  font-size: clamp(11px, 1.6vw, 22px);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.badge-stop  { color: #7fd3a8; border-color: #3a8a60; }
+.badge-pass  { color: #f0b85a; border-color: #a07030; }
+.badge-est   { color: #a0c0e0; border-color: #3a6080; }
+
+/* Route section */
+.fv-route {
+  flex: 1;
+  min-height: 0;
+  padding: clamp(8px, 2vh, 24px) clamp(14px, 3vw, 40px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-bottom: 2px solid #1e3a5a;
+}
+.fv-route-station {
+  font-size: clamp(14px, 3.5vw, 50px);
+  font-weight: bold;
+  color: #e8eaf0;
+  line-height: 1.2;
+}
+.fv-route-station.twyford {
+  color: #ffd080;
+  font-size: clamp(16px, 4.5vw, 64px);
+}
+.fv-route-time {
+  font-size: clamp(12px, 2vw, 30px);
+  color: #7fb3d3;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+.fv-route-arrow {
+  font-size: clamp(11px, 1.6vw, 22px);
+  color: #3a6a8a;
+  padding: clamp(2px, 0.5vh, 6px) 0;
+}
+.fv-route-late {
+  color: #f0a060;
+}
+.fv-route-ontime {
+  color: #7fd3a8;
+}
+.fv-route-est {
+  color: #a0c0e0;
+  font-style: italic;
+}
+
+/* Stats row */
+.fv-stats {
+  flex-shrink: 0;
+  display: flex;
+  border-top: 0;
+}
+.fv-stat-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid #1e3a5a;
+  padding: clamp(8px, 1.5vh, 20px) clamp(6px, 1vw, 16px);
+  gap: clamp(3px, 0.6vh, 8px);
+}
+.fv-stat-card:last-child { border-right: none; }
+.fv-stat-label {
+  font-size: clamp(10px, 1.3vw, 18px);
+  color: #4a7a9a;
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+}
+.fv-stat-value {
+  font-size: clamp(22px, 3.8vw, 56px);
+  font-weight: bold;
+  color: #ffffff;
+  line-height: 1;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+}
+.fv-stat-unit {
+  font-size: clamp(11px, 1.4vw, 20px);
+  color: #5a8fad;
+}
+.stat-late    { color: #f0a060; }
+.stat-ontime  { color: #7fd3a8; }
+.stat-est     { color: #a0c0e0; }
+.stat-cancel  { color: #e05050; }
+
+/* ── List view ────────────────────────────────────────────── */
+#list-view {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+#train-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+#train-table thead th {
+  position: sticky;
+  top: 0;
+  background: #111e2e;
+  border-bottom: 2px solid #1e3a5a;
+  font-size: clamp(9px, 1.2vw, 16px);
+  color: #4a7a9a;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: normal;
+}
+.tr-row {
+  border-bottom: 1px solid #131f2f;
+  cursor: pointer;
+}
+.tr-row:hover   { background: rgba(30,58,90,0.35); }
+.tr-row:active  { background: rgba(30,58,90,0.65); }
+.tr-row.past    { opacity: 0.45; }
+.tr-row td {
+  padding: clamp(7px, 1.2vh, 14px) 10px;
+  font-size: clamp(12px, 1.6vw, 22px);
+  vertical-align: middle;
+}
+.tr-time { font-family: 'DejaVu Sans Mono', 'Courier New', monospace; white-space: nowrap; }
+.tr-late { color: #f0a060; }
+.tr-ontime { color: #7fd3a8; }
+.tr-est { color: #a0c0e0; font-style: italic; }
+.tr-hc { font-family: 'DejaVu Sans Mono', 'Courier New', monospace; font-size: clamp(10px, 1.4vw, 18px); color: #7fb3d3; }
+.tr-op {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: clamp(10px, 1.3vw, 17px);
+  font-weight: bold;
+  white-space: nowrap;
+}
+.tr-route { color: #c0ccd8; font-size: clamp(11px, 1.5vw, 20px); }
+.tr-track { font-size: clamp(10px, 1.3vw, 16px); color: #5a8fad; white-space: nowrap; }
+.tr-status { font-size: clamp(10px, 1.2vw, 15px); white-space: nowrap; }
+.tr-cancel { color: #e05050; }
+
+/* Responsive: Joggler 800×480 */
+@media (max-height: 500px) {
+  #topbar         { height: 44px; }
+  .fv-op-badge    { width: 48px; height: 48px; }
+  .fv-headcode    { font-size: clamp(28px, 9vw, 80px); }
+  .fv-stat-card   { padding: 6px 4px; gap: 2px; }
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="back-btn" onmousedown="window.location.href='/'">&#8592; Dashboard</div>
+  <div id="mode-btns">
+    <div class="mode-btn" id="btn-recent" onmousedown="setMode('recent')">Recent</div>
+    <div class="mode-btn active" id="btn-next" onmousedown="setMode('next')">Next</div>
+    <div class="mode-btn" id="btn-list" onmousedown="setMode('list')">List</div>
+  </div>
+  <div id="updated">Loading…</div>
+</div>
+
+<div id="page">
+  <div id="no-data" style="display:none">No train data</div>
+  <div id="focus-view" style="display:none"></div>
+  <div id="list-view" style="display:none">
+    <table id="train-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>HC</th>
+          <th>Operator</th>
+          <th>From → To</th>
+          <th>Track</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="train-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ── Operator branding ────────────────────────────────────── */
+var OPS = {
+  'GW': {bg:'#007a4d', fg:'#ffffff', abbr:'GWR'},
+  'XR': {bg:'#7156a5', fg:'#ffffff', abbr:'XR'},
+  'XC': {bg:'#a61530', fg:'#ffffff', abbr:'XC'},
+  'HX': {bg:'#532885', fg:'#ffffff', abbr:'HX'},
+  'AW': {bg:'#8c3b8c', fg:'#ffffff', abbr:'TfW'},
+  'EM': {bg:'#334f8d', fg:'#ffffff', abbr:'EMR'},
+  'CH': {bg:'#0a4d8c', fg:'#ffffff', abbr:'CHR'},
+  'LN': {bg:'#1c3f6e', fg:'#ffffff', abbr:'LNR'},
+  'VT': {bg:'#9d1f30', fg:'#ffffff', abbr:'AVT'},
+  'GX': {bg:'#f05a24', fg:'#ffffff', abbr:'GTX'},
+  // Freight
+  'GB': {bg:'#1e3050', fg:'#ffdd00', abbr:'GBRf'},
+  'DW': {bg:'#db0a17', fg:'#ffffff', abbr:'DB'},
+  'FL': {bg:'#1a6b2a', fg:'#ffffff', abbr:'FLT'},
+  'ZZ': {bg:'#f05a24', fg:'#000000', abbr:'CLR'},
+  'ZN': {bg:'#d4ac0d', fg:'#000000', abbr:'NRL'},
+  'HB': {bg:'#4a4a4a', fg:'#ffffff', abbr:'HNR'},
+};
+
+function opStyle(code) {
+  return OPS[code] || {bg:'#2a3a4a', fg:'#c0ccd8', abbr: code || '??'};
+}
+
+/* ── State ────────────────────────────────────────────────── */
+var currentMode = 'next';
+var trainsData  = null;
+var pollTimer   = null;
+
+/* ── Mode switching ──────────────────────────────────────── */
+function setMode(mode) {
+  currentMode = mode;
+  ['recent','next','list'].forEach(function(m) {
+    document.getElementById('btn-' + m).classList.toggle('active', m === mode);
+  });
+  render();
+}
+
+/* ── Polling ─────────────────────────────────────────────── */
+function startPoll() {
+  fetchTrains();
+  pollTimer = setInterval(fetchTrains, 30000);
+}
+
+function fetchTrains() {
+  fetch('/api/trains')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      trainsData = d;
+      render();
+    })
+    .catch(function(e) {
+      console.error(e);
+      document.getElementById('updated').textContent = 'Error';
+    });
+}
+
+/* ── Time helpers ────────────────────────────────────────── */
+function trainMs(t) {
+  var iso = t.twy_actual || t.twy_sched;
+  if (!iso) return 0;
+  var ms = new Date(iso).getTime();
+  if (!t.twy_actual && t.late_min) ms += t.late_min * 60000;
+  return ms;
+}
+
+function fmtTime(isoStr) {
+  if (!isoStr) return '—';
+  var d = new Date(isoStr);
+  if (isNaN(d)) return '—';
+  return d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+function fmtTimeMs(ms) {
+  if (!ms) return '—';
+  var d = new Date(ms);
+  return d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+function trackLabel(t) {
+  var arrow = t.direction === 'up' ? '↑' : '↓';
+  var dir   = t.direction === 'up' ? 'Up' : 'Down';
+  return arrow + ' ' + dir + ' ' + t.track;
+}
+
+function lateStr(t) {
+  if (t.cancelled) return 'Cancelled';
+  if (t.late_min === null || t.late_min === undefined) return '';
+  if (t.late_min === 0) return 'On time';
+  if (t.late_min > 0)   return '+' + t.late_min + ' min';
+  if (t.late_min < 0)   return t.late_min + ' min';
+  return '';
+}
+
+/* ── Main render ─────────────────────────────────────────── */
+function render() {
+  if (!trainsData) return;
+  var now = Date.now();
+
+  var ts = trainsData.ts ? new Date(trainsData.ts * 1000) : new Date();
+  document.getElementById('updated').textContent =
+    ts.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+  var trains = trainsData.trains || [];
+  document.getElementById('no-data').style.display = 'none';
+  document.getElementById('focus-view').style.display = 'none';
+  document.getElementById('list-view').style.display = 'none';
+
+  if (currentMode === 'list' || currentMode === 'list-detail') {
+    if (currentMode === 'list') {
+      document.getElementById('list-view').style.display = 'block';
+      renderList(trains, now);
+    }
+  } else {
+    var target = findTarget(trains, currentMode, now);
+    if (!target) {
+      document.getElementById('no-data').style.display = 'flex';
+      document.getElementById('no-data').textContent =
+        currentMode === 'recent' ? 'No recent trains in last 10 min' : 'No upcoming trains';
+    } else {
+      document.getElementById('focus-view').style.display = 'flex';
+      renderFocus(target, now);
+    }
+  }
+}
+
+function findTarget(trains, mode, now) {
+  if (mode === 'recent') {
+    var cutoff = now - 10 * 60000;
+    var past = trains.filter(function(t) {
+      var ms = trainMs(t);
+      return ms > cutoff && ms < now + 90000;
+    });
+    past.sort(function(a, b) { return trainMs(b) - trainMs(a); });
+    return past[0] || null;
+  } else {
+    var upcoming = trains.filter(function(t) {
+      return trainMs(t) >= now - 120000;
+    });
+    upcoming.sort(function(a, b) { return trainMs(a) - trainMs(b); });
+    return upcoming[0] || null;
+  }
+}
+
+/* ── Focus view ──────────────────────────────────────────── */
+function renderFocus(t, now) {
+  var op   = opStyle(t.op_code);
+  var ms   = trainMs(t);
+  var late = lateStr(t);
+  var isBadLate = (t.late_min && t.late_min >= 5);
+  var isEst = !t.confirmed;
+  var isStop = t.call_type === 'STOP';
+
+  var callClass = isStop ? 'badge-stop' : (isEst ? 'badge-est' : 'badge-pass');
+  var callText  = isStop ? 'Stops at Twyford'
+                : (isEst ? 'Passing through (est.)' : 'Passes Twyford');
+
+  var schedDisp = fmtTime(t.twy_sched);
+  var estDisp   = ms ? fmtTimeMs(ms) : schedDisp;
+  if (isEst) schedDisp = '~' + schedDisp;
+
+  /* Twyford time display */
+  var twyTimeHtml;
+  if (t.cancelled) {
+    twyTimeHtml = '<span class="fv-route-time tr-cancel">Cancelled</span>';
+  } else if (isEst) {
+    twyTimeHtml = '<span class="fv-route-time fv-route-est">~' + fmtTimeMs(ms) + '</span>';
+  } else if (t.twy_actual) {
+    var lateClass = isBadLate ? 'fv-route-late' : 'fv-route-ontime';
+    twyTimeHtml = '<span class="fv-route-time">Sched ' + fmtTime(t.twy_sched) + '</span> ' +
+                  '<span class="fv-route-time ' + lateClass + '">' +
+                  (isBadLate ? ' (' + late + ')' : ' ✓ ' + fmtTime(t.twy_actual)) + '</span>';
+  } else {
+    var lateClass2 = isBadLate ? 'fv-route-late' : '';
+    twyTimeHtml = '<span class="fv-route-time ' + lateClass2 + '">' + fmtTime(t.twy_sched) +
+                  (late && late !== 'On time' ? ' (' + late + ')' : '') + '</span>';
+  }
+
+  var platformHtml = (isStop && t.platform)
+    ? ' <span style="color:#7fb3d3;font-size:clamp(12px,1.8vw,26px)">Plat ' + esc(t.platform) + '</span>'
+    : '';
+
+  /* Stat cards */
+  var statTime   = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtTime(t.twy_sched));
+  var statDelay  = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
+                 : isEst ? '<span class="stat-est">N/A</span>'
+                 : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
+                 : '<span class="stat-late">' + (t.late_min > 0 ? '+' : '') + (t.late_min || '?') + ' min</span>');
+  var statTrack  = trackLabel(t);
+  var statVeh    = t.num_veh ? t.num_veh + (t.num_veh === 1 ? ' coach' : ' coaches') : '—';
+
+  document.getElementById('focus-view').innerHTML =
+    '<div class="fv-header" style="background:linear-gradient(135deg,' + op.bg + '55 0%,' + op.bg + '11 100%); border-bottom: 2px solid ' + op.bg + '88">' +
+      '<div class="fv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
+      '<div class="fv-main">' +
+        '<div class="fv-headcode">' + esc(t.headcode) + '</div>' +
+        '<div class="fv-op-name">' + esc(t.op_name || t.op_code) + '</div>' +
+      '</div>' +
+      '<div class="fv-right">' +
+        '<span class="fv-track-badge">' + esc(trackLabel(t)) + '</span>' +
+        '<span class="fv-call-badge ' + callClass + '">' + callText + '</span>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="fv-route">' +
+      '<div class="fv-route-station">' + esc(t.origin || '—') + '</div>' +
+      (t.orig_dep ? '<div class="fv-route-time">dep ' + fmtTime(t.orig_dep) + '</div>' : '') +
+      '<div class="fv-route-arrow">↓</div>' +
+      '<div class="fv-route-station twyford">Twyford</div>' +
+      '<div>' + twyTimeHtml + platformHtml + '</div>' +
+      '<div class="fv-route-arrow">↓</div>' +
+      '<div class="fv-route-station">' + esc(t.dest || '—') + '</div>' +
+      (t.dest_arr ? '<div class="fv-route-time">arr ' + fmtTime(t.dest_arr) + '</div>' : '') +
+    '</div>' +
+
+    '<div class="fv-stats">' +
+      fvCard(isEst ? 'Est. Time' : 'At Twyford', statTime, '') +
+      fvCard('Delay', statDelay, '', true) +
+      fvCard('Track', statTrack, '') +
+      fvCard('Vehicles', statVeh, '') +
+    '</div>';
+}
+
+function fvCard(label, value, unit, rawHtml) {
+  return '<div class="fv-stat-card">' +
+    '<div class="fv-stat-label">' + esc(label) + '</div>' +
+    '<div class="fv-stat-value">' + (rawHtml ? value : esc(value)) + '</div>' +
+    (unit ? '<div class="fv-stat-unit">' + esc(unit) + '</div>' : '') +
+    '</div>';
+}
+
+/* ── List view ───────────────────────────────────────────── */
+function renderList(trains, now) {
+  var tb = document.getElementById('train-tbody');
+  if (!trains.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#4a7a9a;padding:30px">No trains</td></tr>';
+    return;
+  }
+  var html = '';
+  trains.forEach(function(t) {
+    var ms    = trainMs(t);
+    var isPast = ms < now - 90000;
+    var isEst  = !t.confirmed;
+    var late   = lateStr(t);
+    var op     = opStyle(t.op_code);
+    var timeStr = isEst ? '~' + fmtTimeMs(ms) : (ms ? fmtTimeMs(ms) : fmtTime(t.twy_sched));
+    var lateClass = t.cancelled ? 'tr-cancel'
+                  : isEst ? 'tr-est'
+                  : (t.late_min && t.late_min > 0) ? 'tr-late' : 'tr-ontime';
+    var lateDisp  = t.cancelled ? 'Cancelled' : isEst ? 'est.' : (late || '');
+
+    html += '<tr class="tr-row' + (isPast ? ' past' : '') + '" onmousedown="rowTap(this)" data-uid="' + esc(t.uid) + '">' +
+      '<td class="tr-time ' + lateClass + '">' + esc(timeStr) + '</td>' +
+      '<td class="tr-hc">' + esc(t.headcode) + '</td>' +
+      '<td><span class="tr-op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</span></td>' +
+      '<td class="tr-route">' + esc(t.origin || '—') + ' → ' + esc(t.dest || '—') + '</td>' +
+      '<td class="tr-track">' + esc(trackLabel(t)) + '</td>' +
+      '<td class="tr-status ' + lateClass + '">' + esc(lateDisp) + '</td>' +
+      '</tr>';
+  });
+  tb.innerHTML = html;
+}
+
+function rowTap(row) {
+  if (!trainsData) return;
+  var uid = row.dataset.uid;
+  var t = (trainsData.trains || []).find(function(x) { return x.uid === uid; });
+  if (!t) return;
+  document.getElementById('no-data').style.display = 'none';
+  document.getElementById('focus-view').style.display = 'flex';
+  document.getElementById('list-view').style.display = 'none';
+  renderFocus(t, Date.now());
+  ['recent','next','list'].forEach(function(m) {
+    document.getElementById('btn-' + m).classList.remove('active');
+  });
+  // Pressing List again returns to list
+  document.getElementById('btn-list').classList.add('active');
+  currentMode = 'list-detail';
+}
+
+/* ── Helpers ─────────────────────────────────────────────── */
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ── Boot ────────────────────────────────────────────────── */
+setMode('next');
+startPoll();
+</script>
+</body>
+</html>

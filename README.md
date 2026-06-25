@@ -26,6 +26,7 @@ USB stick, and repurposes the device as a persistent household display.
 | **Radio** | 30+ stations — Marlow FM (with live SSE now-playing), Bauer/Global/indie streams. Station picker grid. Chromecast casting. |
 | **WagtailCam** | Live MJPEG stream and dated timelapse from a garden wildlife camera. |
 | **Trains** | Next 5 departures from Twyford station (National Rail live feed). Tap for calling points. |
+| **Trains detail** (`/trains`) | Standalone full-screen trains SPA (Real Time Trains API). Shows all trains passing the house — stopping, non-stopping, and Main Line fast trains estimated from Reading. RECENT / NEXT / LIST modes with operator branding. |
 | **Flights** | Leaflet.js radar map with ADS-B live positions, airline logos, and FlightAware route details. |
 | **Aircraft detail** (`/aircraft`) | Standalone full-screen aircraft SPA. Tap any aircraft for detail view; Focus mode shows a single large display of the closest commercial aircraft with live stats — designed to identify overhead aircraft at a glance. |
 | **Buses** | Live departure board for Twyford stops (routes 850, 127, 128, 129, 12). Leaflet.js map with live vehicle positions. |
@@ -77,6 +78,7 @@ proxying and data fetching happen on the Pi. The Pi serves the dashboard HTML di
 ```
 dashboard.html          Single-file SPA — all views, CSS, JS
 aircraft.html           Standalone full-screen aircraft SPA (served at /aircraft)
+trains.html             Standalone full-screen trains SPA (served at /trains)
 transport-proxy.py      Pi backend: all API proxying + static file serving
 cast-server.py          Pi: Chromecast discovery and control (port 9998)
 shutdown-server.py      Joggler: graceful power-off via power button (port 9999)
@@ -91,7 +93,7 @@ icons/                  Weather icons (MAm TV set, 92 PNGs) + station/camera log
 
 **Not in this repository** (created at runtime or contain credentials):
 - `hive-tokens.json`, `hive-credentials.json` — Hive/Cognito auth tokens (mode 600)
-- `.env` — BODS API key
+- `.env` — BODS API key, Last.fm API key, RTT refresh token
 - `bus-stops.json`, `bus-route-stops.json` — cached from Overpass/Transport API
 - `logos/`, `aircraft-info/`, `airport-names.json` — downloaded and cached airline logos, aircraft metadata, and airport names
 

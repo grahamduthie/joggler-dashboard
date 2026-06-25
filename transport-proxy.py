@@ -144,6 +144,7 @@ BODS_ENV_FILE   = '/home/gduthie/twyford-dashboard/.env'
 BODS_API_KEY    = ''   # loaded from BODS_ENV_FILE at startup
 LASTFM_API_KEY  = ''   # loaded from BODS_ENV_FILE at startup
 SKYLINK_API_KEY = ''   # loaded from BODS_ENV_FILE at startup
+RTT_REFRESH_TOKEN = ''  # loaded from BODS_ENV_FILE at startup
 BODS_URL       = ('https://data.bus-data.dft.gov.uk/api/v1/datafeed/'
                   '?api_key={key}&operatorRef={op}')
 BODS_OPERATORS = ['RBUS', 'CSLB', 'CTNY']
@@ -596,7 +597,7 @@ def _hive_fetch_temps():
 # ── BODS helpers ─────────────────────────────────────────────────────────────
 
 def _load_env():
-    global BODS_API_KEY, LASTFM_API_KEY, SKYLINK_API_KEY
+    global BODS_API_KEY, LASTFM_API_KEY, SKYLINK_API_KEY, RTT_REFRESH_TOKEN
     try:
         with open(BODS_ENV_FILE) as f:
             for line in f:
@@ -610,6 +611,8 @@ def _load_env():
                         LASTFM_API_KEY = v
                     elif k == 'SKYLINK_API_KEY':
                         SKYLINK_API_KEY = v
+                    elif k == 'RTT_REFRESH_TOKEN':
+                        RTT_REFRESH_TOKEN = v
     except Exception:
         pass
 
@@ -1002,6 +1005,195 @@ def _fetch_icy_nowplaying(stream_url):
     return m.group(1).strip() if m else None
 
 
+# ── RTT (Real Time Trains) API ───────────────────────────────────────────────
+
+RTT_API_BASE     = 'https://data.rtt.io'
+RTT_TTL          = 30   # seconds proxy cache
+
+# Offset (minutes) from Reading departure to estimated Twyford pass time.
+# DOWN trains (ML/DML): train came from London, passed Twyford then arrived Reading.
+# UP trains (UML/UDL):  train left Reading heading east, passes Twyford on way to London.
+_RTT_RDG_OFFSETS = {'ML': -4, 'DML': -4, 'UML': 3, 'UDL': 3}
+_RTT_MAIN_CODES  = frozenset(_RTT_RDG_OFFSETS)
+
+# Destination descriptions that indicate an UP (towards London) service
+_RTT_UP_DESTS = {
+    'London Paddington', 'Paddington', 'London Paddington (EL)',
+    'Abbey Wood', 'Shenfield',
+    'Heathrow Terminal 4', 'Heathrow Terminal 5', 'Heathrow Terminals 1-3',
+}
+
+_rtt_lock         = threading.Lock()
+_rtt_access_token = ''
+_rtt_token_expiry = 0.0
+_rtt_trains_ts    = 0.0
+_rtt_trains_data  = None
+
+
+def _rtt_get_token():
+    global _rtt_access_token, _rtt_token_expiry
+    now = time.time()
+    with _rtt_lock:
+        if _rtt_access_token and now < _rtt_token_expiry - 60:
+            return _rtt_access_token
+        if not RTT_REFRESH_TOKEN:
+            return ''
+        try:
+            req = urllib.request.Request(
+                RTT_API_BASE + '/api/get_access_token',
+                headers={'Authorization': 'Bearer ' + RTT_REFRESH_TOKEN,
+                         'User-Agent': 'Joggler-Dashboard/1.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                d = json.loads(resp.read())
+            _rtt_access_token = d['token']
+            vu = d['validUntil'].replace('Z', '+00:00')
+            _rtt_token_expiry = datetime.datetime.fromisoformat(vu).timestamp()
+            return _rtt_access_token
+        except Exception as e:
+            print(f'RTT token refresh: {e}')
+            return ''
+
+
+def _rtt_location_query(code, time_from_iso, window_min=100):
+    token = _rtt_get_token()
+    if not token:
+        return []
+    url = (RTT_API_BASE + '/gb-nr/location'
+           + '?code=' + code
+           + '&timeFrom=' + quote(time_from_iso)
+           + '&timeWindow=' + str(window_min))
+    try:
+        req = urllib.request.Request(url, headers={
+            'Authorization': 'Bearer ' + token,
+            'User-Agent': 'Joggler-Dashboard/1.0',
+        })
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return json.loads(resp.read()).get('services', [])
+    except Exception as e:
+        print(f'RTT location {code}: {e}')
+        return []
+
+
+def _rtt_normalise(svc, confirmed, line_offset=0):
+    sm  = svc.get('scheduleMetadata', {})
+    td  = svc.get('temporalData', {})
+    lm  = svc.get('locationMetadata', {})
+    arr = td.get('arrival') or {}
+    dep = td.get('departure') or {}
+    pas = td.get('pass') or {}
+    best = dep if dep else (arr if arr else pas)
+
+    sched_iso  = best.get('scheduleAdvertised', '')
+    actual_iso = best.get('realtimeActual', '')
+    forecast_iso = best.get('realtimeForecast', '')
+    late_min   = best.get('realtimeAdvertisedLateness') or 0
+    cancelled  = best.get('isCancelled', False)
+
+    dest_name  = (svc.get('destination') or [{}])[0].get('location', {}).get('description', '')
+    orig_name  = (svc.get('origin') or [{}])[0].get('location', {}).get('description', '')
+    orig_dep   = ((svc.get('origin') or [{}])[0].get('temporalData') or {}).get('scheduleAdvertised', '')
+    dest_arr   = ((svc.get('destination') or [{}])[0].get('temporalData') or {}).get('scheduleAdvertised', '')
+
+    is_up = (dest_name in _RTT_UP_DESTS
+             or 'London Paddington' in dest_name
+             or 'Abbey Wood' in dest_name)
+    direction = 'up' if is_up else 'down'
+
+    line_code  = lm.get('line', {}).get('planned', '')
+    platform   = lm.get('platform', {}).get('planned', '')
+    num_veh    = lm.get('numberOfVehicles')
+
+    if confirmed:
+        track      = 'Relief'
+        call_type  = 'STOP' if td.get('displayAs') == 'CALL' else 'PASS'
+        twy_sched  = sched_iso
+        twy_actual = actual_iso or forecast_iso
+    else:
+        track      = 'Main'
+        call_type  = 'PASS'
+        twy_actual = ''
+        if sched_iso:
+            try:
+                dt = datetime.datetime.fromisoformat(sched_iso.replace('Z', '+00:00'))
+                twy_sched = (dt + datetime.timedelta(minutes=line_offset)).isoformat()
+            except Exception:
+                twy_sched = sched_iso
+        else:
+            twy_sched = ''
+
+    return {
+        'uid':       sm.get('uniqueIdentity', ''),
+        'headcode':  sm.get('trainReportingIdentity', ''),
+        'op_code':   sm.get('operator', {}).get('code', ''),
+        'op_name':   sm.get('operator', {}).get('name', ''),
+        'passenger': sm.get('inPassengerService', True),
+        'call_type': call_type,
+        'direction': direction,
+        'track':     track,
+        'origin':    orig_name,
+        'dest':      dest_name,
+        'orig_dep':  orig_dep,
+        'dest_arr':  dest_arr,
+        'twy_sched': twy_sched,
+        'twy_actual': twy_actual,
+        'late_min':  late_min if not cancelled else None,
+        'cancelled': cancelled,
+        'status':    td.get('status'),
+        'platform':  platform,
+        'confirmed': confirmed,
+        'num_veh':   num_veh,
+    }
+
+
+def _rtt_build_trains():
+    global _rtt_trains_ts, _rtt_trains_data
+    now = time.time()
+    with _lock:
+        if _rtt_trains_data is not None and now - _rtt_trains_ts < RTT_TTL:
+            return _rtt_trains_data
+
+    from_dt   = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)
+    time_from = from_dt.strftime('%Y-%m-%dT%H:%M:%S')
+
+    twy_svcs = _rtt_location_query('TWYFORD', time_from, 100)
+    rdg_svcs = _rtt_location_query('RDG',     time_from, 100)
+
+    trains   = []
+    seen     = set()
+
+    for svc in twy_svcs:
+        uid = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
+        seen.add(uid)
+        t = _rtt_normalise(svc, confirmed=True)
+        if t['twy_sched']:
+            trains.append(t)
+
+    for svc in rdg_svcs:
+        uid  = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
+        if uid in seen:
+            continue
+        td   = svc.get('temporalData', {})
+        lm   = svc.get('locationMetadata', {})
+        line = lm.get('line', {}).get('planned', '')
+        if line not in _RTT_MAIN_CODES:
+            continue
+        if td.get('displayAs') != 'CALL':
+            continue
+        seen.add(uid)
+        offset = _RTT_RDG_OFFSETS[line]
+        t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
+        if t['twy_sched']:
+            trains.append(t)
+
+    trains.sort(key=lambda t: t.get('twy_sched') or '')
+    result = {'trains': trains, 'ts': int(now)}
+
+    with _lock:
+        _rtt_trains_data = result
+        _rtt_trains_ts   = now
+    return result
+
+
 # ── HTTP server ──────────────────────────────────────────────────────────────
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -1049,6 +1241,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._respond(200, 'text/plain', b'ok')
         elif parsed.path == '/aircraft':
             self._static('/aircraft.html')
+        elif parsed.path == '/trains':
+            self._static('/trains.html')
+        elif parsed.path == '/api/trains':
+            self._trains(qs)
         else:
             self._static(parsed.path)
 
@@ -1599,6 +1795,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with _lock:
             _cache[key] = (now, data)
         self._json(data)
+
+    def _trains(self, qs):
+        try:
+            data = _rtt_build_trains()
+            self._json(data)
+        except Exception as e:
+            self._respond(502, 'text/plain', str(e).encode())
 
     def _static(self, path):
         if '..' in path:

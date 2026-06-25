@@ -6,7 +6,8 @@ An O2 Joggler (OpenPeak OpenFrame 1) repurposed as a smart home kiosk for Twyfor
 displays a full-screen touch-driven dashboard with live weather (including indoor temperatures from
 Hive heating), internet radio (30+ stations, with Chromecast casting), WagtailCam live
 stream/timelapse, trains from Twyford station, flights radar, and a live bus departure board
-with map.
+with map. Standalone SPAs at `/aircraft` and `/trains` provide detailed full-screen views of
+nearby aircraft and passing trains respectively.
 
 The original Joggler OS is non-functional. The device runs openframe-linux (Debian Trixie) on a
 USB stick and acts as a **thin client**: it runs Chromium in kiosk mode pointed at a Raspberry Pi
@@ -205,6 +206,7 @@ Host 172.16.10.179
 ```
 dashboard.html              # The kiosk SPA (single file, all views)
 aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
+trains.html                 # Standalone trains SPA (served at /trains)
 transport-proxy.py          # API proxy + static file server (port 5001)
 cast-server.py              # Chromecast discovery/control (port 9998)
 hive-setup.py               # Interactive Hive auth setup (run once to obtain tokens)
@@ -212,7 +214,7 @@ hls.min.js                  # HLS.js library (served statically to browser)
 
 hive-tokens.json            # Hive/Cognito auth tokens + home_id (mode 600)
 hive-credentials.json       # Hive login credentials for auto-reauth (mode 600)
-.env                        # BODS_API_KEY + LASTFM_API_KEY (mode 600)
+.env                        # BODS_API_KEY + LASTFM_API_KEY + RTT_REFRESH_TOKEN (mode 600)
 
 icons/
   wsymbol_*.png             # 92 PNG weather icons (MAm TV set, 128×128)
@@ -242,6 +244,7 @@ cast-server.py              # Chromecast discovery/control (port 9998, 0.0.0.0)
 ```
 dashboard.html              # Source (deploy to Pi with scp)
 aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
+trains.html                 # Standalone trains SPA (served at /trains)
 transport-proxy.py          # Source
 cast-server.py              # Source
 shutdown-server.py          # Source
@@ -541,6 +544,71 @@ or TV alongside the main Joggler kiosk.
   cards still have adequate space.
 - All interactive elements carry `touch-action: manipulation` for instant tap response.
 
+### trains.html — Standalone Full-Screen Trains SPA
+
+Served at `GET /trains` — a separate page from `dashboard.html`, showing real-time train
+information for all trains passing the house (~200 m east of Twyford station). The house is
+adjacent to four tracks: two Main Line tracks (fast GWR inter-city and freight) and two Relief
+Line tracks (GWR local and Elizabeth Line stopping services).
+
+**Data source:** Real Time Trains (RTT) API v2 (`data.rtt.io`). RTT is queried with two calls
+per 30-second polling cycle:
+
+1. **Twyford query** (`/gb-nr/location?code=TWYFORD`): all trains that call or pass Twyford —
+   primarily Elizabeth Line and GWR local on the Relief Line. These are `confirmed=true`.
+
+2. **Reading estimation** (`/gb-nr/location?code=RDG`): Main Line trains (line codes `ML`,
+   `DML`, `UML`) not already returned by the Twyford query. A directional time offset is applied
+   to estimate the Twyford pass time: Down Main (DML → westbound) −4 min before Reading
+   departure; Up Main (UML → eastbound) +3 min after Reading departure. These are
+   `confirmed=false` (estimated pass).
+
+**Why two sources:** Fast-line GWR IETs (Bristol, Cardiff, Swansea, etc.) do not have Twyford
+as a WTT timing point — Twyford is only a pass-through with no scheduled entry in their
+working timetable. Signal berth points `TWYF112`, `TWYF632`, `TWYFDW` exist in RTT but return
+zero services (TRUST berth points are not WTT timing points). The Reading estimation approach
+adds ~26 extra trains per 2-hour window (44 total vs 18 from Twyford alone).
+
+**Known gap:** Freight trains are not reliably timetabled at Reading either. For complete
+freight coverage, the Network Rail TRUST feed (STOMP/ActiveMQ via
+`publicdatafeeds.networkrail.co.uk`) would be required.
+
+**Three display modes** (toggle buttons in top bar):
+
+- **RECENT** — focus view for the most recent train that passed (within last 10 min)
+- **NEXT** — focus view for the next train due (within 2 min past → future)
+- **LIST** — scrollable departure board; tapping a row opens a focus view for that train
+
+**Focus view elements:**
+- Header bar: operator name + gradient background in operator brand colour
+- Large headcode (e.g. `1L35`) + track badge (`Main`/`Relief`) + call type badge (`STOP`/`PASS`/`PASS (est)`)
+- Route strip: origin → **TWYFORD** (amber) → destination
+- Four stat cards: scheduled/actual time, delay (minutes), track, vehicle count
+
+**Operator colour dict (`OPS` in trains.html):**
+
+| Code | Operator | Background |
+|------|----------|------------|
+| GW | GWR | `#007a4d` green |
+| XR | Elizabeth Line | `#7156a5` purple |
+| XC | CrossCountry | `#a61530` red |
+| HX | Heathrow Express | `#532885` indigo |
+| GB | GBRf | `#1e3050` navy / `#ffdd00` amber |
+| DW / DB | DB Cargo | `#db0a17` red |
+| FL | Freightliner | `#1a6b2a` green |
+| ZZ | Colas Rail | `#f05a24` orange |
+| ZN | Network Rail | `#d4ac0d` yellow |
+
+**Direction logic:** `direction=up` if destination is in the set of London termini (London
+Paddington, Abbey Wood, Shenfield, Heathrow termini). Otherwise `down`. Henley branch trains
+show `down` which is approximate.
+
+**Token management:** RTT uses a long-lived refresh token (stored as `RTT_REFRESH_TOKEN` in
+Pi's `.env`) exchanged for a short-lived access token (~20 min) at `/api/get_access_token`.
+The proxy caches the access token and refreshes it 60 s before expiry without blocking requests.
+
+**Rate limits:** 30 req/min, 750/hr, 9000/day. Two queries per 30 s = 5,760/day (within limit).
+
 ### Buses View
 
 Two tabs: **Departures** and **Map**. The Buses tile opens on Departures.
@@ -600,12 +668,14 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/airline-logo?iata=XX` | pics.avs.io (file-cached) | File permanent | |
 | `GET /api/aircraft-info?hex=XXXXXX` | OpenSky metadata (file-cached) | 30 days (mtime check) | |
 | `GET /api/airport-name?iata=XXX` | `airport-names.json` (OurAirports CSV, downloaded once) | In-memory for life of process | Returns `{"name": "…"}` or `{"name": null}` |
+| `GET /api/trains` | RTT API (Twyford + Reading, combined) | 30 s | Two-source: confirmed stops + estimated Main Line passes |
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
 | `GET /api/radio/nowplaying?url=…` | ICY stream metadata | 25 s | StreamTitle from ICY |
 | `GET /api/radio/nowplaying-rp?chan=N` | Radio Paradise API | 20 s | |
 | `GET /api/radio/track-info?artist=…&title=…` | Last.fm API | 3600 s | Bio, album, listeners, artwork, tags, similar artists |
 | `GET /health` | — | — | Returns `ok` |
 | `GET /aircraft` | Static — aircraft.html | — | Standalone full-screen aircraft SPA |
+| `GET /trains` | Static — trains.html | — | Standalone full-screen trains SPA |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
 **National Rail SOAP details:**
@@ -668,6 +738,7 @@ other device.
 | WagtailCam thumbnail | Browser | Home screen | 5 min (3 calls) | ~864 | None |
 | WagtailCam MJPEG | Browser | WagtailCam view | Reconnect/5 min | Low | None |
 | National Rail SOAP | Proxy | Tile (120 s) + trains view | 90 s TTL | ~720 + view | Fair use |
+| RTT API (Twyford + Reading) | Proxy | trains.html (30 s) | 30 s TTL | ~5,760 (2×/30 s) | 9,000/day |
 | ADS-B LOL | Proxy | Tile (60 s) + flights view | 60 s TTL | ~720 + view | Generous |
 | BODS SIRI-VM | Proxy | Bus map tab | 30 s | Low | None |
 | Passenger platform scrape | Proxy | Bus departures tab | 30 s TTL | ~2,880 | None |
@@ -890,8 +961,11 @@ ssh gduthie@172.16.10.136 'pgrep -af python3'
 # Check what servers are running on the Joggler
 ssh of@172.16.10.168 'pgrep -af python3'
 
-# Test train departures
+# Test train departures (National Rail — dashboard tile)
 ssh gduthie@172.16.10.136 'curl -s "http://localhost:5001/api/departures?station=TWY&rows=5"'
+
+# Test RTT trains endpoint (trains.html)
+ssh gduthie@172.16.10.136 'curl -s "http://localhost:5001/api/trains" | python3 -m json.tool | head -40'
 
 # Test bus departures (Twyford Waggon and Horses stop)
 ssh gduthie@172.16.10.136 'curl -s "http://localhost:5001/api/bods/departures?stop=035091060001"'
@@ -931,7 +1005,7 @@ ssh of@172.16.10.168 'sudo of-expand'
 
 ## Current Status
 
-Everything working as of 2026-06-23.
+Everything working as of 2026-06-25.
 
 - [x] Joggler: Boot, WiFi, SSH
 - [x] Autologin → X → Openbox → kiosk chain (Chromium → Pi)
@@ -967,3 +1041,10 @@ Everything working as of 2026-06-23.
 - [x] aircraft.html: route not-found state cached to avoid stuck "loading" display
 - [x] aircraft.html: responsive layout — portrait/narrow stacks map above list; clamp() font sizes ensure readability on phones (390 px); compact topbar ≤600 px; landscape phone reduces focus view spacing
 - [x] aircraft.html: focus view heading card — space between direction letters and rotating arrow
+- [x] trains.html: standalone full-screen trains SPA at /trains
+- [x] trains.html: RECENT / NEXT / LIST view modes with mode toggle buttons
+- [x] trains.html: focus view — operator branding header, headcode, track/call-type badges, route strip, stat cards
+- [x] trains.html: LIST mode — scrollable departure board; tap row → focus view for that train
+- [x] trains.html: two-source RTT data (Twyford confirmed stops + Reading Main Line estimation)
+- [x] trains.html: operator colour dict (GWR, Elizabeth Line, CrossCountry, Heathrow Express, freight operators)
+- [x] trains.html: RTT token exchange + caching in transport-proxy (60 s pre-expiry refresh)
