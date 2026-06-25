@@ -143,6 +143,7 @@ threading.Thread(target=_load_airport_names, daemon=True).start()
 BODS_ENV_FILE   = '/home/gduthie/twyford-dashboard/.env'
 BODS_API_KEY    = ''   # loaded from BODS_ENV_FILE at startup
 LASTFM_API_KEY  = ''   # loaded from BODS_ENV_FILE at startup
+SKYLINK_API_KEY = ''   # loaded from BODS_ENV_FILE at startup
 BODS_URL       = ('https://data.bus-data.dft.gov.uk/api/v1/datafeed/'
                   '?api_key={key}&operatorRef={op}')
 BODS_OPERATORS = ['RBUS', 'CSLB', 'CTNY']
@@ -595,7 +596,7 @@ def _hive_fetch_temps():
 # ── BODS helpers ─────────────────────────────────────────────────────────────
 
 def _load_env():
-    global BODS_API_KEY, LASTFM_API_KEY
+    global BODS_API_KEY, LASTFM_API_KEY, SKYLINK_API_KEY
     try:
         with open(BODS_ENV_FILE) as f:
             for line in f:
@@ -607,6 +608,8 @@ def _load_env():
                         BODS_API_KEY = v
                     elif k == 'LASTFM_API_KEY':
                         LASTFM_API_KEY = v
+                    elif k == 'SKYLINK_API_KEY':
+                        SKYLINK_API_KEY = v
     except Exception:
         pass
 
@@ -1030,6 +1033,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._airline_logo(qs)
         elif parsed.path == '/api/aircraft-info':
             self._aircraft_info(qs)
+        elif parsed.path == '/api/aircraft-info-test':
+            self._aircraft_info_test(qs)
         elif parsed.path == '/api/airport-name':
             self._airport_name(qs)
         elif parsed.path == '/api/radio/resolve':
@@ -1435,39 +1440,84 @@ class Handler(http.server.BaseHTTPRequestHandler):
         cache_path = os.path.join(cache_dir, hex_code + '.json')
         if os.path.exists(cache_path):
             try:
-                age = time.time() - os.path.getmtime(cache_path)
-                if age < 30 * 86400:
-                    with open(cache_path) as f:
-                        self._json(json.load(f))
-                    return
+                with open(cache_path) as f:
+                    self._json(json.load(f))
+                return
             except Exception:
                 pass
         result = {}
-        fetched = False
+        # Try UK CAA G-INFO first (free, no key, covers G- registered aircraft)
         try:
-            url = 'https://opensky-network.org/api/metadata/aircraft/icao/' + hex_code
-            req = urllib.request.Request(url, headers={'User-Agent': 'Joggler-Dashboard/1.0'})
+            hex_upper = hex_code.upper()
+            search_body = json.dumps({'ICAO24BitHex': hex_upper, 'IncludeDeregistered': False}).encode()
+            req = urllib.request.Request(
+                'https://ginfoapi.caa.co.uk/api/aircraft/search',
+                data=search_body,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Origin': 'https://www.caa.co.uk',
+                    'Referer': 'https://www.caa.co.uk/',
+                    'User-Agent': 'Mozilla/5.0',
+                },
+            )
             with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read())
-            if data.get('built'):
-                result['built'] = data['built'][:4]
-                result['built_label'] = 'Built'
-            elif data.get('firstFlightDate'):
-                result['built'] = data['firstFlightDate'][:4]
-                result['built_label'] = 'Built'
-            elif data.get('registered'):
-                result['built'] = data['registered'][:4]
-                result['built_label'] = "Reg'd"
-            fetched = True
+                matches = json.loads(resp.read())
+            if matches:
+                aircraft_id = matches[0].get('AircraftID')
+                if aircraft_id:
+                    req2 = urllib.request.Request(
+                        f'https://ginfoapi.caa.co.uk/api/aircraft/details/{aircraft_id}',
+                        headers={
+                            'Origin': 'https://www.caa.co.uk',
+                            'Referer': 'https://www.caa.co.uk/',
+                            'User-Agent': 'Mozilla/5.0',
+                        },
+                    )
+                    with urllib.request.urlopen(req2, timeout=10) as resp2:
+                        detail = json.loads(resp2.read())
+                    year = detail.get('AircraftDetails', {}).get('YearBuild')
+                    if year:
+                        result['built'] = str(year)
+                        result['built_label'] = 'Built'
         except Exception:
             pass
-        if fetched:
+        # Fall back to SkyLink API if CAA had no result and key is configured
+        if not result and SKYLINK_API_KEY:
+            try:
+                url = 'https://skylink-api.p.rapidapi.com/v3/aircraft/icao24/' + hex_code
+                req = urllib.request.Request(url, headers={
+                    'X-RapidAPI-Key':  SKYLINK_API_KEY,
+                    'X-RapidAPI-Host': 'skylink-api.p.rapidapi.com',
+                })
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                year = data.get('aircraft', {}).get('year_built', '')
+                if year:
+                    result['built'] = str(year)
+                    result['built_label'] = 'Built'
+            except Exception:
+                pass
+        if result:
             try:
                 with open(cache_path, 'w') as f:
                     json.dump(result, f)
             except Exception:
                 pass
         self._json(result)
+
+    def _aircraft_info_test(self, qs):
+        hex_code = qs.get('hex', [''])[0].strip().lower()
+        if not re.match(r'^[0-9a-f]{6}$', hex_code):
+            self._respond(400, 'text/plain', b'Bad hex')
+            return
+        try:
+            url = 'https://opensky-network.org/api/metadata/aircraft/icao/' + hex_code
+            req = urllib.request.Request(url, headers={'User-Agent': 'Joggler-Dashboard/1.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = resp.read()
+            self._respond(200, 'application/json', raw)
+        except Exception as e:
+            self._json({'error': str(e)})
 
     def _airport_name(self, qs):
         iata = qs.get('iata', [''])[0].strip().upper()

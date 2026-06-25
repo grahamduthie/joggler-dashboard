@@ -231,6 +231,7 @@
     user-select: none;
   }
   .topbar-btn:hover, .topbar-btn:active { background: #2a5a80; color: #ffffff; }
+  .topbar-btn.active { background: #2a5a80; color: #ffffff; border-color: #4a9acc; }
 
   /* ── Location settings modal ── */
   #settings-overlay {
@@ -419,7 +420,8 @@
     text-align: right;
   }
   .cv-route {
-    flex-shrink: 0;
+    flex: 1;
+    min-height: 0;
     padding: 2vh 3vw;
     border-bottom: 2px solid #1e3a5a;
     display: flex;
@@ -438,9 +440,8 @@
   .cv-times { font-size: 2.2vw; color: #7fb3d3; margin-top: 0.8vh; }
   .cv-route-loading { font-size: 2vw; color: #4a7a9a; font-style: italic; padding: 1vh 0; }
   .cv-stats {
-    flex: 1;
+    flex-shrink: 0;
     display: flex;
-    min-height: 0;
     border-bottom: 2px solid #1e3a5a;
   }
   .cv-stat-card {
@@ -698,6 +699,7 @@
   <div id="ac-title">&#9992; Aircraft Nearby</div>
   <div id="ac-count">Loading&hellip;</div>
   <div id="location-btn" class="topbar-btn" onmousedown="toggleSettings()">&#9881; Location</div>
+  <div id="filter-btn" class="topbar-btn" onmousedown="toggleCommercialFilter()">Cml only</div>
   <div id="focus-btn" class="topbar-btn" onmousedown="toggleClosest()">Focus</div>
   <div id="ac-clock"></div>
 </div>
@@ -994,7 +996,8 @@ var selectedAc   = null;
 var trails       = {};
 var TRAIL_MAX    = 80;
 var acInfoCache  = {};
-var closestMode  = false;
+var closestMode      = false;
+var commercialOnly   = false;
 var extraAirports = {};  // iata → name (null = fetch in progress / failed, '' = unknown)
 
 // ── Location (URL params override localStorage override defaults) ─────────────
@@ -1048,6 +1051,23 @@ function setupMap() {
   canvas.height = side.offsetHeight;
   flightMap.invalidateSize();
   drawRadar();
+
+  canvas.addEventListener('mousedown', function(e) {
+    if (closestMode) return;
+    var rect = canvas.getBoundingClientRect();
+    var cx = e.clientX - rect.left;
+    var cy = e.clientY - rect.top;
+    var HIT = 30;
+    var best = null, bestD = HIT;
+    aircraft.forEach(function(ac) {
+      if (!ac.lat || !ac.lon) return;
+      if (commercialOnly && !isCommercial(ac)) return;
+      var p = flightMap.latLngToContainerPoint(L.latLng(ac.lat, ac.lon));
+      var d = Math.sqrt((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy));
+      if (d < bestD) { bestD = d; best = ac; }
+    });
+    if (best) { e.stopPropagation(); selectAc(best.hex); }
+  });
 }
 
 function mapHome()    { if (flightMap) flightMap.setView([CFG_LAT, CFG_LON], 9, {animate: false}); }
@@ -1111,6 +1131,7 @@ function drawRadar() {
 
   aircraft.forEach(function(ac) {
     if (!ac.lat || !ac.lon) return;
+    if (commercialOnly && !isCommercial(ac)) return;
     var p = flightMap.latLngToContainerPoint(L.latLng(ac.lat, ac.lon));
     if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) return;
     ac._px = p;
@@ -1145,6 +1166,20 @@ function drawRadar() {
       ctx.fillText(cs, p.x + 13, p.y + 5);
     }
   });
+}
+
+// ── Commercial aircraft filter ────────────────────────────────
+function isCommercial(ac) {
+  var cs = (ac.flight || '').trim();
+  return cs.length >= 4 && !!AIRLINES[cs.substring(0, 3)];
+}
+
+function toggleCommercialFilter() {
+  commercialOnly = !commercialOnly;
+  var btn = document.getElementById('filter-btn');
+  if (btn) btn.className = 'topbar-btn' + (commercialOnly ? ' active' : '');
+  drawRadar();
+  renderList();
 }
 
 // ── Haversine distance (nm) ───────────────────────────────────
@@ -1443,7 +1478,7 @@ function buildAcInfoHtml(ac) {
   if (acType) parts.push(acType);
   if (ac.r)   parts.push(ac.r);
   var cached = acInfoCache[ac.hex];
-  if (cached && cached.year) parts.push('Built ' + cached.year);
+  if (cached && cached.year) parts.push((cached.label || 'Built') + ' ' + cached.year);
   return parts.join('  &middot;  ') || '&mdash;';
 }
 
@@ -1469,9 +1504,7 @@ function fetchAircraftInfo(hex) {
   xhr.onload = function() {
     try {
       var info = JSON.parse(xhr.responseText);
-      var year = '';
-      if (info.registered) year = String(info.registered).substring(0, 4);
-      acInfoCache[hex] = {year: year};
+      acInfoCache[hex] = {year: info.built || '', label: info.built_label || 'Built'};
       if (selectedAc && selectedAc.hex === hex) updateDetailStats(selectedAc);
       if (closestMode) updateClosestView();
     } catch(e) { delete acInfoCache[hex]; }
@@ -1538,7 +1571,6 @@ function showDetail(ac) {
   detEl.style.display   = 'flex';
 
   if (cs && !routeCache[cs]) fetchRoute(cs);
-  fetchAircraftInfo(ac.hex);
 }
 
 // ── Location settings ─────────────────────────────────────────
@@ -1708,7 +1740,7 @@ function updateClosestView() {
   var acType  = AC_TYPES[ac.t] || ac.t || '';
   if (acType) acParts.push(acType);
   if (ac.r)   acParts.push(ac.r);
-  if (cached && cached.year) acParts.push('Built ' + cached.year);
+  if (cached && cached.year) acParts.push((cached.label || 'Built') + ' ' + cached.year);
 
   var acInfoRightHtml = acParts.length
     ? '<div class="cv-ac-info-right">' + acParts.map(function(p) { return '<div>' + p + '</div>'; }).join('') + '</div>'
