@@ -584,9 +584,12 @@ are not audible from the house (~200 m east of the station).
 
 - **RECENT** — focus view for the most recent train that passed (within last 10 min)
 - **NEXT** — focus view for the next train due. If 2 or more trains are expected within
-  90 seconds of each other, a compact stacked multi-card view shows all of them simultaneously,
-  each with operator badge, headcode, route, track direction, and time
-- **LIST** — scrollable departure board; tapping a row opens a focus view for that train
+  90 seconds of each other, a stacked multi-card view shows all of them simultaneously.
+  Each card is a compressed version of the single focus view: operator header, route band
+  (Origin → TWYFORD → Destination, horizontal), and 4 stat cards (At Twyford, Delay, Track,
+  Vehicles). All the same information as the single-train view, at ~60% the font size.
+- **LIST** — scrollable departure board with 7 columns: Sched, Actual, HC, Operator,
+  From → To, Track, Status. Tapping a row opens a focus view for that train.
 
 **Focus view elements:**
 - Header bar: operator name + gradient background in operator brand colour
@@ -621,6 +624,19 @@ the grace period before removing a train from NEXT depends on direction relative
 - UP trains (London direction): train departs Twyford heading east, passes the house ~30 s
   later → grace = 30 s after `twy_actual`
 - Unconfirmed/estimated trains: grace = 120 s (schedule is approximate)
+
+**RECENT/NEXT mutual exclusion:** A train cannot appear in both RECENT and NEXT simultaneously.
+RECENT uses the same grace thresholds but inverted — a train only moves from NEXT to RECENT
+once it has cleared its grace window (`ms < now - grace`). This avoids a confirmed UP train
+(30 s grace) appearing in NEXT (not yet expired) and RECENT (just passed) at the same time.
+
+**Countdown features:**
+- Topbar shows countdown in seconds to the next API refresh (ticks every 1 s via `tickTopbar()`)
+- Estimated trains show a half-minute resolution countdown below the departure time:
+  "in about 2½ mins", "in about 30 secs", "passing now" (< 15 s)
+- Polling: trains.html polls proxy every 15 s; proxy only hits RTT every 30 s (TTL absorbs extra).
+  When TRUST fires at STANOX 87014 (stopping train), proxy invalidates RTT cache immediately
+  (`_rtt_trains_ts = 0`) so the confirmed pass time appears within 1–2 s of the TRUST event.
 
 **Freight display:** Freight trains (`passenger=false`) show a green `FRET` badge (background
 `#2d3d1a`, text `#a0c060`) instead of the operator colour. The focus view shows the freight
@@ -934,7 +950,8 @@ Enquiries Darwin feed, which is gzip-compressed).
 | Topic | Feed | Rate | Description |
 |-------|------|------|-------------|
 | `TRAIN_MVT_ALL_TOC` | Train Movements | Up to 600/min | TRUST system — every train passing or calling at a timing point. Includes freight and non-stopping trains. Messages are batched. **The most useful feed for trains.html.** |
-| `TD_ALL_SIG_AREA` | Train Describer (TD) | Up to 6000/min | Berth-level signal box data. More granular than Train Movements but requires berth mapping. Twyford berths: `TWYF112`, `TWYF632`, `TWYFDW`. |
+| `TD_ALL_SIG_AREA` | Train Describer (TD) | Up to 6000/min | All signal areas combined — very high volume. Use area-specific topics instead. |
+| `TD_M_SIG_AREA` | Train Describer (TD) | Medium | Paddington/Thames Valley panel only. Covers the GWR main line through Twyford. The `M` area code is visible in the Traksy URL `traksy.uk/live/M+63+TWYFORD`. TD messages include CA (berth step), CB (berth cancel), CC (berth interpose), CT (heartbeat). Berth IDs near Twyford visible at that URL. Subscribe to this topic and filter by berth ID client-side — much lower volume than ALL. **Currently being explored for exact position data.** |
 | `VSTP_ALL` | VSTP | Low volume | Very Short Term Planning — late-notice schedule additions not in the daily SCHEDULE feed. |
 | `RTPPM_ALL` | RTPPM | 1/min | Aggregate performance metrics. Not useful for per-train display. |
 | `TSR_ALL_ROUTE` | TSR | ~11/week | Temporary speed restrictions from the Weekly Operating Notice. |
@@ -1371,3 +1388,11 @@ Everything working as of 2026-06-25.
 - [x] transport-proxy.py: BST/UTC timezone fix — naive ISO strings now treated as Europe/London (ZoneInfo), not system-default naive
 - [x] transport-proxy.py: TRUST headcode extraction fixed — train_id[2:6] not [:4] ([:4] returned schedule prefix + partial headcode)
 - [x] transport-proxy.py: TRUST deduplication fixed — headcode+time matching against RTT data (was UID matching, which failed because TRUST UIDs are 'nr:' prefixed)
+- [x] trains.html: list view 7-column departure board (Sched, Actual, HC, Operator, From→To, Track, Status)
+- [x] trains.html: topbar countdown to next API refresh (seconds, ticks every 1 s)
+- [x] trains.html: estimated train countdown at half-minute resolution (in about 2½ mins, etc.)
+- [x] trains.html: poll interval 15 s; STOMP STANOX 87014 watch invalidates RTT cache on stopping train pass
+- [x] trains.html: multi-train NEXT view redesigned — each card mirrors single focus view (header + horizontal route band + 4 stat cards)
+- [x] trains.html: RECENT/NEXT mutual exclusion — grace period inverted so same train cannot appear in both modes
+- [ ] transport-proxy.py: switch TRUST watch from STANOX 74005 (Maidenhead, no freight) → 74023 (Twyford, freight)
+- [ ] trains.html: TD feed berth tracking — subscribe to TD_M_SIG_AREA, correlate berth steps with known trains, use for exact pass-time detection (exploring)

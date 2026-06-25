@@ -241,93 +241,168 @@ html, body {
   flex-direction: column;
   overflow: hidden;
 }
-.mv-card {
+.mvc-card {
   flex: 1;
   display: flex;
-  align-items: center;
-  gap: clamp(10px, 1.5vw, 20px);
-  padding: clamp(6px, 1.8vh, 18px) clamp(12px, 2vw, 28px);
-  border-bottom: 2px solid #1e3a5a;
+  flex-direction: column;
   min-height: 0;
+  border-bottom: 2px solid #1e3a5a;
 }
-.mv-card:last-child { border-bottom: none; }
-.mv-op-badge {
+.mvc-card:last-child { border-bottom: none; }
+
+/* Header — mirrors fv-header but smaller */
+.mvc-header {
   flex-shrink: 0;
-  width: clamp(42px, 6.5vw, 86px);
-  height: clamp(42px, 6.5vw, 86px);
+  display: flex;
+  align-items: center;
+  gap: clamp(8px, 1.5vw, 20px);
+  padding: clamp(5px, 1vh, 12px) clamp(12px, 2vw, 28px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.mvc-op-badge {
+  flex-shrink: 0;
+  width: clamp(36px, 5.5vw, 74px);
+  height: clamp(36px, 5.5vw, 74px);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: clamp(13px, 2.6vw, 36px);
+  font-size: clamp(12px, 2.4vw, 32px);
   font-weight: 900;
   line-height: 1;
   letter-spacing: -1px;
 }
-.mv-headcode {
-  font-size: clamp(26px, 5.5vw, 74px);
-  font-weight: bold;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-  line-height: 1;
-  flex-shrink: 0;
-}
-.mv-middle {
+.mvc-main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
 }
-.mv-route-str {
-  font-size: clamp(12px, 1.7vw, 22px);
-  color: #c0ccd8;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.mvc-headcode {
+  font-size: clamp(22px, 5vw, 68px);
+  font-weight: bold;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+  line-height: 1;
 }
-.mv-call {
-  font-size: clamp(10px, 1.3vw, 17px);
-  color: #7fb3d3;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.mvc-op-name {
+  font-size: clamp(11px, 1.9vw, 26px);
+  opacity: 0.85;
 }
-.mv-meta {
-  font-size: clamp(10px, 1.2vw, 16px);
-  color: #5a8fad;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.mv-right {
+.mvc-right {
   flex-shrink: 0;
   text-align: right;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 3px;
+  gap: clamp(2px, 0.4vh, 6px);
 }
-.mv-time {
-  font-size: clamp(24px, 4.8vw, 64px);
+.mvc-track-badge {
+  font-size: clamp(10px, 1.4vw, 18px);
   font-weight: bold;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-  line-height: 1;
+  letter-spacing: 1px;
+  padding: 3px 10px;
+  border-radius: 16px;
+  border: 1.5px solid rgba(255,255,255,0.3);
+  white-space: nowrap;
 }
-.mv-actual {
-  font-size: clamp(11px, 1.5vw, 19px);
+.mvc-call-badge {
+  font-size: clamp(9px, 1.1vw, 15px);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.mvc-countdown {
+  font-size: clamp(9px, 1.1vw, 14px);
+  color: #a0c8e8;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* Route — horizontal */
+.mvc-route {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  padding: clamp(3px, 0.8vh, 10px) clamp(12px, 2vw, 28px);
+  gap: clamp(6px, 1vw, 14px);
+  border-bottom: 1px solid #1e3a5a;
+  overflow: hidden;
+}
+.mvc-route-ep {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mvc-route-ep-right { align-items: flex-end; text-align: right; }
+.mvc-ep-name {
+  font-size: clamp(11px, 2vw, 26px);
+  font-weight: bold;
+  color: #e8eaf0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mvc-ep-time {
+  font-size: clamp(9px, 1.2vw, 16px);
   color: #7fb3d3;
   white-space: nowrap;
 }
-.mv-track {
-  font-size: clamp(10px, 1.4vw, 18px);
-  padding: 3px 10px;
-  border-radius: 16px;
-  border: 1.5px solid rgba(255,255,255,0.25);
+.mvc-route-arrow {
+  flex-shrink: 0;
+  font-size: clamp(14px, 2.5vw, 32px);
+  color: #3a6a8a;
+}
+.mvc-route-twy {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.mvc-twy-name {
+  font-size: clamp(13px, 2.4vw, 32px);
+  font-weight: bold;
+  color: #ffd080;
+}
+.mvc-twy-time {
+  font-size: clamp(10px, 1.4vw, 19px);
+  color: #7fb3d3;
+  text-align: center;
   white-space: nowrap;
 }
-.mv-delay {
-  font-size: clamp(10px, 1.2vw, 15px);
-  white-space: nowrap;
+
+/* Stats — mirrors fv-stats but smaller */
+.mvc-stats {
+  flex-shrink: 0;
+  display: flex;
+}
+.mvc-stat-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid #1e3a5a;
+  padding: clamp(4px, 0.8vh, 10px) clamp(4px, 0.8vw, 10px);
+  gap: clamp(1px, 0.3vh, 4px);
+}
+.mvc-stat-card:last-child { border-right: none; }
+.mvc-stat-label {
+  font-size: clamp(8px, 1vw, 13px);
+  color: #4a7a9a;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+.mvc-stat-value {
+  font-size: clamp(14px, 2.5vw, 34px);
+  font-weight: bold;
+  color: #ffffff;
+  line-height: 1;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
 }
 
 /* ── List view ────────────────────────────────────────────── */
@@ -624,7 +699,14 @@ function findTarget(trains, mode, now) {
     var cutoff = now - 10 * 60000;
     var past = trains.filter(function(t) {
       var ms = trainMs(t);
-      return ms > cutoff && ms < now + 90000;
+      if (ms < cutoff) return false;
+      // Use the same grace thresholds as NEXT, but inverted:
+      // a train is "past" only once it has cleared its grace window.
+      var grace = 120000;
+      if (t.confirmed && t.twy_actual) {
+        grace = (t.direction === 'up') ? 30000 : 0;
+      }
+      return ms < now - grace;
     });
     past.sort(function(a, b) { return trainMs(b) - trainMs(a); });
     return past.length ? [past[0]] : [];
@@ -749,66 +831,105 @@ function renderMulti(targets, now) {
   targets.forEach(function(t) {
     var op        = opStyle(t.op_code, t.passenger);
     var ms        = trainMs(t);
+    var late      = lateStr(t);
     var isEst     = !t.confirmed;
     var isBadLate = (t.late_min && t.late_min >= 5);
     var hasPassed = t.confirmed && t.twy_actual && ms < now;
+    var isStop    = t.call_type === 'STOP';
 
-    var timeDisp, timeClass;
+    var callClass = isStop ? 'badge-stop' : (isEst ? 'badge-est' : 'badge-pass');
+    var callText  = isStop ? 'Stops at Twyford'
+                  : (isEst ? 'Passing through (est.)' : 'Passes Twyford');
+
+    // Twyford time — same logic as renderFocus
+    var twyTimeHtml;
     if (t.cancelled) {
-      timeDisp = 'CNCL'; timeClass = 'stat-cancel';
+      twyTimeHtml = '<span class="stat-cancel">Cancelled</span>';
+    } else if (isEst) {
+      twyTimeHtml = '<span class="stat-est">~' + esc(fmtTimeMs(ms)) + '</span>';
     } else if (t.twy_actual) {
-      timeDisp = fmtTime(t.twy_actual);
-      timeClass = isBadLate ? 'stat-late' : 'stat-ontime';
-    } else if (isEst) {
-      timeDisp = '~' + fmtTimeMs(ms); timeClass = 'stat-est';
+      var lateClassA = isBadLate ? 'fv-route-late' : 'fv-route-ontime';
+      var lateNoteA  = isBadLate ? ' (+' + t.late_min + ' min)' : '';
+      twyTimeHtml = 'Sched ' + esc(fmtTime(t.twy_sched)) +
+                    ' <span class="' + lateClassA + '"> ✓ ' + esc(fmtTime(t.twy_actual)) + esc(lateNoteA) + '</span>';
     } else {
-      timeDisp = fmtTime(t.twy_sched);
-      timeClass = isBadLate ? 'stat-late' : '';
+      var lateClassB = isBadLate ? 'fv-route-late' : '';
+      twyTimeHtml = '<span class="' + lateClassB + '">' + esc(fmtTime(t.twy_sched)) +
+                    (late && late !== 'On time' ? ' (' + esc(late) + ')' : '') + '</span>';
     }
 
-    var routeStr = t.passenger === false
-      ? freightClass(t.headcode)
-      : (t.origin || '—') + ' → ' + (t.dest || '—');
+    var platformHtml = (isStop && t.platform)
+      ? ' <span style="color:#7fb3d3"> Plat ' + esc(t.platform) + '</span>'
+      : '';
 
-    var callStr;
-    if (t.cancelled) {
-      callStr = 'Cancelled';
-    } else if (t.call_type === 'STOP') {
-      callStr = 'Stops at Twyford' + (t.platform ? ' · Plat ' + t.platform : '');
-    } else {
-      callStr = isEst ? 'Passing through (est.)' : 'Passes Twyford';
-    }
+    // Stat cards — same as renderFocus
+    var statLabel = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
+    var statTime  = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtTime(t.twy_sched));
+    var statDelay = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
+                  : isEst ? '<span class="stat-est">N/A</span>'
+                  : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
+                  : '<span class="stat-late">' + (t.late_min > 0 ? '+' : '') + (t.late_min || '?') + ' min</span>');
+    var statTrack = trackLabel(t);
+    var statVeh   = t.num_veh ? t.num_veh + (t.num_veh === 1 ? ' coach' : ' coaches') : '—';
 
-    // Meta line: vehicles + delay/actual confirmation
-    var metaParts = [];
-    if (t.num_veh) metaParts.push(t.num_veh + (t.num_veh === 1 ? ' coach' : ' coaches'));
-    if (t.twy_actual) {
-      var aNote = (hasPassed ? 'Passed ' : '✓ ') + fmtTime(t.twy_actual);
-      if (isBadLate) aNote += ' (+' + t.late_min + ' min)';
-      metaParts.push(aNote);
-    } else if (isEst) {
-      metaParts.push(fmtCountdown(ms, now));
-    } else if (!t.cancelled) {
-      if (t.late_min === 0) metaParts.push('On time');
-      else if (t.late_min) metaParts.push((t.late_min > 0 ? '+' : '') + t.late_min + ' min');
-    }
-    var metaStr = metaParts.join(' · ');
+    var originStr = t.passenger === false
+      ? (t.direction === 'up' ? '← From west' : '← From London')
+      : (t.origin || '—');
+    var destStr = t.passenger === false
+      ? (t.direction === 'up' ? '→ To London' : '→ To west')
+      : (t.dest || '—');
 
-    html += '<div class="mv-card" style="background:linear-gradient(135deg,' + op.bg + '22 0%,transparent 60%)">' +
-      '<div class="mv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
-      '<div class="mv-headcode">' + esc(t.headcode) + '</div>' +
-      '<div class="mv-middle">' +
-        '<div class="mv-route-str">' + esc(routeStr) + '</div>' +
-        '<div class="mv-call">' + esc(callStr) + '</div>' +
-        (metaStr ? '<div class="mv-meta">' + esc(metaStr) + '</div>' : '') +
+    html +=
+      '<div class="mvc-card" style="background:linear-gradient(135deg,' + op.bg + '55 0%,' + op.bg + '11 100%)">' +
+
+      '<div class="mvc-header" style="background:linear-gradient(135deg,' + op.bg + '44 0%,transparent 100%);border-bottom:1px solid ' + op.bg + '66">' +
+        '<div class="mvc-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
+        '<div class="mvc-main">' +
+          '<div class="mvc-headcode">' + esc(t.headcode) + '</div>' +
+          '<div class="mvc-op-name">' + esc(t.passenger === false ? freightClass(t.headcode) : (t.op_name || t.op_code)) + '</div>' +
+        '</div>' +
+        '<div class="mvc-right">' +
+          '<span class="mvc-track-badge">' + esc(trackLabel(t)) + '</span>' +
+          '<span class="mvc-call-badge ' + callClass + '">' + esc(callText) + '</span>' +
+          (isEst ? '<span class="mvc-countdown">' + esc(fmtCountdown(ms, now)) + '</span>' : '') +
+        '</div>' +
       '</div>' +
-      '<div class="mv-right">' +
-        '<div class="mv-time ' + timeClass + '">' + esc(timeDisp) + '</div>' +
-        '<div class="mv-track">' + esc(trackLabel(t)) + '</div>' +
+
+      '<div class="mvc-route">' +
+        '<div class="mvc-route-ep">' +
+          '<div class="mvc-ep-name">' + esc(originStr) + '</div>' +
+          (t.orig_dep ? '<div class="mvc-ep-time">dep ' + esc(fmtTime(t.orig_dep)) + '</div>' : '') +
+        '</div>' +
+        '<div class="mvc-route-arrow">→</div>' +
+        '<div class="mvc-route-twy">' +
+          '<div class="mvc-twy-name">Twyford</div>' +
+          '<div class="mvc-twy-time">' + twyTimeHtml + platformHtml + '</div>' +
+        '</div>' +
+        '<div class="mvc-route-arrow">→</div>' +
+        '<div class="mvc-route-ep mvc-route-ep-right">' +
+          '<div class="mvc-ep-name">' + esc(destStr) + '</div>' +
+          (t.dest_arr ? '<div class="mvc-ep-time">arr ' + esc(fmtTime(t.dest_arr)) + '</div>' : '') +
+        '</div>' +
       '</div>' +
-    '</div>';
+
+      '<div class="mvc-stats">' +
+        mvcCard(statLabel, statTime, '') +
+        mvcCard('Delay', statDelay, '', true) +
+        mvcCard('Track', statTrack, '') +
+        mvcCard('Vehicles', statVeh, '') +
+      '</div>' +
+
+      '</div>';
   });
   document.getElementById('multi-view').innerHTML = html;
+}
+
+function mvcCard(label, value, unit, rawHtml) {
+  return '<div class="mvc-stat-card">' +
+    '<div class="mvc-stat-label">' + esc(label) + '</div>' +
+    '<div class="mvc-stat-value">' + (rawHtml ? value : esc(value)) + '</div>' +
+    (unit ? '<div style="font-size:clamp(8px,0.9vw,12px);color:#5a8fad">' + esc(unit) + '</div>' : '') +
+    '</div>';
 }
 
 /* ── List view ───────────────────────────────────────────── */
