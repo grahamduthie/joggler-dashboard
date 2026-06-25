@@ -2,6 +2,7 @@
 hive-tokens.json
 hive-credentials.json
 .env
+nr-credentials.env
 
 # Runtime caches — generated automatically, not source files
 bus-stops.json

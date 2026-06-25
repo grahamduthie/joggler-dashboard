@@ -759,6 +759,243 @@ and restarted on return to home. This avoids wasting quota on invisible tile dat
 
 ---
 
+## Real Time Trains (RTT) API
+
+### Account
+
+- **Portal / account management:** https://api-portal.rtt.io (RTT unified login account)
+- **Account:** graham.duthie@gmail.com
+- **Credentials file (Mac, gitignored):** `nr-credentials.env` in this repository root
+  (key: `RTT_REFRESH_TOKEN`)
+- **Pi `.env`:** `RTT_REFRESH_TOKEN=…` — read by `transport-proxy.py` at startup
+
+### Authentication flow
+
+RTT uses a two-token scheme:
+
+1. **Refresh token** — long-lived JWT issued by `api-portal.rtt.io` when you sign up. Stored
+   in `nr-credentials.env` (Mac) and in the Pi's `.env`. Does not expire on its own but will
+   be revoked if placed in a public/client-side application.
+
+2. **Access token** — short-lived (~20 min). Obtained by calling:
+   ```
+   GET https://data.rtt.io/api/get_access_token
+   Authorization: Bearer <refresh_token>
+   ```
+   Response: `{"token": "…", "validUntil": "2026-06-25T14:32:00Z", "entitlements": […]}`
+
+   The proxy (`transport-proxy.py`) does this exchange automatically, caches the access token
+   in memory, and refreshes it 60 s before `validUntil` without blocking in-flight requests.
+
+All subsequent API calls use the access token:
+```
+Authorization: Bearer <access_token>
+```
+
+### API endpoints used
+
+Base URL: `https://data.rtt.io`
+
+| Endpoint | Used for |
+|----------|----------|
+| `GET /api/get_access_token` | Exchange refresh token for access token |
+| `GET /gb-nr/location?code=TWYFORD&from=HHmm&to=HHmm` | Twyford location lineup (stopping/passing trains) |
+| `GET /gb-nr/location?code=RDG&from=HHmm&to=HHmm` | Reading location lineup (Main Line estimation) |
+
+The `from`/`to` parameters are local times in `HHmm` format defining a window. The proxy
+uses a 100-minute window centred on now (−30 min, +70 min) to capture recent past and upcoming.
+
+### Rate limits
+
+| Dimension | Limit |
+|-----------|-------|
+| Per minute | 30 requests |
+| Per hour | 750 requests |
+| Per day | 9,000 requests |
+
+Current usage: 2 requests per 30-second poll = 5,760/day (comfortably within limits).
+
+### What RTT returns (and what it misses)
+
+RTT Twyford query returns trains that have **Twyford as a WTT timing point** — i.e. trains
+that stop or are scheduled to pass through at a recorded time. This covers:
+
+- ✅ Elizabeth Line (XR) — stop at Twyford (Relief Line)
+- ✅ GWR local services (GW) — stop at Twyford (Relief Line)
+- ❌ Fast GWR inter-city IETs (Bristol, Cardiff, Swansea, Penzance, etc.) — Twyford is not
+  a WTT timing point for these; they never appear in the Twyford lineup
+- ❌ Freight trains — also absent from the Twyford lineup
+
+**Workaround for fast trains:** Query Reading (`RDG`) for Main Line trains and apply a time
+offset to estimate Twyford pass time (Down Main −4 min, Up Main +3 min). Adds ~26 extra
+trains per 2-hour window. See trains.html section for full detail.
+
+**No workaround for freight:** Freight does not reliably stop at Reading either. Full freight
+coverage requires the Network Rail TRUST/Train Movements feed — see NR section below.
+
+### Key field reference
+
+`locationMetadata.line.planned` — line code at that location:
+- `RL` — Relief Line
+- `ML` — Main Line (Down)
+- `UML` — Up Main Line
+- `DML` — Down Main Line (sometimes used instead of `ML`)
+
+`displayAs` — `CALL` (stops) or `PASS` (passes without stopping)
+
+---
+
+## Network Rail Open Data Feeds
+
+### Account
+
+- **Portal:** https://publicdatafeeds.networkrail.co.uk
+- **Account:** graham.duthie@gmail.com
+- **Credentials file (Mac, gitignored):** `nr-credentials.env` in this repository root
+- **Account state:** Active as of 2026-06-25 (verified by successful STOMP connection)
+- **No separate API key** — the website login email and password are used directly as the
+  STOMP username and password. There is nothing else to apply for.
+- **No website "subscribe" step needed** — STOMP topic subscriptions are made in code at
+  connection time. The website UI has a subscription management page but it does not gate
+  access; messages flow as soon as you subscribe via STOMP.
+
+### STOMP connection details
+
+| Parameter | Value |
+|-----------|-------|
+| Hostname | `publicdatafeeds.networkrail.co.uk` |
+| Port | `61618` (SSL/TLS) |
+| Username | NR account email |
+| Password | NR account password |
+| Protocol | STOMP 1.1 |
+| Heartbeat | Recommended: `(10000, 10000)` ms |
+| Client ID | Set `client-id` header to your email (required for durable subscriptions) |
+
+Subscribe to topics as `/topic/<topic-name>`. For durable subscriptions (messages queued for
+up to 5 minutes while disconnected) also set the `activemq.subscriptionName` header to a
+stable unique string.
+
+**Python example (stomp.py library):**
+```python
+import stomp
+
+conn = stomp.Connection(
+    host_and_ports=[('publicdatafeeds.networkrail.co.uk', 61618)],
+    heartbeats=(10000, 10000)
+)
+conn.connect(
+    username='graham.duthie@gmail.com',
+    passcode='<password from nr-credentials.env>',
+    wait=True,
+    headers={'client-id': 'graham.duthie@gmail.com'}
+)
+conn.subscribe(
+    destination='/topic/TRAIN_MVT_ALL_TOC',
+    id='1',
+    ack='auto',
+    headers={'activemq.subscriptionName': 'graham.duthie@gmail.com-mvt'}
+)
+```
+
+Messages arrive as JSON batches (an array of objects). Each batch typically contains 1–20
+movement records. Messages are NOT gzip-compressed on this platform (unlike the National Rail
+Enquiries Darwin feed, which is gzip-compressed).
+
+### Available feeds
+
+| Topic | Feed | Rate | Description |
+|-------|------|------|-------------|
+| `TRAIN_MVT_ALL_TOC` | Train Movements | Up to 600/min | TRUST system — every train passing or calling at a timing point. Includes freight and non-stopping trains. Messages are batched. **The most useful feed for trains.html.** |
+| `TD_ALL_SIG_AREA` | Train Describer (TD) | Up to 6000/min | Berth-level signal box data. More granular than Train Movements but requires berth mapping. Twyford berths: `TWYF112`, `TWYF632`, `TWYFDW`. |
+| `VSTP_ALL` | VSTP | Low volume | Very Short Term Planning — late-notice schedule additions not in the daily SCHEDULE feed. |
+| `RTPPM_ALL` | RTPPM | 1/min | Aggregate performance metrics. Not useful for per-train display. |
+| `TSR_ALL_ROUTE` | TSR | ~11/week | Temporary speed restrictions from the Weekly Operating Notice. |
+
+Static feeds (authenticated HTTP GET, not STOMP):
+
+| Feed | URL pattern | Description |
+|------|-------------|-------------|
+| SCHEDULE (CIF) | `https://publicdatafeeds.networkrail.co.uk/ntrod/CifFileAuthenticate?type=CIF_ALL_FULL_DAILY` | Full working timetable, updated daily ~01:00 UTC. Large file (~200 MB compressed). |
+| SCHEDULE (JSON) | `https://publicdatafeeds.networkrail.co.uk/ntrod/inspire/feeds/scheduled_feeds/...` | JSON equivalent. |
+| Reference Data | Via the portal download pages | TOC codes, STANOX→TIPLOC mapping, etc. |
+
+### Train Movements message format
+
+Each STOMP message body is a JSON array of objects, each with `header` and `body`:
+
+```json
+[
+  {
+    "header": {
+      "msg_type": "0003",
+      "msg_queue_timestamp": "1782379703000",
+      "source_system_id": "TRUST",
+      "original_data_source": "SMART"
+    },
+    "body": {
+      "train_id":             "871C14MD25",   // TRUST train ID (headcode + date encoded)
+      "actual_timestamp":     "1782383280000", // Unix ms — actual time at this location
+      "timetable_variation":  "0",            // minutes late (negative = early)
+      "direction_ind":        "UP",           // UP or DOWN
+      "event_type":           "DEPARTURE",    // ARRIVAL, DEPARTURE, or DESTINATION
+      "loc_stanox":           "87014",        // STANOX of the location
+      "planned_timestamp":    "1782383280000",
+      "planned_event_type":   "DEPARTURE",
+      "platform":             " 4",
+      "variation_status":     "ON TIME",      // ON TIME, EARLY, LATE, OFF ROUTE
+      "train_terminated":     "false",
+      "offroute_ind":         "false",
+      "auto_expected":        "true"
+    }
+  }
+]
+```
+
+**msg_type values:**
+- `0001` — Train Activation (train ID assigned to a schedule)
+- `0002` — Train Cancellation
+- `0003` — Train Movement (passing/calling a timing point) ← the useful one
+- `0004` — Unidentified train
+- `0005` — Train Reinstatement
+- `0006` — Change of Origin
+- `0007` — Change of Identity
+- `0008` — Change of Location
+
+### Twyford location codes
+
+| Code type | Code | Notes |
+|-----------|------|-------|
+| STANOX | `87014` | Twyford station — the primary code to filter Train Movement messages |
+| TIPLOC | `TWYFORD` | Used in RTT API and CIF schedules |
+| CRS | `TWY` | 3-letter public station code |
+| STANOX (signal berths) | `TWYF112`, `TWYF632`, `TWYFDW` | TD berth points — appear in TD feed but NOT in WTT schedules; RTT returns zero services for these |
+
+**Filter Train Movement messages by `body.loc_stanox == "87014"`** to see all trains passing
+or calling at Twyford, including freight and non-stopping Main Line fast trains that are absent
+from the RTT Twyford query.
+
+### Account states
+
+An NROD account can be in one of three states:
+
+- **Pending** — registered but waiting for capacity allocation. Can use the portal UI but
+  cannot connect via STOMP. The system sends an email when activated.
+- **Active** — fully functional; can connect via STOMP and receive all subscribed feeds.
+- **Inactive** — account dormant for ≥30 days; resources deallocated. Log into the portal
+  and click "Add to Pending state" to re-queue for activation (~1 hour if capacity available).
+
+Graham's account was confirmed **Active** on 2026-06-25.
+
+### Status page
+
+https://nrodcaci.grafana.net/public-dashboards/960fa54d94884dc7abd1f5ab9c70df7e
+
+### Support
+
+Email: dsg_nrod.support@caci.co.uk (the feeds are operated by CACI on behalf of Network Rail)
+
+---
+
 ## Persistent Data Files
 
 These files live on the Pi and survive reboots. Deleting them forces a fresh fetch.
