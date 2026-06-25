@@ -1235,7 +1235,7 @@ def _rtt_build_trains():
                 continue   # RTT already has this train
             trains.append(entry)
 
-    trains.sort(key=lambda t: t.get('twy_sched') or '')
+    trains.sort(key=lambda t: _iso_to_ts(t.get('twy_sched', '')))
     result = {'trains': trains, 'ts': int(now)}
 
     with _lock:
