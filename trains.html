@@ -234,6 +234,95 @@ html, body {
 .stat-est     { color: #a0c0e0; }
 .stat-cancel  { color: #e05050; }
 
+/* ── Multi-train view ────────────────────────────────────── */
+#multi-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mv-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 1.5vw, 20px);
+  padding: clamp(6px, 1.8vh, 18px) clamp(12px, 2vw, 28px);
+  border-bottom: 2px solid #1e3a5a;
+  min-height: 0;
+}
+.mv-card:last-child { border-bottom: none; }
+.mv-op-badge {
+  flex-shrink: 0;
+  width: clamp(42px, 6.5vw, 86px);
+  height: clamp(42px, 6.5vw, 86px);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(13px, 2.6vw, 36px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+.mv-headcode {
+  font-size: clamp(26px, 5.5vw, 74px);
+  font-weight: bold;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.mv-middle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mv-route-str {
+  font-size: clamp(12px, 1.7vw, 22px);
+  color: #c0ccd8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-call {
+  font-size: clamp(10px, 1.3vw, 17px);
+  color: #7fb3d3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mv-right {
+  flex-shrink: 0;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.mv-time {
+  font-size: clamp(24px, 4.8vw, 64px);
+  font-weight: bold;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+  line-height: 1;
+}
+.mv-actual {
+  font-size: clamp(11px, 1.5vw, 19px);
+  color: #7fb3d3;
+  white-space: nowrap;
+}
+.mv-track {
+  font-size: clamp(10px, 1.4vw, 18px);
+  padding: 3px 10px;
+  border-radius: 16px;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  white-space: nowrap;
+}
+.mv-delay {
+  font-size: clamp(10px, 1.2vw, 15px);
+  white-space: nowrap;
+}
+
 /* ── List view ────────────────────────────────────────────── */
 #list-view {
   flex: 1;
@@ -311,6 +400,7 @@ html, body {
 <div id="page">
   <div id="no-data" style="display:none">No train data</div>
   <div id="focus-view" style="display:none"></div>
+  <div id="multi-view" style="display:none"></div>
   <div id="list-view" style="display:none">
     <table id="train-table">
       <thead>
@@ -451,6 +541,7 @@ function render() {
   var trains = trainsData.trains || [];
   document.getElementById('no-data').style.display = 'none';
   document.getElementById('focus-view').style.display = 'none';
+  document.getElementById('multi-view').style.display = 'none';
   document.getElementById('list-view').style.display = 'none';
 
   if (currentMode === 'list' || currentMode === 'list-detail') {
@@ -459,18 +550,23 @@ function render() {
       renderList(trains, now);
     }
   } else {
-    var target = findTarget(trains, currentMode, now);
-    if (!target) {
+    var targets = findTarget(trains, currentMode, now);
+    if (!targets.length) {
       document.getElementById('no-data').style.display = 'flex';
       document.getElementById('no-data').textContent =
         currentMode === 'recent' ? 'No recent trains in last 10 min' : 'No upcoming trains';
-    } else {
+    } else if (targets.length === 1) {
       document.getElementById('focus-view').style.display = 'flex';
-      renderFocus(target, now);
+      renderFocus(targets[0], now);
+    } else {
+      document.getElementById('multi-view').style.display = 'flex';
+      renderMulti(targets, now);
     }
   }
 }
 
+// Returns an array. For 'next' mode: first upcoming train plus any within 90s of it.
+// For 'recent' mode: single most-recent train (as array). Empty array = nothing to show.
 function findTarget(trains, mode, now) {
   if (mode === 'recent') {
     var cutoff = now - 10 * 60000;
@@ -479,15 +575,13 @@ function findTarget(trains, mode, now) {
       return ms > cutoff && ms < now + 90000;
     });
     past.sort(function(a, b) { return trainMs(b) - trainMs(a); });
-    return past[0] || null;
+    return past.length ? [past[0]] : [];
   } else {
     var upcoming = trains.filter(function(t) {
       var ms = trainMs(t);
-      // For confirmed trains with a real actual time, use a tighter grace period.
-      // Down trains: house is east of Twyford — the train passed the house *before*
-      //   arriving at Twyford, so once twy_actual is past the train has gone (grace=0).
-      // Up trains: house is east of Twyford — train departs Twyford heading east, passes
-      //   the house ~30s later, so we keep it in NEXT for 30s after twy_actual.
+      // Down trains: house is east of Twyford — train passed the house *before*
+      //   arriving at Twyford, so once twy_actual is set the train is gone (grace=0).
+      // Up trains: train departs Twyford heading east, passes the house ~30s later.
       // Estimated/unconfirmed: keep 2-min grace (schedule is approximate).
       var grace = 120000;
       if (t.confirmed && t.twy_actual) {
@@ -496,7 +590,10 @@ function findTarget(trains, mode, now) {
       return ms >= now - grace;
     });
     upcoming.sort(function(a, b) { return trainMs(a) - trainMs(b); });
-    return upcoming[0] || null;
+    if (!upcoming.length) return [];
+    var firstMs = trainMs(upcoming[0]);
+    // Include all trains within 90s of the first
+    return upcoming.filter(function(t) { return trainMs(t) <= firstMs + 90000; });
   }
 }
 
@@ -518,6 +615,7 @@ function renderFocus(t, now) {
   if (isEst) schedDisp = '~' + schedDisp;
 
   /* Twyford time display */
+  var hasPassed = t.confirmed && t.twy_actual && ms < now;
   var twyTimeHtml;
   if (t.cancelled) {
     twyTimeHtml = '<span class="fv-route-time tr-cancel">Cancelled</span>';
@@ -525,9 +623,9 @@ function renderFocus(t, now) {
     twyTimeHtml = '<span class="fv-route-time fv-route-est">~' + fmtTimeMs(ms) + '</span>';
   } else if (t.twy_actual) {
     var lateClass = isBadLate ? 'fv-route-late' : 'fv-route-ontime';
+    var lateNote  = isBadLate ? ' (' + late + ')' : '';
     twyTimeHtml = '<span class="fv-route-time">Sched ' + fmtTime(t.twy_sched) + '</span> ' +
-                  '<span class="fv-route-time ' + lateClass + '">' +
-                  (isBadLate ? ' (' + late + ')' : ' ✓ ' + fmtTime(t.twy_actual)) + '</span>';
+                  '<span class="fv-route-time ' + lateClass + '"> ✓ ' + fmtTime(t.twy_actual) + lateNote + '</span>';
   } else {
     var lateClass2 = isBadLate ? 'fv-route-late' : '';
     twyTimeHtml = '<span class="fv-route-time ' + lateClass2 + '">' + fmtTime(t.twy_sched) +
@@ -539,6 +637,7 @@ function renderFocus(t, now) {
     : '';
 
   /* Stat cards */
+  var statLabel  = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
   var statTime   = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtTime(t.twy_sched));
   var statDelay  = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
                  : isEst ? '<span class="stat-est">N/A</span>'
@@ -576,7 +675,7 @@ function renderFocus(t, now) {
     '</div>' +
 
     '<div class="fv-stats">' +
-      fvCard(isEst ? 'Est. Time' : 'At Twyford', statTime, '') +
+      fvCard(statLabel, statTime, '') +
       fvCard('Delay', statDelay, '', true) +
       fvCard('Track', statTrack, '') +
       fvCard('Vehicles', statVeh, '') +
@@ -589,6 +688,70 @@ function fvCard(label, value, unit, rawHtml) {
     '<div class="fv-stat-value">' + (rawHtml ? value : esc(value)) + '</div>' +
     (unit ? '<div class="fv-stat-unit">' + esc(unit) + '</div>' : '') +
     '</div>';
+}
+
+/* ── Multi-train view ────────────────────────────────────── */
+function renderMulti(targets, now) {
+  var html = '';
+  targets.forEach(function(t) {
+    var op        = opStyle(t.op_code, t.passenger);
+    var ms        = trainMs(t);
+    var isEst     = !t.confirmed;
+    var isBadLate = (t.late_min && t.late_min >= 5);
+    var hasPassed = t.confirmed && t.twy_actual && ms < now;
+
+    var timeDisp, timeClass;
+    if (t.cancelled) {
+      timeDisp = 'CNCL'; timeClass = 'stat-cancel';
+    } else if (t.twy_actual) {
+      timeDisp = fmtTime(t.twy_actual);
+      timeClass = isBadLate ? 'stat-late' : 'stat-ontime';
+    } else if (isEst) {
+      timeDisp = '~' + fmtTimeMs(ms); timeClass = 'stat-est';
+    } else {
+      timeDisp = fmtTime(t.twy_sched);
+      timeClass = isBadLate ? 'stat-late' : '';
+    }
+
+    var schedDisp = (!t.twy_actual && !isEst && isBadLate) ? 'Sched ' + fmtTime(t.twy_sched) : '';
+    var actualNote = '';
+    if (t.twy_actual && !hasPassed) {
+      actualNote = '';
+    } else if (hasPassed) {
+      actualNote = 'Passed ' + fmtTime(t.twy_actual);
+    } else if (t.twy_actual) {
+      actualNote = '✓ ' + fmtTime(t.twy_actual);
+    }
+
+    var routeStr = t.passenger === false
+      ? freightClass(t.headcode)
+      : (t.origin || '—') + ' → ' + (t.dest || '—');
+
+    var callStr;
+    if (t.cancelled) {
+      callStr = 'Cancelled';
+    } else if (t.call_type === 'STOP') {
+      callStr = 'Stops at Twyford' + (t.platform ? ' · Plat ' + t.platform : '');
+    } else {
+      callStr = isEst ? 'Passing through (est.)' : 'Passes Twyford';
+    }
+    if (isBadLate && t.late_min) callStr += ' · +' + t.late_min + ' min';
+
+    html += '<div class="mv-card" style="background:linear-gradient(135deg,' + op.bg + '22 0%,transparent 60%)">' +
+      '<div class="mv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
+      '<div class="mv-headcode">' + esc(t.headcode) + '</div>' +
+      '<div class="mv-middle">' +
+        '<div class="mv-route-str">' + esc(routeStr) + '</div>' +
+        '<div class="mv-call">' + esc(callStr) + '</div>' +
+      '</div>' +
+      '<div class="mv-right">' +
+        '<div class="mv-time ' + timeClass + '">' + esc(timeDisp) + '</div>' +
+        (schedDisp ? '<div class="mv-actual">' + esc(schedDisp) + '</div>' : '') +
+        '<div class="mv-track">' + esc(trackLabel(t)) + '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  document.getElementById('multi-view').innerHTML = html;
 }
 
 /* ── List view ───────────────────────────────────────────── */
