@@ -482,7 +482,18 @@ function findTarget(trains, mode, now) {
     return past[0] || null;
   } else {
     var upcoming = trains.filter(function(t) {
-      return trainMs(t) >= now - 120000;
+      var ms = trainMs(t);
+      // For confirmed trains with a real actual time, use a tighter grace period.
+      // Down trains: house is east of Twyford — the train passed the house *before*
+      //   arriving at Twyford, so once twy_actual is past the train has gone (grace=0).
+      // Up trains: house is east of Twyford — train departs Twyford heading east, passes
+      //   the house ~30s later, so we keep it in NEXT for 30s after twy_actual.
+      // Estimated/unconfirmed: keep 2-min grace (schedule is approximate).
+      var grace = 120000;
+      if (t.confirmed && t.twy_actual) {
+        grace = (t.direction === 'up') ? 30000 : 0;
+      }
+      return ms >= now - grace;
     });
     upcoming.sort(function(a, b) { return trainMs(a) - trainMs(b); });
     return upcoming[0] || null;
