@@ -211,19 +211,14 @@ function berthToX(berthStr) {
 // Estimated x from schedule: ms until Twyford, direction, speed class
 var HOUSE_X = berthToX('571');  // ≈ 279 in SVG coords
 function schedToX(msUntilHouse, direction, isMain) {
-  // Speed: Relief ~75mph = 33m/s, Main ~110mph = 49m/s
+  // Berths increase going west. Down trains approach from east (lower berth numbers).
+  // Up trains approach from west (higher berth numbers).
+  // Speed: Relief ~75mph = 33m/s, Main ~110mph = 49m/s; each berth ≈ 100m
   var mps = isMain ? 49 : 33;
-  var berths_per_sec = mps / 100;  // each berth ≈ 100m
-  var berths_away = (msUntilHouse / 1000) * berths_per_sec;
-  var b_approx = direction === 'down'
-    ? 571 - berths_away   // down train approaching from east (higher berths)
-    : 571 + berths_away;  // up train departs east (lower berths then higher)
-  // Actually for Down: approaching from Maidenhead (high SVG x, lower berth numbers)
-  // Wait — berths INCREASE going west. Down train comes from EAST (low berths) and moves west (higher berths).
-  // Approaching from east: current berth = house_berth - berths_away
+  var berths_away = (msUntilHouse / 1000) * (mps / 100);
   var approx_berth = direction === 'down'
-    ? 571 - berths_away    // approaching from east (lower berth = further east)
-    : 571 + berths_away;   // departing east after station (higher berth = further west... no)
+    ? 571 - berths_away   // approaching from east → lower berth = higher x (right)
+    : 571 + berths_away;  // approaching from west → higher berth = lower x (left)
   return berthToX(String(Math.round(approx_berth)));
 }
 
