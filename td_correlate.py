@@ -29,7 +29,7 @@ LOG_PATH        = Path(__file__).parent / 'td_correlate_log.json'
 # D6 berths near the house (crossover ~200 m east of Twyford station).
 # Down trains (increasing berths, westbound): approach house ~0560-0577
 # Up trains  (decreasing berths, eastbound): depart station ~0548-0565
-HOUSE_ZONE      = {'D6': (0x0540, 0x0600)}   # hex int range to highlight
+HOUSE_ZONE      = {'D6': (540, 600)}   # decimal berth range near house/crossover
 
 # Correlation window: SF events within this many ms of a CA are considered linked
 CORR_WINDOW_MS  = 2000

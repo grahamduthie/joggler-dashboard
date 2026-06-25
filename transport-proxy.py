@@ -1276,6 +1276,9 @@ _td_buffer    = []   # recent TD CA (berth step) messages, newest last, D1/D4/D6
 _TD_BUF_MAX   = 3000
 _TD_AREAS     = {'D1', 'D4', 'D6'}   # Thames Valley SC: Reading, Hayes, Maidenhead
 
+_sf_lock      = threading.Lock()
+_sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds}
+
 
 def _nr_freight_hc(hc):
     return bool(hc) and hc[0] in '456789'
@@ -1293,39 +1296,46 @@ class _NRListener:
         threading.Thread(target=_nr_stomp_reconnect, daemon=True).start()
 
     def _handle_td(self, msgs):
-        """Process Train Describer (TD) berth-step messages."""
+        """Process Train Describer (TD) messages: CA berth steps and SF signal flags."""
         global _td_buffer
-        new_entries = []
+        new_ca = []
+        sf_updates = {}   # (area, addr) → (data, ts) — deduplicated to last value
         for item in msgs:
-            # TD messages wrap each event as {"CA_MSG": {...}, "CB_MSG": {...}, ...}
             for msg_key, body in item.items():
                 if not isinstance(body, dict):
                     continue
-                mtype = msg_key[:2]   # "CA", "CB", "CC", "CT"
-                if mtype != 'CA':
+                area = body.get('area_id', '')
+                if area not in _TD_AREAS:
                     continue
-                if body.get('area_id', '') not in _TD_AREAS:
-                    continue
-                descr = body.get('descr', '').strip()
-                if not descr or descr == '    ' or descr == '0000':
-                    continue
+                mtype = msg_key[:2]
                 try:
                     ts = int(body.get('time', 0))
                 except (TypeError, ValueError):
                     ts = 0
-                entry = {
-                    'area': body.get('area_id', ''),
-                    'from': body.get('from', ''),
-                    'to':   body.get('to', ''),
-                    'descr': descr,
-                    'ts':   ts,
-                }
-                new_entries.append(entry)
-        if new_entries:
+                if mtype == 'CA':
+                    descr = body.get('descr', '').strip()
+                    if not descr or descr == '    ' or descr == '0000':
+                        continue
+                    new_ca.append({
+                        'area': area,
+                        'from': body.get('from', ''),
+                        'to':   body.get('to', ''),
+                        'descr': descr,
+                        'ts':   ts,
+                    })
+                elif mtype == 'SF':
+                    addr = body.get('address', '')
+                    data = body.get('data', '')
+                    if addr:
+                        sf_updates[(area, addr)] = (data, ts)
+        if new_ca:
             with _td_lock:
-                _td_buffer.extend(new_entries)
+                _td_buffer.extend(new_ca)
                 if len(_td_buffer) > _TD_BUF_MAX:
                     _td_buffer = _td_buffer[-_TD_BUF_MAX:]
+        if sf_updates:
+            with _sf_lock:
+                _sf_state.update(sf_updates)
 
     def on_message(self, frame):
         global _rtt_trains_ts
@@ -1566,10 +1576,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._static('/aircraft.html')
         elif parsed.path == '/trains':
             self._static('/trains.html')
+        elif parsed.path == '/lineside':
+            self._static('/lineside.html')
         elif parsed.path == '/api/trains':
             self._trains(qs)
         elif parsed.path == '/api/td-log':
             self._td_log(qs)
+        elif parsed.path == '/api/td-live':
+            self._td_live(qs)
         else:
             self._static(parsed.path)
 
@@ -2134,6 +2148,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with _td_lock:
             entries = list(_td_buffer[-limit:])
         self._json({'count': len(entries), 'entries': entries})
+
+    def _td_live(self, qs):
+        """Current train positions (one per headcode, most recent berth) + signal states."""
+        now_ts = time.time()
+        positions = {}   # headcode → entry (most recent only)
+        with _td_lock:
+            for entry in reversed(_td_buffer):
+                hc = entry['descr']
+                if hc not in positions and now_ts - entry['ts'] < 600:
+                    positions[hc] = {
+                        'headcode':   hc,
+                        'area':       entry['area'],
+                        'berth':      entry['to'],
+                        'from_berth': entry['from'],
+                        'ts':         entry['ts'],
+                        'age_s':      int(now_ts - entry['ts']),
+                    }
+        with _sf_lock:
+            signals = {f"{a}:{addr}": {'data': d, 'ts': t}
+                       for (a, addr), (d, t) in _sf_state.items()}
+        self._json({'positions': list(positions.values()),
+                    'signals': signals, 'ts': int(now_ts)})
 
     def _static(self, path):
         if '..' in path:
