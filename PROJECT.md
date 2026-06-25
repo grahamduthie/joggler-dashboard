@@ -23,7 +23,7 @@ Raspberry Pi (172.16.10.136, user gduthie)
   ├── transport-proxy.py   port 5001  (0.0.0.0) — API proxy + static file server
   ├── dashboard.html, icons/, hls.min.js — served as static files by transport-proxy
   ├── hive-tokens.json, hive-credentials.json (mode 600)
-  ├── .env  — BODS_API_KEY + LASTFM_API_KEY (mode 600)
+  ├── .env  — BODS_API_KEY + LASTFM_API_KEY + RTT_REFRESH_TOKEN + NR_USERNAME + NR_PASSWORD (mode 600)
   └── logos/, aircraft-info/, bus-stops.json, bus-route-stops.json (runtime caches)
 
 O2 Joggler (172.16.10.168, user of)
@@ -214,7 +214,7 @@ hls.min.js                  # HLS.js library (served statically to browser)
 
 hive-tokens.json            # Hive/Cognito auth tokens + home_id (mode 600)
 hive-credentials.json       # Hive login credentials for auto-reauth (mode 600)
-.env                        # BODS_API_KEY + LASTFM_API_KEY + RTT_REFRESH_TOKEN (mode 600)
+.env                        # BODS_API_KEY + LASTFM_API_KEY + RTT_REFRESH_TOKEN + NR_USERNAME + NR_PASSWORD (mode 600)
 
 icons/
   wsymbol_*.png             # 92 PNG weather icons (MAm TV set, 128×128)
@@ -569,9 +569,16 @@ working timetable. Signal berth points `TWYF112`, `TWYF632`, `TWYFDW` exist in R
 zero services (TRUST berth points are not WTT timing points). The Reading estimation approach
 adds ~26 extra trains per 2-hour window (44 total vs 18 from Twyford alone).
 
-**Known gap:** Freight trains are not reliably timetabled at Reading either. For complete
-freight coverage, the Network Rail TRUST feed (STOMP/ActiveMQ via
-`publicdatafeeds.networkrail.co.uk`) would be required.
+**Freight trains via Network Rail STOMP:** Freight is absent from both RTT Twyford and RTT
+Reading queries. The proxy opens a persistent STOMP connection to the Network Rail TRUST feed
+on startup and buffers freight movements (headcodes starting with 4–9) passing Maidenhead
+(STANOX 74005). A ±4 min directional offset converts the Maidenhead timestamp to an estimated
+Twyford pass time. Freight entries from this buffer are merged into the `/api/trains` response
+alongside RTT passenger data. See the "Network Rail Open Data Feeds" section for STOMP details.
+
+**Henley branch trains excluded:** Trains with headcode prefix `2H` are filtered out. These
+run on the Henley-on-Thames branch, diverging from the **west** end of Twyford station, and
+are not audible from the house (~200 m east of the station).
 
 **Three display modes** (toggle buttons in top bar):
 
@@ -600,8 +607,15 @@ freight coverage, the Network Rail TRUST feed (STOMP/ActiveMQ via
 | ZN | Network Rail | `#d4ac0d` yellow |
 
 **Direction logic:** `direction=up` if destination is in the set of London termini (London
-Paddington, Abbey Wood, Shenfield, Heathrow termini). Otherwise `down`. Henley branch trains
-show `down` which is approximate.
+Paddington, Abbey Wood, Shenfield, Heathrow termini). Otherwise `down`.
+
+**Freight display:** Freight trains (`passenger=false`) show a green `FRET` badge (background
+`#2d3d1a`, text `#a0c060`) instead of the operator colour. The focus view shows the freight
+class (`Heavy Freight` / `Intermodal` / `Freight` / `Light Loco` / `Special` based on the
+first digit of the headcode) in place of the operator name, and shows direction labels
+(`← From west` / `→ To London` or `← From London` / `→ To west`) in place of origin/dest.
+If the freight operator code is known (e.g. `GB` for GBRf, `FL` for Freightliner), the
+operator's own branding is used instead of the generic `FRET` badge.
 
 **Token management:** RTT uses a long-lived refresh token (stored as `RTT_REFRESH_TOKEN` in
 Pi's `.env`) exchanged for a short-lived access token (~20 min) at `/api/get_access_token`.
@@ -668,7 +682,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/airline-logo?iata=XX` | pics.avs.io (file-cached) | File permanent | |
 | `GET /api/aircraft-info?hex=XXXXXX` | OpenSky metadata (file-cached) | 30 days (mtime check) | |
 | `GET /api/airport-name?iata=XXX` | `airport-names.json` (OurAirports CSV, downloaded once) | In-memory for life of process | Returns `{"name": "…"}` or `{"name": null}` |
-| `GET /api/trains` | RTT API (Twyford + Reading, combined) | 30 s | Two-source: confirmed stops + estimated Main Line passes |
+| `GET /api/trains` | RTT API (Twyford + Reading) + NR STOMP buffer | 30 s | Three-source: confirmed stops + estimated Main Line passes + NR freight from STOMP |
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
 | `GET /api/radio/nowplaying?url=…` | ICY stream metadata | 25 s | StreamTitle from ICY |
 | `GET /api/radio/nowplaying-rp?chan=N` | Radio Paradise API | 20 s | |
@@ -739,6 +753,7 @@ other device.
 | WagtailCam MJPEG | Browser | WagtailCam view | Reconnect/5 min | Low | None |
 | National Rail SOAP | Proxy | Tile (120 s) + trains view | 90 s TTL | ~720 + view | Fair use |
 | RTT API (Twyford + Reading) | Proxy | trains.html (30 s) | 30 s TTL | ~5,760 (2×/30 s) | 9,000/day |
+| NR TRUST STOMP (TRAIN_MVT_ALL_TOC) | Proxy | Persistent TCP stream | — (push) | — (push) | None (up to 600 msg/min) |
 | ADS-B LOL | Proxy | Tile (60 s) + flights view | 60 s TTL | ~720 + view | Generous |
 | BODS SIRI-VM | Proxy | Bus map tab | 30 s | Low | None |
 | Passenger platform scrape | Proxy | Bus departures tab | 30 s TTL | ~2,880 | None |
@@ -969,10 +984,19 @@ Each STOMP message body is a JSON array of objects, each with `header` and `body
 | TIPLOC | `TWYFORD` | Used in RTT API and CIF schedules |
 | CRS | `TWY` | 3-letter public station code |
 | STANOX (signal berths) | `TWYF112`, `TWYF632`, `TWYFDW` | TD berth points — appear in TD feed but NOT in WTT schedules; RTT returns zero services for these |
+| STANOX (Maidenhead) | `74005` | Used in proxy for freight — ~4 min east of Twyford on Main Line |
 
-**Filter Train Movement messages by `body.loc_stanox == "87014"`** to see all trains passing
-or calling at Twyford, including freight and non-stopping Main Line fast trains that are absent
-from the RTT Twyford query.
+**Twyford (STANOX 87014) only fires for trains that have Twyford as a WTT timing point** —
+i.e. stopping services only. Fast passengers and freight pass through without a TRUST message.
+
+**Maidenhead (STANOX 74005) is used for freight.** Freight trains do have Maidenhead as a
+TRUST timing point. The proxy watches for freight headcodes (first digit 4–9) at STANOX 74005
+and applies a ±4 min offset to estimate Twyford pass time:
+- UP trains (towards London): Maidenhead timestamp − 4 min (already passed Twyford)
+- DOWN trains (towards west): Maidenhead timestamp + 4 min (Twyford is upcoming)
+
+To filter the full TRAIN_MVT_ALL_TOC stream for Twyford stopping trains:
+`body.loc_stanox == "87014"`
 
 ### Account states
 
@@ -1065,11 +1089,12 @@ scp dashboard.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
 # Use ctrl+shift+r (hard reload), NOT F5 — F5 may serve cached CSS
 
 # Deploy and restart transport-proxy on Pi
+# Note: must use -u (unbuffered) so stdout flushes to log; proxy runs as root via sudo bash
 scp transport-proxy.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
   ssh gduthie@172.16.10.136 \
-    'kill $(pgrep -f transport-proxy) 2>/dev/null; \
-     nohup python3 /home/gduthie/twyford-dashboard/transport-proxy.py \
-       >> /home/gduthie/twyford-dashboard/dashboard.log 2>&1 & disown; echo started'
+    'sudo kill $(pgrep -f transport-proxy.py) 2>/dev/null; sleep 1; \
+     sudo bash -c "nohup python3 -u /home/gduthie/twyford-dashboard/transport-proxy.py \
+       >> /home/gduthie/twyford-dashboard/proxy.log 2>&1 & disown"'
 
 # Deploy and restart cast-server on Pi
 scp cast-server.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
@@ -1140,6 +1165,9 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
   AIRLINES dict in dashboard.html is keyed by ICAO
 
 ### Python / Server
+- **`stomp.py` must be installed system-wide for the proxy** — the proxy runs as root (`sudo bash -c 'nohup python3 …'`). A user-level install (`pip3 install --user`) is not visible to root and the import silently falls back to `_HAS_STOMP = False`, disabling freight. Install with `sudo pip3 install stomp.py --break-system-packages`
+- **`python3 -u` required** — without `-u`, Python block-buffers stdout when output is redirected to a file. Startup messages (NR STOMP connected, airport names loaded) never appear in the log until the buffer is flushed. Always start with `python3 -u transport-proxy.py`
+- **NR STOMP auto-reconnects** — on disconnect, `_NRListener.on_disconnected()` starts a background thread (`_nr_stomp_reconnect`) with exponential backoff starting at 10 s, capped at 5 min
 - **`python3-pip` not in apt on Debian Trixie** — use get-pip.py on the Joggler if needed
 - **`python3-venv` not in apt on Debian Trixie** — use `pip install --user --break-system-packages`
 - **`pkill` returns exit code 255 on Trixie even on success** — use `pgrep` + `kill` instead
@@ -1219,8 +1247,18 @@ ssh gduthie@172.16.10.136 \
 # Test Hive temperature endpoint
 ssh gduthie@172.16.10.136 'curl -s http://localhost:5001/api/hive'
 
-# Watch proxy log
-ssh gduthie@172.16.10.136 'tail -f /home/gduthie/twyford-dashboard/dashboard.log'
+# Watch proxy log (proxy started with -u flag so output flushes immediately)
+ssh gduthie@172.16.10.136 'tail -f /home/gduthie/twyford-dashboard/proxy.log'
+
+# Check NR STOMP connection status
+ssh gduthie@172.16.10.136 'grep -i "NR STOMP" /home/gduthie/twyford-dashboard/proxy.log'
+
+# Check freight trains in buffer (quick API test)
+ssh gduthie@172.16.10.136 'curl -s http://localhost:5001/api/trains | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+freight = [t for t in d[\"trains\"] if not t.get(\"passenger\", True)]
+print(f\"{len(freight)} freight trains in buffer\")
+for t in freight: print(f\"  {t[\\\"headcode\\\"]} {t[\\\"direction\\\"]} {t[\\\"twy_sched\\\"]}\")"'
 
 # Check disk space on Joggler
 ssh of@172.16.10.168 'df -h'
@@ -1285,3 +1323,6 @@ Everything working as of 2026-06-25.
 - [x] trains.html: two-source RTT data (Twyford confirmed stops + Reading Main Line estimation)
 - [x] trains.html: operator colour dict (GWR, Elizabeth Line, CrossCountry, Heathrow Express, freight operators)
 - [x] trains.html: RTT token exchange + caching in transport-proxy (60 s pre-expiry refresh)
+- [x] trains.html: NR STOMP freight integration — proxy subscribes to TRAIN_MVT_ALL_TOC, buffers freight at Maidenhead (±4 min offset), merges into /api/trains
+- [x] trains.html: freight display — FRET badge, freightClass label, directional origin/dest in focus view
+- [x] trains.html: Henley branch trains (2H headcodes) filtered out
