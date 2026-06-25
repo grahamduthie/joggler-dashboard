@@ -1227,12 +1227,17 @@ try:
 except ImportError:
     _HAS_STOMP = False
 
-# STANOX → directional offset (minutes) to estimate Twyford pass time.
-# UP trains come from the west and have already passed Twyford by the time they reach the STANOX.
-# DOWN trains are heading west and will reach Twyford after the STANOX.
-# Maidenhead (74005) is ~4 min east of Twyford on the Main line.
+# STANOX → platform-aware offsets (minutes) to estimate Twyford pass time.
+# UP trains have already passed Twyford (offsets are negative = in the past).
+# DOWN trains will reach Twyford after the STANOX (offsets are positive = in the future).
+# Platforms 1/2 = Main Line (fast IETs, ~4 min); platforms 3/4 = Relief Line (freight/local, ~6 min).
+# Freight runs on the Relief line, so the 'slow' offset applies to most freight.
 _NR_STANOX_WATCH = {
-    '74005': {'up_offset': -4, 'down_offset': 4},   # Maidenhead
+    '74005': {                   # Maidenhead (~4 miles east of Twyford)
+        'main_plats':  frozenset({'1', '2'}),
+        'up_fast':    -4,  'down_fast':   4,   # Main Line (IETs, ~67 mph)
+        'up_slow':    -6,  'down_slow':   6,   # Relief Line (freight/local, ~40-60 mph)
+    },
 }
 
 _nr_lock      = threading.Lock()
@@ -1270,11 +1275,13 @@ class _NRListener:
                 if not _nr_freight_hc(reporting_hc):
                     continue
                 direction = body.get('direction_ind', '').upper()
-                offsets = _NR_STANOX_WATCH[stanox]
+                platform  = body.get('platform', '').strip()
+                info = _NR_STANOX_WATCH[stanox]
+                is_main = platform in info['main_plats']
                 if direction == 'UP':
-                    offset_min = offsets['up_offset']
+                    offset_min = info['up_fast'] if is_main else info['up_slow']
                 elif direction == 'DOWN':
-                    offset_min = offsets['down_offset']
+                    offset_min = info['down_fast'] if is_main else info['down_slow']
                 else:
                     continue
                 ts_ms = body.get('actual_timestamp')
@@ -1300,7 +1307,7 @@ class _NRListener:
                     'passenger':  False,
                     'call_type':  'PASS',
                     'direction':  'up' if direction == 'UP' else 'down',
-                    'track':      'Main',
+                    'track':      'Main' if is_main else 'Relief',
                     'origin':     '',
                     'dest':       '',
                     'orig_dep':   '',
