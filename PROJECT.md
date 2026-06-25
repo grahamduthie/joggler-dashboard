@@ -950,8 +950,7 @@ Enquiries Darwin feed, which is gzip-compressed).
 | Topic | Feed | Rate | Description |
 |-------|------|------|-------------|
 | `TRAIN_MVT_ALL_TOC` | Train Movements | Up to 600/min | TRUST system — every train passing or calling at a timing point. Includes freight and non-stopping trains. Messages are batched. **The most useful feed for trains.html.** |
-| `TD_ALL_SIG_AREA` | Train Describer (TD) | Up to 6000/min | All signal areas combined — very high volume. Use area-specific topics instead. |
-| `TD_M_SIG_AREA` | Train Describer (TD) | Medium | Paddington/Thames Valley panel only. Covers the GWR main line through Twyford. The `M` area code is visible in the Traksy URL `traksy.uk/live/M+63+TWYFORD`. TD messages include CA (berth step), CB (berth cancel), CC (berth interpose), CT (heartbeat). Berth IDs near Twyford visible at that URL. Subscribe to this topic and filter by berth ID client-side — much lower volume than ALL. **Currently being explored for exact position data.** |
+| `TD_ALL_SIG_AREA` | Train Describer (TD) | ~6000/min | All signal areas combined — the **only available TD topic**. Area-specific topics (e.g. `TD_WTV_SIG_AREA` for Western Thames Valley) were deprecated years ago and no longer exist on the broker. Filter client-side. We filter to areas D1/D4/D6 in `_handle_td()` before buffering, reducing effective volume ~50×. Message types: **CA** (berth step — train moved from→to), **CB** (berth cancel), **CC** (berth interpose), **CT** (heartbeat, ignore), **SF** (signal flag — aspect change), **SG/SH** (signal flag variants). |
 | `VSTP_ALL` | VSTP | Low volume | Very Short Term Planning — late-notice schedule additions not in the daily SCHEDULE feed. |
 | `RTPPM_ALL` | RTPPM | 1/min | Aggregate performance metrics. Not useful for per-train display. |
 | `TSR_ALL_ROUTE` | TSR | ~11/week | Temporary speed restrictions from the Weekly Operating Notice. |
@@ -1021,6 +1020,22 @@ headcode chars, producing bogus headcodes starting with `7`/`8`.
 | CRS | `TWY` | 3-letter public station code |
 | STANOX (signal berths) | `TWYF112`, `TWYF632`, `TWYFDW` | TD berth points — appear in TD feed but NOT in WTT schedules; RTT returns zero services for these |
 | STANOX (Maidenhead) | `74005` | ~4.5 miles east of Twyford on Main Line. **Has ZERO freight WTT timing points in CIF** — freight does not fire here. Elizabeth Line stopping trains fire here and are already in RTT data. |
+
+**TD signal area geography (confirmed by observation 2026-06-25):**
+
+All three areas are part of Thames Valley Signalling Centre (TVSC). The former area-specific STOMP topic was `TD_WTV_SIG_AREA` (Western Thames Valley) — now deprecated; all data comes via `TD_ALL_SIG_AREA`.
+
+| TD area_id | TVSC panel name | Geography | Confirmed trains |
+|------------|-----------------|-----------|-----------------|
+| `D4` | Hayes Area Scalable IECC | East of Twyford → Maidenhead | 1P36 (up Main) entered D4 at berth 0470 heading east |
+| `D6` | Maidenhead Area Scalable IECC | Twyford corridor — **Relief Line both directions + Up Main** | 9R78, 9R26, 9U35 (Relief); 1A31, 1P36 (up Main) |
+| `D1` | Reading IECC A | Reading area + **Down Main through Twyford** | 1G29 (down Main) was in D1 throughout its Twyford arrival |
+
+**D6 berth geography** (berths increase going west/toward Reading on Relief Line):
+- Down Relief at Twyford station: ~0577→0595
+- House (crossover between Up and Down Relief lines, ~200 m east of station): ~0x0565–0x0577 (down), ~0x0548–0x0565 (up)
+- House-zone watch range: D6 berths **0x0540–0x0600**
+- D6→D4 panel boundary (heading east/toward Maidenhead): berth ~0476/0470
 
 **TRUST at Twyford:** STANOX 87014 fires for stopping trains only. STANOX 74023 fires for
 ALL trains that have Twyford as a WTT timing point — including freight (confirmed: 157 freight
@@ -1394,5 +1409,8 @@ Everything working as of 2026-06-25.
 - [x] trains.html: poll interval 15 s; STOMP STANOX 87014 watch invalidates RTT cache on stopping train pass
 - [x] trains.html: multi-train NEXT view redesigned — each card mirrors single focus view (header + horizontal route band + 4 stat cards)
 - [x] trains.html: RECENT/NEXT mutual exclusion — grace period inverted so same train cannot appear in both modes
+- [x] transport-proxy.py: TD buffer filter — only D1/D4/D6 (Thames Valley SC) stored; _TD_BUF_MAX raised 300→3000; discards all other UK areas immediately on receipt
+- [x] td_correlate.py: diagnostic script — connects to TD_ALL_SIG_AREA, logs CA+SF events for D1/D4/D6 with ms timestamps, post-run analysis correlates which SF signal addresses consistently fire alongside each CA berth transition; house-zone berths (D6 0x0540–0x0600) highlighted live; run with `python3 td_correlate.py [minutes]`, re-analyse saved log with `--analyse`
 - [ ] transport-proxy.py: switch TRUST watch from STANOX 74005 (Maidenhead, no freight) → 74023 (Twyford, freight)
-- [ ] trains.html: TD feed berth tracking — subscribe to TD_M_SIG_AREA, correlate berth steps with known trains, use for exact pass-time detection (exploring)
+- [ ] trains.html: TD berth position tracking — use CA steps in D6 to show live train position between Maidenhead and Reading; real-time speed-based ETA to house (berths ~0x0540–0x0600 in D6); replaces fixed-offset Main Line estimation
+- [ ] trains.html: SF signal integration — once signal addresses mapped (via td_correlate.py), show "clear road" / "signals ahead at caution" for approaching trains; requires address→location mapping built from CA/SF correlation

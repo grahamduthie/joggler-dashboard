@@ -1268,6 +1268,11 @@ _nr_buffer    = {}   # uid → train dict
 _nr_conn      = None
 _nr_running   = False
 
+_td_lock      = threading.Lock()
+_td_buffer    = []   # recent TD CA (berth step) messages, newest last, D1/D4/D6 only
+_TD_BUF_MAX   = 3000
+_TD_AREAS     = {'D1', 'D4', 'D6'}   # Thames Valley SC: Reading, Hayes, Maidenhead
+
 
 def _nr_freight_hc(hc):
     return bool(hc) and hc[0] in '456789'
@@ -1280,12 +1285,55 @@ class _NRListener:
     def set_conn(self, conn):
         self._conn_ref = conn
 
+    def on_heartbeat_timeout(self):
+        print('NR STOMP heartbeat timeout; will reconnect')
+        threading.Thread(target=_nr_stomp_reconnect, daemon=True).start()
+
+    def _handle_td(self, msgs):
+        """Process Train Describer (TD) berth-step messages."""
+        global _td_buffer
+        new_entries = []
+        for item in msgs:
+            # TD messages wrap each event as {"CA_MSG": {...}, "CB_MSG": {...}, ...}
+            for msg_key, body in item.items():
+                if not isinstance(body, dict):
+                    continue
+                mtype = msg_key[:2]   # "CA", "CB", "CC", "CT"
+                if mtype != 'CA':
+                    continue
+                if body.get('area_id', '') not in _TD_AREAS:
+                    continue
+                descr = body.get('descr', '').strip()
+                if not descr or descr == '    ' or descr == '0000':
+                    continue
+                try:
+                    ts = int(body.get('time', 0))
+                except (TypeError, ValueError):
+                    ts = 0
+                entry = {
+                    'area': body.get('area_id', ''),
+                    'from': body.get('from', ''),
+                    'to':   body.get('to', ''),
+                    'descr': descr,
+                    'ts':   ts,
+                }
+                new_entries.append(entry)
+        if new_entries:
+            with _td_lock:
+                _td_buffer.extend(new_entries)
+                if len(_td_buffer) > _TD_BUF_MAX:
+                    _td_buffer = _td_buffer[-_TD_BUF_MAX:]
+
     def on_message(self, frame):
         global _rtt_trains_ts
         try:
             msgs = json.loads(frame.body)
             if not isinstance(msgs, list):
                 msgs = [msgs]
+            # Distinguish TD messages (have CA_MSG/CB_MSG keys) from MVT (have 'header')
+            if msgs and any(k.endswith('_MSG') for k in msgs[0]):
+                self._handle_td(msgs)
+                return
             for msg in msgs:
                 body = msg.get('body', {})
                 if msg.get('header', {}).get('msg_type') != '0003':
@@ -1363,7 +1411,8 @@ class _NRListener:
         threading.Thread(target=_nr_stomp_reconnect, daemon=True).start()
 
     def on_error(self, frame):
-        print(f'NR STOMP error: {frame.body}')
+        hdrs = getattr(frame, 'headers', {})
+        print(f'NR STOMP error: {frame.body!r}  headers={hdrs}')
 
 
 def _nr_stomp_connect():
@@ -1394,8 +1443,18 @@ def _nr_stomp_connect():
             ack='auto',
             headers={'activemq.subscriptionName': NR_USERNAME + '-mvt'},
         )
+        try:
+            conn.subscribe(
+                destination='/topic/TD_ALL_SIG_AREA',
+                id='2',
+                ack='auto',
+                headers={'activemq.subscriptionName': NR_USERNAME + '-td'},
+            )
+            print('NR STOMP also subscribed to TD_ALL_SIG_AREA')
+        except Exception as e:
+            print(f'NR STOMP TD subscription failed (non-fatal): {e}')
         _nr_conn = conn
-        print('NR STOMP connected and subscribed to TRAIN_MVT_ALL_TOC')
+        print('NR STOMP connected and subscribed to TRAIN_MVT_ALL_TOC + TD_ALL_SIG_AREA')
         return True
     except Exception as e:
         print(f'NR STOMP connect failed: {e}')
@@ -1470,6 +1529,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._static('/trains.html')
         elif parsed.path == '/api/trains':
             self._trains(qs)
+        elif parsed.path == '/api/td-log':
+            self._td_log(qs)
         else:
             self._static(parsed.path)
 
@@ -2027,6 +2088,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(data)
         except Exception as e:
             self._respond(502, 'text/plain', str(e).encode())
+
+    def _td_log(self, qs):
+        limit = min(int(qs.get('n', ['100'])[0]), _TD_BUF_MAX)
+        with _td_lock:
+            entries = list(_td_buffer[-limit:])
+        self._json({'count': len(entries), 'entries': entries})
 
     def _static(self, path):
         if '..' in path:
