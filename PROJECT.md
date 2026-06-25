@@ -583,14 +583,18 @@ are not audible from the house (~200 m east of the station).
 **Three display modes** (toggle buttons in top bar):
 
 - **RECENT** — focus view for the most recent train that passed (within last 10 min)
-- **NEXT** — focus view for the next train due (within 2 min past → future)
+- **NEXT** — focus view for the next train due. If 2 or more trains are expected within
+  90 seconds of each other, a compact stacked multi-card view shows all of them simultaneously,
+  each with operator badge, headcode, route, track direction, and time
 - **LIST** — scrollable departure board; tapping a row opens a focus view for that train
 
 **Focus view elements:**
 - Header bar: operator name + gradient background in operator brand colour
 - Large headcode (e.g. `1L35`) + track badge (`Main`/`Relief`) + call type badge (`STOP`/`PASS`/`PASS (est)`)
-- Route strip: origin → **TWYFORD** (amber) → destination
-- Four stat cards: scheduled/actual time, delay (minutes), track, vehicle count
+- Route strip: origin → **TWYFORD** (amber) → destination; when TRUST has confirmed the actual
+  pass time, shows `✓ HH:MM` (or `✓ HH:MM (+N min)` if late ≥5 min)
+- Four stat cards: time at Twyford (label changes to "Passed At" once TRUST confirms actual
+  time), delay (minutes), track direction, vehicle count
 
 **Operator colour dict (`OPS` in trains.html):**
 
@@ -608,6 +612,15 @@ are not audible from the house (~200 m east of the station).
 
 **Direction logic:** `direction=up` if destination is in the set of London termini (London
 Paddington, Abbey Wood, Shenfield, Heathrow termini). Otherwise `down`.
+
+**NEXT mode grace period (direction-aware):** Once TRUST fires for Twyford (`twy_actual` set),
+the grace period before removing a train from NEXT depends on direction relative to the house
+(~200 m east of Twyford station):
+- DOWN trains (Reading direction): house is east of Twyford so the train passed the house
+  *before* arriving at Twyford → grace = 0 (remove immediately once `twy_actual` is set)
+- UP trains (London direction): train departs Twyford heading east, passes the house ~30 s
+  later → grace = 30 s after `twy_actual`
+- Unconfirmed/estimated trains: grace = 120 s (schedule is approximate)
 
 **Freight display:** Freight trains (`passenger=false`) show a green `FRET` badge (background
 `#2d3d1a`, text `#a0c060`) instead of the operator colour. The focus view shows the freight
@@ -966,6 +979,11 @@ Each STOMP message body is a JSON array of objects, each with `header` and `body
 ]
 ```
 
+**`train_id` format (10 characters):** `PPHHHHSSSS` where PP = 2-char schedule prefix
+(numeric), HHHH = 4-char headcode (e.g. `1G21`), SSSS = 4-char date suffix. Extract the
+headcode with `train_id[2:6]` — **not** `[:4]` which would return the prefix + first two
+headcode chars, producing bogus headcodes starting with `7`/`8`.
+
 **msg_type values:**
 - `0001` — Train Activation (train ID assigned to a schedule)
 - `0002` — Train Cancellation
@@ -980,23 +998,29 @@ Each STOMP message body is a JSON array of objects, each with `header` and `body
 
 | Code type | Code | Notes |
 |-----------|------|-------|
-| STANOX | `87014` | Twyford station — the primary code to filter Train Movement messages |
-| TIPLOC | `TWYFORD` | Used in RTT API and CIF schedules |
+| STANOX | `87014` | Twyford station — fires in TRUST for **stopping** trains only |
+| STANOX | `74023` | Twyford (alternate STANOX) — fires for both stopping AND passing trains including freight (2101 freight schedules in CIF_FREIGHT_FULL_DAILY pass Twyford at STANOX 74023) |
+| TIPLOC | `TWYFORD` | Used in RTT API and CIF schedules; maps to STANOX 74023 |
 | CRS | `TWY` | 3-letter public station code |
 | STANOX (signal berths) | `TWYF112`, `TWYF632`, `TWYFDW` | TD berth points — appear in TD feed but NOT in WTT schedules; RTT returns zero services for these |
-| STANOX (Maidenhead) | `74005` | Used in proxy for freight — ~4 min east of Twyford on Main Line |
+| STANOX (Maidenhead) | `74005` | ~4.5 miles east of Twyford on Main Line. **Has ZERO freight WTT timing points in CIF** — freight does not fire here. Elizabeth Line stopping trains fire here and are already in RTT data. |
 
-**Twyford (STANOX 87014) only fires for trains that have Twyford as a WTT timing point** —
-i.e. stopping services only. Fast passengers and freight pass through without a TRUST message.
+**TRUST at Twyford:** STANOX 87014 fires for stopping trains only. STANOX 74023 fires for
+ALL trains that have Twyford as a WTT timing point — including freight (confirmed: 157 freight
+services active on a typical day in CIF_FREIGHT_FULL_DAILY, all with `pass` at TWYFORD TIPLOC).
 
-**Maidenhead (STANOX 74005) is used for freight.** Freight trains do have Maidenhead as a
-TRUST timing point. The proxy watches for freight headcodes (first digit 4–9) at STANOX 74005
-and applies a ±4 min offset to estimate Twyford pass time:
-- UP trains (towards London): Maidenhead timestamp − 4 min (already passed Twyford)
-- DOWN trains (towards west): Maidenhead timestamp + 4 min (Twyford is upcoming)
+**Maidenhead STANOX 74005 is NOT useful for freight.** Despite earlier assumption, CIF
+analysis shows freight has zero WTT timing points at Maidenhead. TRUST fires at 74005 for
+Elizabeth Line passenger trains (which are already in RTT data), not freight. The proxy
+currently watches 74005 but any freight captured there is a false positive.
+
+**Twyford STANOX 74023 is the correct STANOX for freight** — not yet switched in proxy (as
+of 2026-06-25); 87014 (stops only) is still the primary code in use.
 
 To filter the full TRAIN_MVT_ALL_TOC stream for Twyford stopping trains:
 `body.loc_stanox == "87014"`
+For all Twyford timing points (including freight pass-through):
+`body.loc_stanox == "74023"`
 
 ### Account states
 
@@ -1164,6 +1188,21 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
 - **IATA vs ICAO:** ICAO codes are 3-letter (BAW, EZY), IATA are 2-letter (BA, U2). The
   AIRLINES dict in dashboard.html is keyed by ICAO
 
+### Timezone handling in transport-proxy.py
+- **RTT times are local BST, not UTC.** RTT returns schedule times as naive ISO strings without
+  timezone suffix (e.g. `2026-06-25T14:04:00`). These are local Europe/London time (BST in
+  summer, GMT in winter). Treating them as UTC introduces a 1-hour error in BST.
+- **`_iso_to_ts(iso)`** converts any ISO string to a UTC Unix timestamp. Naive strings are
+  explicitly tagged as `ZoneInfo('Europe/London')` — handles BST/GMT boundary automatically
+  via the Python stdlib. Timezone-aware strings (TRUST buffer uses `+00:00` UTC, BODS uses UTC)
+  are passed through unchanged.
+- **TRUST `actual_timestamp`** is Unix milliseconds, always UTC. Stored in the buffer as
+  a UTC-aware ISO string with `+00:00` suffix.
+- **CIF times** (e.g. `1638` = 16:38) are local BST. Not used in the proxy currently (freight
+  CIF integration is pending), but must be treated as local time when parsed.
+- **`ZoneInfo` import**: `from zoneinfo import ZoneInfo` and `_TZ_LONDON = ZoneInfo('Europe/London')`
+  at module top; requires Python 3.9+ (Pi has 3.13 — fine).
+
 ### Python / Server
 - **`stomp.py` must be installed system-wide for the proxy** — the proxy runs as root (`sudo bash -c 'nohup python3 …'`). A user-level install (`pip3 install --user`) is not visible to root and the import silently falls back to `_HAS_STOMP = False`, disabling freight. Install with `sudo pip3 install stomp.py --break-system-packages`
 - **`python3 -u` required** — without `-u`, Python block-buffers stdout when output is redirected to a file. Startup messages (NR STOMP connected, airport names loaded) never appear in the log until the buffer is flushed. Always start with `python3 -u transport-proxy.py`
@@ -1323,6 +1362,12 @@ Everything working as of 2026-06-25.
 - [x] trains.html: two-source RTT data (Twyford confirmed stops + Reading Main Line estimation)
 - [x] trains.html: operator colour dict (GWR, Elizabeth Line, CrossCountry, Heathrow Express, freight operators)
 - [x] trains.html: RTT token exchange + caching in transport-proxy (60 s pre-expiry refresh)
-- [x] trains.html: NR STOMP freight integration — proxy subscribes to TRAIN_MVT_ALL_TOC, buffers freight at Maidenhead (±4 min offset), merges into /api/trains
+- [x] trains.html: NR STOMP freight integration — proxy subscribes to TRAIN_MVT_ALL_TOC, buffers movements at watched STANOXes, merges into /api/trains
 - [x] trains.html: freight display — FRET badge, freightClass label, directional origin/dest in focus view
 - [x] trains.html: Henley branch trains (2H headcodes) filtered out
+- [x] trains.html: NEXT mode multi-train view — if 2+ trains within 90s of each other, compact stacked cards shown simultaneously
+- [x] trains.html: direction-aware NEXT grace period (DOWN=0s, UP=30s, unconfirmed=120s after twy_actual)
+- [x] trains.html: actual pass time always shown in focus view when TRUST confirms (✓ HH:MM); stat label → "Passed At"
+- [x] transport-proxy.py: BST/UTC timezone fix — naive ISO strings now treated as Europe/London (ZoneInfo), not system-default naive
+- [x] transport-proxy.py: TRUST headcode extraction fixed — train_id[2:6] not [:4] ([:4] returned schedule prefix + partial headcode)
+- [x] transport-proxy.py: TRUST deduplication fixed — headcode+time matching against RTT data (was UID matching, which failed because TRUST UIDs are 'nr:' prefixed)
