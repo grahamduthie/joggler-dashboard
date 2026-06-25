@@ -383,6 +383,14 @@ html, body {
 .tr-status { font-size: clamp(10px, 1.2vw, 15px); white-space: nowrap; }
 .tr-cancel { color: #e05050; }
 
+.fv-countdown {
+  font-size: clamp(11px, 1.5vw, 20px);
+  color: #a0c8e8;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  font-style: italic;
+}
+
 /* Responsive: Joggler 800×480 */
 @media (max-height: 500px) {
   #topbar         { height: 44px; }
@@ -467,9 +475,10 @@ function freightClass(hc) {
 }
 
 /* ── State ────────────────────────────────────────────────── */
-var currentMode = 'next';
-var trainsData  = null;
-var pollTimer   = null;
+var currentMode    = 'next';
+var trainsData     = null;
+var pollTimer      = null;
+var countdownTimer = null;
 
 /* ── Mode switching ──────────────────────────────────────── */
 function setMode(mode) {
@@ -483,7 +492,8 @@ function setMode(mode) {
 /* ── Polling ─────────────────────────────────────────────── */
 function startPoll() {
   fetchTrains();
-  pollTimer = setInterval(fetchTrains, 30000);
+  pollTimer      = setInterval(fetchTrains, 30000);
+  countdownTimer = setInterval(render, 15000);  // re-render for countdown updates (no fetch)
 }
 
 function fetchTrains() {
@@ -534,6 +544,21 @@ function lateStr(t) {
   if (t.late_min > 0)   return '+' + t.late_min + ' min';
   if (t.late_min < 0)   return t.late_min + ' min';
   return '';
+}
+
+// Returns a half-minute-resolution countdown string, e.g. "in about 2½ mins".
+// Only used for estimated (unconfirmed) trains.
+function fmtCountdown(ms, now) {
+  var diff = ms - now;
+  if (diff < 15000) return 'passing now';
+  var slots = Math.round(diff / 30000);  // 1 slot = 30 seconds
+  if (slots < 1) return 'passing now';
+  var totalSecs = slots * 30;
+  var mins = Math.floor(totalSecs / 60);
+  var half = (totalSecs % 60) === 30;
+  if (mins === 0) return 'in about 30 secs';
+  if (half)  return 'in about ' + mins + '½ mins';
+  return 'in about ' + mins + ' min' + (mins !== 1 ? 's' : '');
 }
 
 /* ── Main render ─────────────────────────────────────────── */
@@ -663,6 +688,7 @@ function renderFocus(t, now) {
       '<div class="fv-right">' +
         '<span class="fv-track-badge">' + esc(trackLabel(t)) + '</span>' +
         '<span class="fv-call-badge ' + callClass + '">' + callText + '</span>' +
+        (isEst ? '<span class="fv-countdown">' + esc(fmtCountdown(ms, now)) + '</span>' : '') +
       '</div>' +
     '</div>' +
 
@@ -740,7 +766,9 @@ function renderMulti(targets, now) {
       var aNote = (hasPassed ? 'Passed ' : '✓ ') + fmtTime(t.twy_actual);
       if (isBadLate) aNote += ' (+' + t.late_min + ' min)';
       metaParts.push(aNote);
-    } else if (!isEst && !t.cancelled) {
+    } else if (isEst) {
+      metaParts.push(fmtCountdown(ms, now));
+    } else if (!t.cancelled) {
       if (t.late_min === 0) metaParts.push('On time');
       else if (t.late_min) metaParts.push((t.late_min > 0 ? '+' : '') + t.late_min + ' min');
     }
