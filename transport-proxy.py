@@ -1199,16 +1199,28 @@ def _rtt_build_trains():
         if t['twy_sched'] and not t['headcode'].startswith('2H'):
             trains.append(t)
 
-    # Merge NR freight from STOMP buffer; prune entries older than 2 hours
+    # Merge NR STOMP buffer; prune entries older than 2 hours.
+    # Deduplicate against RTT trains by headcode+time (10-min window) so that
+    # GWR fast trains stopping at Maidenhead don't appear twice.
     cutoff = now - 7200
+    rtt_hc_ts = {}   # headcode → scheduled twy timestamp from RTT
+    for t in trains:
+        hc_key = t.get('headcode', '')
+        ts = _iso_to_ts(t.get('twy_sched', ''))
+        if hc_key and ts:
+            rtt_hc_ts[hc_key] = ts
     with _nr_lock:
         stale = [uid for uid, e in _nr_buffer.items()
                  if _iso_to_ts(e.get('twy_sched', '')) < cutoff]
         for uid in stale:
             del _nr_buffer[uid]
         for uid, entry in _nr_buffer.items():
-            if uid not in seen:
-                trains.append(entry)
+            hc = entry.get('headcode', '')
+            ts = _iso_to_ts(entry.get('twy_sched', ''))
+            rtt_ts = rtt_hc_ts.get(hc)
+            if rtt_ts and abs(rtt_ts - ts) < 600:
+                continue   # RTT already has this train
+            trains.append(entry)
 
     trains.sort(key=lambda t: t.get('twy_sched') or '')
     result = {'trains': trains, 'ts': int(now)}
@@ -1230,13 +1242,13 @@ except ImportError:
 # STANOX → platform-aware offsets (minutes) to estimate Twyford pass time.
 # UP trains have already passed Twyford (offsets are negative = in the past).
 # DOWN trains will reach Twyford after the STANOX (offsets are positive = in the future).
-# Platforms 1/2 = Main Line (fast IETs, ~4 min); platforms 3/4 = Relief Line (freight/local, ~6 min).
-# Freight runs on the Relief line, so the 'slow' offset applies to most freight.
+# Platforms 1/2 = Main Line; platforms 3/4 = Relief Line (freight/local).
+# Observed TRUST transit times (2026-06-25): Main DOWN ~3.5 min, Relief DOWN ~5 min.
 _NR_STANOX_WATCH = {
-    '74005': {                   # Maidenhead (~4 miles east of Twyford)
+    '74005': {                   # Maidenhead (~4.5 miles east of Twyford)
         'main_plats':  frozenset({'1', '2'}),
-        'up_fast':    -4,  'down_fast':   4,   # Main Line (IETs, ~67 mph)
-        'up_slow':    -6,  'down_slow':   6,   # Relief Line (freight/local, ~40-60 mph)
+        'up_fast':    -4,  'down_fast':   4,   # Main Line (IETs, ~67 mph) — observed 3.5 min
+        'up_slow':    -5,  'down_slow':   5,   # Relief Line (freight/local) — observed 5.2 min
     },
 }
 
@@ -1270,8 +1282,9 @@ class _NRListener:
                 if stanox not in _NR_STANOX_WATCH:
                     continue
                 hc = body.get('train_id', '')
-                # train_id in TRUST is a 10-char string; reporting identity is first 4 chars
-                reporting_hc = hc[:4] if len(hc) >= 4 else hc
+                # TRUST train_id is 10 chars: 2-char schedule prefix + 4-char headcode + 4-char suffix.
+                # e.g. "731G21MR25" → prefix "73", headcode "1G21", suffix "MR25".
+                reporting_hc = hc[2:6] if len(hc) >= 6 else hc
                 if not _nr_freight_hc(reporting_hc):
                     continue
                 direction = body.get('direction_ind', '').upper()
