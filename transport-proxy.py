@@ -1267,6 +1267,9 @@ _nr_lock      = threading.Lock()
 _nr_buffer    = {}   # uid → train dict
 _nr_conn      = None
 _nr_running   = False
+_nr_start_lock     = threading.Lock()
+_nr_page_active_ts = 0.0     # time of last /api/trains request
+_NR_IDLE_TIMEOUT   = 90      # seconds without a poll → disconnect STOMP
 
 _td_lock      = threading.Lock()
 _td_buffer    = []   # recent TD CA (berth step) messages, newest last, D1/D4/D6 only
@@ -1462,20 +1465,56 @@ def _nr_stomp_connect():
 
 
 def _nr_stomp_reconnect():
-    global _nr_running
     delay = 10
-    while _nr_running:
+    while True:
         time.sleep(delay)
+        if not _nr_running:          # stopped intentionally while we slept — do not reconnect
+            return
         print(f'NR STOMP reconnecting (delay was {delay}s)…')
         if _nr_stomp_connect():
             return
         delay = min(delay * 2, 300)
 
 
+def _nr_stomp_stop():
+    """Cleanly disconnect STOMP. Sets _nr_running=False BEFORE disconnect so
+    on_disconnected → _nr_stomp_reconnect exits immediately without retrying."""
+    global _nr_running, _nr_conn
+    if not _nr_running:
+        return
+    _nr_running = False          # must precede disconnect() to suppress reconnect
+    conn, _nr_conn = _nr_conn, None
+    if conn:
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+    print('NR STOMP disconnected (idle)')
+
+
 def _nr_stomp_start():
     global _nr_running
     _nr_running = True
     threading.Thread(target=_nr_stomp_connect, daemon=True).start()
+
+
+def _nr_touch():
+    """Record that the trains page is active; start STOMP if not already running."""
+    global _nr_page_active_ts
+    _nr_page_active_ts = time.time()
+    if not _nr_running and _HAS_STOMP:
+        with _nr_start_lock:
+            if not _nr_running:      # double-check inside lock to prevent race
+                _nr_stomp_start()
+
+
+def _nr_idle_watcher():
+    """Background thread: disconnect STOMP when no /api/trains poll for _NR_IDLE_TIMEOUT s."""
+    while True:
+        time.sleep(30)
+        if _nr_running and time.time() - _nr_page_active_ts > _NR_IDLE_TIMEOUT:
+            print('NR STOMP: no trains page activity — disconnecting')
+            _nr_stomp_stop()
 
 
 # ── HTTP server ──────────────────────────────────────────────────────────────
@@ -2083,6 +2122,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json(data)
 
     def _trains(self, qs):
+        _nr_touch()
         try:
             data = _rtt_build_trains()
             self._json(data)
@@ -2134,5 +2174,5 @@ class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 if __name__ == '__main__':
     _load_env()
-    _nr_stomp_start()
+    threading.Thread(target=_nr_idle_watcher, daemon=True).start()
     ThreadedServer(('0.0.0.0', 5001), Handler).serve_forever()
