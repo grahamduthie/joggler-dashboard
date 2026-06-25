@@ -1925,6 +1925,151 @@
   }
   .fd-back-btn:active { background: #2a3a4a; }
 
+  /* ── Flight focus overlay ── */
+  #fd-focus {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    background: #0d1b2a;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #fd-focus.active { display: flex; }
+  .cv-bar {
+    flex-shrink: 0;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #111e2e;
+    border-bottom: 2px solid #1e3a5a;
+    padding: 0 28px;
+  }
+  .cv-back {
+    font-size: clamp(15px, 2vw, 28px);
+    font-weight: bold;
+    color: #7fb3d3;
+    cursor: none;
+    letter-spacing: 0.5px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .cv-back:active { color: #ffffff; }
+  .cv-updated { font-size: clamp(12px, 1.4vw, 20px); color: #4a7a9a; }
+  #fd-focus-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .cv-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 3vw;
+    padding: 2.5vh 3vw;
+    border-bottom: 2px solid rgba(255,255,255,0.12);
+  }
+  .cv-logo {
+    height: 16vh;
+    max-height: 110px;
+    max-width: 28vw;
+    object-fit: contain;
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 12px 24px;
+    flex-shrink: 0;
+  }
+  .cv-flight-num {
+    font-size: clamp(36px, 7.5vw, 120px);
+    font-weight: bold;
+    line-height: 1;
+    font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+  }
+  .cv-airline-name { font-size: clamp(20px, 4vw, 60px); opacity: 0.85; margin-top: 0.5vh; }
+  .cv-flight-info {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    font-size: clamp(13px, 2.2vw, 36px);
+    color: #5a8fad;
+    gap: 0.8vh;
+    text-align: right;
+  }
+  .cv-ac-info-right {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 0.6vh;
+    font-size: clamp(15px, 2.8vw, 44px);
+    opacity: 0.75;
+    text-align: right;
+  }
+  .cv-route {
+    flex: 1;
+    min-height: 0;
+    padding: 2vh 3vw;
+    border-bottom: 2px solid #1e3a5a;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .cv-airport { font-size: clamp(22px, 5vw, 80px); font-weight: bold; color: #e8eaf0; line-height: 1.2; }
+  .cv-route-arrow { font-size: clamp(14px, 2vw, 32px); color: #4a7a9a; padding: 0.2vh 0; }
+  .cv-iata { font-size: clamp(12px, 2.2vw, 36px); opacity: 0.55; font-weight: normal; }
+  .cv-terminal { font-size: clamp(11px, 1.6vw, 26px); color: #7fb3d3; margin-left: 10px; }
+  .cv-times { font-size: clamp(13px, 2.2vw, 36px); color: #7fb3d3; margin-top: 0.8vh; }
+  .cv-route-loading { font-size: clamp(14px, 2vw, 28px); color: #4a7a9a; font-style: italic; padding: 1vh 0; }
+  .cv-stats {
+    flex-shrink: 0;
+    display: flex;
+    border-top: 2px solid #1e3a5a;
+  }
+  .cv-stat-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid #1e3a5a;
+    padding: 2vh 1vw;
+    gap: 0.8vh;
+  }
+  .cv-stat-card:last-child { border-right: none; }
+  .cv-stat-label { font-size: clamp(12px, 1.4vw, 22px); color: #4a7a9a; text-transform: uppercase; letter-spacing: 3px; }
+  .cv-stat-value { font-size: clamp(26px, 4vw, 64px); font-weight: bold; color: #ffffff; line-height: 1; font-family: 'DejaVu Sans Mono', 'Courier New', monospace; }
+  .cv-stat-unit { font-size: clamp(12px, 1.6vw, 26px); color: #5a8fad; }
+  .cv-heading-arrow { font-size: clamp(26px, 5vw, 80px); color: #7fb3d3; line-height: 1; display: inline-block; }
+
+  /* ── Focus overlay size overrides for 800×418px Joggler content area ── */
+  /* cv-bar=64px, so content gets 354px. Sizes below are tuned to fit. */
+  #fd-focus {
+    font-family: 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif;
+  }
+  #fd-focus .cv-header    { padding: 8px 24px; gap: 20px; }
+  #fd-focus .cv-logo      { height: 50px; max-height: 50px; max-width: 140px; padding: 6px 14px; border-radius: 6px; }
+  #fd-focus .cv-flight-num  { font-size: clamp(26px, 4.2vw, 52px); }
+  #fd-focus .cv-airline-name { font-size: clamp(13px, 1.8vw, 24px); margin-top: 3px; }
+  #fd-focus .cv-ac-info-right { font-size: clamp(11px, 1.5vw, 20px); gap: 2px; }
+  #fd-focus .cv-route     { padding: 10px 24px; }
+  #fd-focus .cv-airport   { font-size: clamp(17px, 2.8vw, 36px); }
+  #fd-focus .cv-route-arrow { font-size: clamp(11px, 1.5vw, 20px); padding: 1px 0; }
+  #fd-focus .cv-iata      { font-size: clamp(11px, 1.5vw, 20px); }
+  #fd-focus .cv-terminal  { font-size: clamp(10px, 1.2vw, 16px); }
+  #fd-focus .cv-times     { font-size: clamp(12px, 1.6vw, 22px); margin-top: 3px; }
+  #fd-focus .cv-route-loading { font-size: clamp(13px, 1.7vw, 22px); }
+  #fd-focus .cv-flight-info   { font-size: clamp(12px, 1.6vw, 22px); gap: 3px; }
+  #fd-focus .cv-stat-card { padding: 8px 8px; gap: 3px; }
+  #fd-focus .cv-stat-label { font-size: clamp(9px, 1vw, 13px); letter-spacing: 2px; }
+  #fd-focus .cv-stat-value { font-size: clamp(22px, 2.9vw, 38px); }
+  #fd-focus .cv-stat-unit  { font-size: clamp(10px, 1.2vw, 16px); }
+  #fd-focus .cv-heading-arrow { font-size: clamp(22px, 2.9vw, 38px); }
+
   #flight-msg {
     display: none; align-items: center; justify-content: center;
     height: 100%; font-size: 15px; color: #4a7a9a;
@@ -2474,6 +2619,7 @@
             <button id="flt-btn-commercial"    class="flt-btn active" onmousedown="flightToggleFilter('commercial')"    ontouchstart="flightToggleFilter('commercial')">Airlines</button>
             <button id="flt-btn-nonCommercial" class="flt-btn active" onmousedown="flightToggleFilter('nonCommercial')" ontouchstart="flightToggleFilter('nonCommercial')">Other</button>
             <button id="flt-btn-lhr"           class="flt-btn"        onmousedown="flightToggleFilter('lhr')"           ontouchstart="flightToggleFilter('lhr')">LHR only</button>
+            <button id="flt-btn-focus"         class="flt-btn"        onmousedown="flightToggleFocus()"                 ontouchstart="flightToggleFocus()">Focus</button>
           </div>
           <div id="flight-detail"></div>
           <div id="flight-msg">Loading aircraft data&#8230;</div>
@@ -2533,6 +2679,15 @@
         <button class="ts-btn ts-cancel" onmousedown="transHideSettings()">Cancel</button>
         <button class="ts-btn ts-save" onmousedown="transSaveSettings()">Save</button>
       </div>
+    </div>
+
+    <!-- Flight focus overlay -->
+    <div id="fd-focus">
+      <div class="cv-bar">
+        <div class="cv-back" onmousedown="flightCloseFocus()">&#8592; Back</div>
+        <div class="cv-updated" id="fd-focus-updated"></div>
+      </div>
+      <div id="fd-focus-content"></div>
     </div>
   </div>
 
@@ -4893,8 +5048,10 @@
 
   var flightAircraft  = [];
   var flightSelected  = null;
+  var flightFocusAc        = null;
+  var flightFocusAcInfoCache = {};
   var flightTimer     = null;
-  var ROUTE_CACHE_MAX_AGE = 6 * 60 * 60 * 1000; // 6 hours — flight numbers are reused daily
+  var ROUTE_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes — timing data changes while flight is in progress
   var flightRouteCache = (function() {
     try {
       var raw    = JSON.parse(localStorage.getItem('flightRouteCache') || '{}');
@@ -5051,16 +5208,18 @@
     'MAN':'Manchester','BHX':'Birmingham','EDI':'Edinburgh','GLA':'Glasgow',
     'BRS':'Bristol','NCL':'Newcastle','LBA':'Leeds Bradford','LPL':'Liverpool',
     'EMA':'East Midlands','ABZ':'Aberdeen','BFS':'Belfast','CWL':'Cardiff',
-    'SOU':'Southampton','EXT':'Exeter','NQY':'Newquay',
+    'SOU':'Southampton','EXT':'Exeter','NQY':'Newquay','INV':'Inverness',
+    'JER':'Jersey','GCI':'Guernsey',
     'CDG':'Paris CDG','ORY':'Paris Orly','AMS':'Amsterdam',
-    'FRA':'Frankfurt','MUC':'Munich','DUS':'Dusseldorf','BER':'Berlin','HAM':'Hamburg','STR':'Stuttgart','CGN':'Cologne',
-    'VIE':'Vienna','ZRH':'Zurich','GVA':'Geneva','BSL':'Basel',
+    'FRA':'Frankfurt','MUC':'Munich','DUS':'Dusseldorf','BER':'Berlin','HAM':'Hamburg','STR':'Stuttgart','CGN':'Cologne','HAJ':'Hannover','NUE':'Nuremberg',
+    'VIE':'Vienna','ZRH':'Zurich','GVA':'Geneva','BSL':'Basel','INN':'Innsbruck','GRZ':'Graz','SZG':'Salzburg',
     'MAD':'Madrid','BCN':'Barcelona','LIS':'Lisbon','OPO':'Porto',
     'FCO':'Rome Fiumicino','MXP':'Milan Malpensa','VCE':'Venice','NAP':'Naples','BLQ':'Bologna','PMO':'Palermo',
-    'ATH':'Athens','SKG':'Thessaloniki',
-    'IST':'Istanbul','SAW':'Istanbul Sabiha','ADB':'Izmir','ESB':'Ankara',
-    'CPH':'Copenhagen','ARN':'Stockholm','GOT':'Gothenburg',
-    'HEL':'Helsinki','OSL':'Oslo','BGO':'Bergen',
+    'CTA':'Catania','FLR':'Florence','LIN':'Milan Linate','PSA':'Pisa','TRN':'Turin','VRN':'Verona','BRI':'Bari','CAG':'Cagliari','OLB':'Olbia',
+    'ATH':'Athens','SKG':'Thessaloniki','KLX':'Kalamata',
+    'IST':'Istanbul','SAW':'Istanbul Sabiha','ADB':'Izmir','ESB':'Ankara','BJV':'Bodrum','DLM':'Dalaman',
+    'CPH':'Copenhagen','ARN':'Stockholm','GOT':'Gothenburg','BLL':'Billund',
+    'HEL':'Helsinki','OSL':'Oslo','BGO':'Bergen','KEF':'Reykjavik',
     'DUB':'Dublin','ORK':'Cork',
     'OTP':'Bucharest','BUD':'Budapest','PRG':'Prague',
     'WAW':'Warsaw','KRK':'Kraków','WRO':'Wrocław','GDN':'Gdańsk',
@@ -5070,12 +5229,15 @@
     'RIX':'Riga','TLL':'Tallinn','VNO':'Vilnius',
     'KBP':'Kyiv','LWO':'Lviv',
     'LCA':'Larnaca','PFO':'Paphos',
-    'BRU':'Brussels','LUX':'Luxembourg',
+    'BRU':'Brussels','LUX':'Luxembourg','RTM':'Rotterdam','MLA':'Malta',
+    'TIA':'Tirana','ALG':'Algiers','GIB':'Gibraltar','TBS':'Tbilisi',
+    'NCE':'Nice','LYS':'Lyon','MRS':'Marseille','BOD':'Bordeaux','TLS':'Toulouse',
     'GRO':'Girona','VLC':'Valencia','SVQ':'Seville','BIO':'Bilbao',
-    'RAK':'Marrakech','TNG':'Tangier',
-    'AGP':'Malaga','ALC':'Alicante','PMI':'Palma','IBZ':'Ibiza',
+    'RAK':'Marrakech','TNG':'Tangier','AGA':'Agadir','RBA':'Rabat',
+    'AGP':'Malaga','ALC':'Alicante','PMI':'Palma','IBZ':'Ibiza','FUE':'Fuerteventura','MAH':'Menorca',
     'FAO':'Faro','ACE':'Lanzarote','TFS':'Tenerife South','LPA':'Gran Canaria',
-    'HER':'Heraklion','RHO':'Rhodes','CFU':'Corfu','EFL':'Kefalonia','ZTH':'Zakynthos','KGS':'Kos','SKG':'Thessaloniki','CHQ':'Chania','JMK':'Mykonos','JTR':'Santorini','AYT':'Antalya',
+    'HER':'Heraklion','RHO':'Rhodes','CFU':'Corfu','EFL':'Kefalonia','ZTH':'Zakynthos','KGS':'Kos','CHQ':'Chania','JMK':'Mykonos','JTR':'Santorini','AYT':'Antalya',
+    'SSH':'Sharm El Sheikh',
     'JFK':'New York JFK','EWR':'New York Newark','LGA':'New York LaGuardia',
     'LAX':'Los Angeles','ORD':"Chicago O'Hare",'ATL':'Atlanta',
     'DFW':'Dallas Fort Worth','DEN':'Denver','SEA':'Seattle',
@@ -5083,16 +5245,24 @@
     'IAD':'Washington Dulles','DCA':'Washington Reagan',
     'IAH':'Houston','PHX':'Phoenix','MSP':'Minneapolis','DTW':'Detroit',
     'CLT':'Charlotte','MCO':'Orlando','LAS':'Las Vegas','SAN':'San Diego',
+    'AUS':'Austin','BWI':'Baltimore','PHL':'Philadelphia',
     'YYZ':'Toronto Pearson','YUL':'Montreal','YVR':'Vancouver','YYC':'Calgary',
     'MEX':'Mexico City','CUN':'Cancun','GRU':'Sao Paulo','EZE':'Buenos Aires',
+    'GIG':'Rio de Janeiro','SCL':'Santiago',
+    'BGI':'Barbados','ANU':'Antigua','GND':'Grenada','POS':'Port of Spain','UVF':'St Lucia',
+    'KIN':'Kingston','NAS':'Nassau','PUJ':'Punta Cana','GCM':'Cayman Islands','BDA':'Bermuda','GEO':'Georgetown',
     'DXB':'Dubai','AUH':'Abu Dhabi','DOH':'Doha','KWI':'Kuwait',
     'BAH':'Bahrain','RUH':'Riyadh','JED':'Jeddah','MCT':'Muscat',
     'TLV':'Tel Aviv','BEY':'Beirut','AMM':'Amman','CAI':'Cairo',
     'SIN':'Singapore','HKG':'Hong Kong','NRT':'Tokyo Narita','HND':'Tokyo Haneda',
-    'ICN':'Seoul Incheon','PEK':'Beijing','PVG':'Shanghai',
+    'ICN':'Seoul Incheon','PEK':'Beijing','PVG':'Shanghai','CAN':'Guangzhou',
     'BKK':'Bangkok','KUL':'Kuala Lumpur','DEL':'Delhi','BOM':'Mumbai',
+    'BLR':'Bengaluru','MAA':'Chennai','HYD':'Hyderabad',
+    'ISB':'Islamabad','KHI':'Karachi','LHE':'Lahore','DAC':'Dhaka','CMB':'Colombo','MLE':'Malé',
+    'MNL':'Manila','CGK':'Jakarta','TPE':'Taipei',
     'JNB':'Johannesburg','CPT':'Cape Town','NBO':'Nairobi','ADD':'Addis Ababa',
-    'CMN':'Casablanca','LOS':'Lagos',
+    'CMN':'Casablanca','LOS':'Lagos','ACC':'Accra','ABV':'Abuja',
+    'MRU':'Mauritius','TUN':'Tunis',
     'SYD':'Sydney','MEL':'Melbourne','BNE':'Brisbane','PER':'Perth','AKL':'Auckland',
   };
 
@@ -5321,7 +5491,8 @@
 
   function flightStop() {
     if (flightTimer) { clearInterval(flightTimer); flightTimer = null; }
-    flightSelected = null;
+    flightSelected  = null;
+    if (flightFocusOpen) flightCloseFocus();
   }
 
   // ── Canvas setup ─────────────────────────────────────────────
@@ -5543,6 +5714,7 @@
           document.getElementById('flight-msg').style.display = 'none';
           flightDrawRadar();
           flightRenderList();
+          if (flightFocusOpen) flightUpdateFocus();
           return;
         } catch(e) { /* fall through to error handler */ }
       }
@@ -5936,7 +6108,9 @@
           route._ts = Date.now();
           flightRouteCache[cs] = route;
           try { localStorage.setItem('flightRouteCache', JSON.stringify(flightRouteCache)); } catch(e) {}
-          if (flightSelected && (flightSelected.flight || '').trim() === cs) {
+          if (flightFocusOpen && flightFocusAc && (flightFocusAc.flight || '').trim() === cs) {
+            flightUpdateFocus();
+          } else if (flightSelected && (flightSelected.flight || '').trim() === cs) {
             flightShowRoute(route);
           } else if (!flightSelected) {
             flightRenderList();
@@ -5980,6 +6154,190 @@
         if (yearEl) yearEl.textContent = '  ·  ' + info.built_label + ' ' + info.built;
       } catch(e) {}
     };
+    xhr.send();
+  }
+
+  // ── Focus view ─────────────────────────────────────────────────────────────
+
+  var flightFocusOpen = false;
+
+  function flightToggleFocus() {
+    if (flightFocusOpen) {
+      flightCloseFocus();
+    } else {
+      flightOpenFocus();
+    }
+  }
+
+  function flightOpenFocus() {
+    flightFocusOpen = true;
+    flightFocusAc   = null;
+    var btn = document.getElementById('flt-btn-focus');
+    if (btn) btn.classList.add('active');
+    document.getElementById('fd-focus').classList.add('active');
+    flightUpdateFocus();
+  }
+
+  function flightCloseFocus() {
+    flightFocusOpen = false;
+    flightFocusAc   = null;
+    var btn = document.getElementById('flt-btn-focus');
+    if (btn) btn.classList.remove('active');
+    document.getElementById('fd-focus').classList.remove('active');
+    document.getElementById('fd-focus-content').innerHTML = '';
+  }
+
+  function flightUpdateFocus() {
+    if (!flightFocusOpen) return;
+
+    // Find the nearest commercial aircraft
+    var commercial = flightAircraft.filter(flightAcIsCommercial);
+    commercial.sort(function(a, b) { return a._dist - b._dist; });
+    var ac = commercial[0] || null;
+    flightFocusAc = ac;
+
+    var now = new Date();
+    var updEl = document.getElementById('fd-focus-updated');
+    if (updEl) updEl.textContent = 'Updated ' + now.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+    var contentEl = document.getElementById('fd-focus-content');
+    if (!contentEl) return;
+
+    if (!ac) {
+      contentEl.innerHTML = '<div style="flex:1;display:flex;align-items:center;justify-content:center;font-size:18px;color:#4a7a9a">No commercial aircraft nearby</div>';
+      return;
+    }
+
+    var cs   = (ac.flight || '').trim();
+    var icao = cs.substring(0, 3);
+    var al   = AIRLINES[icao];
+    var bg   = al ? al.bg : '#0a1520';
+    var fg   = al ? al.fg : '#ffffff';
+    var route   = flightRouteCache[cs];
+    var iataFlt = route ? faRouteIataFlight(route) : '';
+    var dispFlt = iataFlt || cs || ac.r || '—';
+    var alName  = al ? al.name : (icao || '');
+
+    var logoHtml = al
+      ? '<img class="cv-logo" src="/api/airline-logo?iata=' + encodeURIComponent(al.iata) + '" onerror="this.style.display=\'none\'">'
+      : '';
+
+    // Route section
+    var routeHtml;
+    if (route && route.orig && route.dest) {
+      var origCity  = (route.orig_iata && AIRPORTS[route.orig_iata]) ? AIRPORTS[route.orig_iata] : route.orig;
+      var destCity  = (route.dest_iata && AIRPORTS[route.dest_iata]) ? AIRPORTS[route.dest_iata] : route.dest;
+      var origIata  = route.orig_iata ? ' <span class="cv-iata">(' + route.orig_iata + ')</span>' : '';
+      var destIata  = route.dest_iata ? ' <span class="cv-iata">(' + route.dest_iata + ')</span>' : '';
+      var origTerm  = route.orig_terminal ? '&nbsp;<span class="cv-terminal">T' + route.orig_terminal + '</span>' : '';
+      var dParts    = [];
+      if (route.dest_terminal) dParts.push('T' + route.dest_terminal);
+      if (route.dest_gate)     dParts.push('Gate ' + route.dest_gate);
+      var destTerm  = dParts.length ? '&nbsp;<span class="cv-terminal">' + dParts.join(' &middot; ') + '</span>' : '';
+      var depLine   = fdFmtTimeLine('Dep', route.depart_sched, route.depart_est);
+      var arrLine   = fdFmtTimeLine('Arr', route.arrive_sched, route.arrive_est);
+      var eteStr    = route.ete_s ? fdFmtEte(route.ete_s) : '';
+      var distStr   = route.distance_nm ? route.distance_nm.toLocaleString() + ' nm' : '';
+      var infoParts = [eteStr, distStr].filter(Boolean);
+      var infoHtml  = infoParts.length
+        ? '<div class="cv-flight-info">' + infoParts.map(function(p) { return '<div>' + p + '</div>'; }).join('') + '</div>'
+        : '';
+      routeHtml =
+        '<div style="display:flex;gap:2vw;align-items:stretch">' +
+          '<div style="flex:1">' +
+            '<div class="cv-airport">' + origCity + origIata + origTerm + '</div>' +
+            (depLine ? '<div class="cv-times">' + depLine + '</div>' : '') +
+            '<div class="cv-route-arrow">&#8595;</div>' +
+            '<div class="cv-airport">' + destCity + destIata + destTerm + '</div>' +
+            (arrLine ? '<div class="cv-times">' + arrLine + '</div>' : '') +
+          '</div>' +
+          infoHtml +
+        '</div>';
+    } else {
+      routeHtml = '<div class="cv-route-loading">' + (route ? 'No route information available' : 'Route information loading…') + '</div>';
+      if (cs && !flightRouteCache[cs]) flightFetchRoute(ac, cs);
+    }
+
+    // Stats
+    var dirs    = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    var altFt   = typeof ac.alt_baro === 'number' ? ac.alt_baro : null;
+    var altM    = altFt != null ? Math.round(altFt * 0.3048) : null;
+    var altVal  = altM  != null ? altM.toLocaleString() : '&mdash;';
+    var kph     = ac.gs ? Math.round(ac.gs * 1.852) : null;
+    var kphVal  = kph != null ? kph : '&mdash;';
+    var hdg     = ac.track != null ? Math.round(ac.track) : null;
+    var hdgDir  = hdg != null ? dirs[Math.round(hdg / 22.5) % 16] : '&mdash;';
+    var hdgSub  = hdg != null ? hdg + '&deg;' : '';
+    var arrow   = hdg != null ? '<div class="cv-heading-arrow" style="transform:rotate(' + hdg + 'deg)">&#8593;</div>' : '';
+    var distKm  = Math.round(ac._dist * 1.852);
+    var distNm  = Math.round(ac._dist);
+
+    // Aircraft type/reg
+    var acParts  = [];
+    var acType   = AC_TYPES[ac.t] || ac.t || '';
+    var acCached = flightFocusAcInfoCache[ac.hex];
+    if (acType) acParts.push(acType);
+    if (ac.r)   acParts.push(ac.r);
+    if (acCached && acCached.year) acParts.push((acCached.label || 'Built') + ' ' + acCached.year);
+    var acInfoHtml = acParts.length
+      ? '<div class="cv-ac-info-right">' + acParts.map(function(p) { return '<div>' + p + '</div>'; }).join('') + '</div>'
+      : '';
+
+    contentEl.innerHTML =
+      '<div class="cv-header" style="background:' + bg + ';color:' + fg + '">' +
+        logoHtml +
+        '<div style="flex:1">' +
+          '<div class="cv-flight-num">' + dispFlt + '</div>' +
+          '<div class="cv-airline-name">' + alName + '</div>' +
+        '</div>' +
+        acInfoHtml +
+      '</div>' +
+      '<div class="cv-route">' + routeHtml + '</div>' +
+      '<div class="cv-stats">' +
+        '<div class="cv-stat-card">' +
+          '<div class="cv-stat-label">Altitude</div>' +
+          '<div class="cv-stat-value">' + altVal + '</div>' +
+          '<div class="cv-stat-unit">metres</div>' +
+        '</div>' +
+        '<div class="cv-stat-card">' +
+          '<div class="cv-stat-label">Speed</div>' +
+          '<div class="cv-stat-value">' + kphVal + '</div>' +
+          '<div class="cv-stat-unit">kph</div>' +
+        '</div>' +
+        '<div class="cv-stat-card">' +
+          '<div class="cv-stat-label">Heading</div>' +
+          '<div style="display:flex;align-items:center;gap:max(8px,1.2vw)">' +
+            '<div class="cv-stat-value">' + hdgDir + '</div>' +
+            arrow +
+          '</div>' +
+          '<div class="cv-stat-unit">' + hdgSub + '</div>' +
+        '</div>' +
+        '<div class="cv-stat-card">' +
+          '<div class="cv-stat-label">Distance</div>' +
+          '<div class="cv-stat-value">' + distKm + '</div>' +
+          '<div class="cv-stat-unit">km (' + distNm + ' nm)</div>' +
+        '</div>' +
+      '</div>';
+
+    // Fetch aircraft build year to augment ac-info-right
+    flightFocusFetchAcInfo(hex);
+  }
+
+  function flightFocusFetchAcInfo(hex) {
+    if (hex in flightFocusAcInfoCache) return;
+    flightFocusAcInfoCache[hex] = null;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/aircraft-info?hex=' + encodeURIComponent(hex), true);
+    xhr.timeout = 10000;
+    xhr.onload = function() {
+      try {
+        var info = JSON.parse(xhr.responseText);
+        if (!info.built) { flightFocusAcInfoCache[hex] = {}; return; }
+        flightFocusAcInfoCache[hex] = {year: info.built, label: info.built_label || 'Built'};
+        if (flightFocusAc && flightFocusAc.hex === hex) flightUpdateFocus();
+      } catch(e) { delete flightFocusAcInfoCache[hex]; }
+    };
+    xhr.onerror = xhr.ontimeout = function() { delete flightFocusAcInfoCache[hex]; };
     xhr.send();
   }
 

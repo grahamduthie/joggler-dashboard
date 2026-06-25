@@ -460,8 +460,9 @@ Leaflet.js OSM map + canvas overlay. Aircraft triangles rotated by heading.
 
 - ADS-B data via `/api/flights` → adsb.lol API (proxied — adsb.lol dropped direct CORS support)
 - Route data via `/api/flight-route?cs=CALLSIGN` → Pi scrapes FlightAware. Results cached in
-  `flightRouteCache` (localStorage). **TTL: 6 hours** — low-cost carriers reuse flight numbers
-  daily on different routes, so long TTLs show stale destinations.
+  `flightRouteCache` (localStorage). **TTL: 30 minutes** — timing data (actual/estimated
+  departure and arrival) changes while a flight is in progress, so short TTL keeps delay
+  information current. Proxy-side `ROUTE_TTL` is also 30 minutes for the same reason.
 - Map is **draggable** — canvas intercepts mouse/touch drag gestures and calls `flightMap.panBy()`.
   Aircraft list shows up to 7 aircraft closest to the map centre that are within the visible bounds.
 - **Filter buttons:** Airlines (commercial callsigns in AIRLINES table) / Other / LHR only.
@@ -509,7 +510,8 @@ or TV alongside the main Joggler kiosk.
 - Sends `&focus=1` on ADS-B fetch so proxy uses 20 s TTL instead of 60 s
 
 **Airport name resolution:**
-- Static AIRPORTS dict in JS covers ~80 common codes
+- Static AIRPORTS dict in JS covers ~230 common codes (all major LHR destinations: European,
+  North American, Caribbean, Middle Eastern, South Asian, African, Asia-Pacific)
 - On cache miss: calls `/api/airport-name?iata=XXX` → proxy reads `airport-names.json`
   (populated from OurAirports CSV, ~10 k IATA codes, downloaded once on proxy startup)
 - Result stored in `extraAirports` dict and triggers re-render
@@ -948,11 +950,11 @@ Everything working as of 2026-06-23.
 - [x] WagtailCam: live MJPEG, timelapse, fullscreen
 - [x] Transport: trains (5 departures, calling points)
 - [x] Flights: draggable Leaflet map, canvas overlay, Airlines/Other/LHR filter buttons,
-      aircraft detail panel, 6-hour route cache, rAF-throttled drag, debounced fetch
+      aircraft detail panel, 30-min route cache, rAF-throttled drag, debounced fetch
 - [x] Buses: Passenger platform departure board, BODS live vehicle map, stop markers
 - [x] Bus stop data file-cached (Overpass, run once)
 - [x] Bus timetable route data building progressively (Transport API, file-cached)
-- [x] Aircraft route cache persisted to localStorage (6-hour TTL)
+- [x] Aircraft route cache persisted to localStorage (30-min TTL)
 - [x] Aircraft info disk-cached on Pi (30-day mtime expiry)
 - [x] Hive indoor temperatures in Weather view
 - [x] Graceful shutdown via power button (Joggler only)
