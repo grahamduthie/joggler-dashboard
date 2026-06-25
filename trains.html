@@ -352,8 +352,21 @@ var OPS = {
   'HB': {bg:'#4a4a4a', fg:'#ffffff', abbr:'HNR'},
 };
 
-function opStyle(code) {
-  return OPS[code] || {bg:'#2a3a4a', fg:'#c0ccd8', abbr: code || '??'};
+function opStyle(code, isPassenger) {
+  if (OPS[code]) return OPS[code];
+  if (isPassenger === false) return {bg:'#2d3d1a', fg:'#a0c060', abbr:'FRET'};
+  return {bg:'#2a3a4a', fg:'#c0ccd8', abbr: code || '??'};
+}
+
+function freightClass(hc) {
+  if (!hc) return 'Freight';
+  var c = hc[0];
+  if (c === '4') return 'Heavy Freight';
+  if (c === '6') return 'Intermodal';
+  if (c === '7') return 'Freight';
+  if (c === '8') return 'Light Loco';
+  if (c === '9') return 'Special';
+  return 'Freight';
 }
 
 /* ── State ────────────────────────────────────────────────── */
@@ -478,7 +491,7 @@ function findTarget(trains, mode, now) {
 
 /* ── Focus view ──────────────────────────────────────────── */
 function renderFocus(t, now) {
-  var op   = opStyle(t.op_code);
+  var op   = opStyle(t.op_code, t.passenger);
   var ms   = trainMs(t);
   var late = lateStr(t);
   var isBadLate = (t.late_min && t.late_min >= 5);
@@ -528,7 +541,7 @@ function renderFocus(t, now) {
       '<div class="fv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
       '<div class="fv-main">' +
         '<div class="fv-headcode">' + esc(t.headcode) + '</div>' +
-        '<div class="fv-op-name">' + esc(t.op_name || t.op_code) + '</div>' +
+        '<div class="fv-op-name">' + esc(t.passenger === false ? freightClass(t.headcode) : (t.op_name || t.op_code)) + '</div>' +
       '</div>' +
       '<div class="fv-right">' +
         '<span class="fv-track-badge">' + esc(trackLabel(t)) + '</span>' +
@@ -537,13 +550,17 @@ function renderFocus(t, now) {
     '</div>' +
 
     '<div class="fv-route">' +
-      '<div class="fv-route-station">' + esc(t.origin || '—') + '</div>' +
+      '<div class="fv-route-station">' + esc(t.passenger === false
+        ? (t.direction === 'up' ? '← From west' : '← From London')
+        : (t.origin || '—')) + '</div>' +
       (t.orig_dep ? '<div class="fv-route-time">dep ' + fmtTime(t.orig_dep) + '</div>' : '') +
       '<div class="fv-route-arrow">↓</div>' +
       '<div class="fv-route-station twyford">Twyford</div>' +
       '<div>' + twyTimeHtml + platformHtml + '</div>' +
       '<div class="fv-route-arrow">↓</div>' +
-      '<div class="fv-route-station">' + esc(t.dest || '—') + '</div>' +
+      '<div class="fv-route-station">' + esc(t.passenger === false
+        ? (t.direction === 'up' ? '→ To London' : '→ To west')
+        : (t.dest || '—')) + '</div>' +
       (t.dest_arr ? '<div class="fv-route-time">arr ' + fmtTime(t.dest_arr) + '</div>' : '') +
     '</div>' +
 
@@ -576,18 +593,21 @@ function renderList(trains, now) {
     var isPast = ms < now - 90000;
     var isEst  = !t.confirmed;
     var late   = lateStr(t);
-    var op     = opStyle(t.op_code);
+    var op     = opStyle(t.op_code, t.passenger);
     var timeStr = isEst ? '~' + fmtTimeMs(ms) : (ms ? fmtTimeMs(ms) : fmtTime(t.twy_sched));
     var lateClass = t.cancelled ? 'tr-cancel'
                   : isEst ? 'tr-est'
                   : (t.late_min && t.late_min > 0) ? 'tr-late' : 'tr-ontime';
     var lateDisp  = t.cancelled ? 'Cancelled' : isEst ? 'est.' : (late || '');
+    var routeStr  = t.passenger === false
+      ? freightClass(t.headcode)
+      : (t.origin || '—') + ' → ' + (t.dest || '—');
 
     html += '<tr class="tr-row' + (isPast ? ' past' : '') + '" onmousedown="rowTap(this)" data-uid="' + esc(t.uid) + '">' +
       '<td class="tr-time ' + lateClass + '">' + esc(timeStr) + '</td>' +
       '<td class="tr-hc">' + esc(t.headcode) + '</td>' +
       '<td><span class="tr-op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</span></td>' +
-      '<td class="tr-route">' + esc(t.origin || '—') + ' → ' + esc(t.dest || '—') + '</td>' +
+      '<td class="tr-route">' + esc(routeStr) + '</td>' +
       '<td class="tr-track">' + esc(trackLabel(t)) + '</td>' +
       '<td class="tr-status ' + lateClass + '">' + esc(lateDisp) + '</td>' +
       '</tr>';

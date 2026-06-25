@@ -145,6 +145,8 @@ BODS_API_KEY    = ''   # loaded from BODS_ENV_FILE at startup
 LASTFM_API_KEY  = ''   # loaded from BODS_ENV_FILE at startup
 SKYLINK_API_KEY = ''   # loaded from BODS_ENV_FILE at startup
 RTT_REFRESH_TOKEN = ''  # loaded from BODS_ENV_FILE at startup
+NR_USERNAME       = ''  # loaded from BODS_ENV_FILE at startup
+NR_PASSWORD       = ''  # loaded from BODS_ENV_FILE at startup
 BODS_URL       = ('https://data.bus-data.dft.gov.uk/api/v1/datafeed/'
                   '?api_key={key}&operatorRef={op}')
 BODS_OPERATORS = ['RBUS', 'CSLB', 'CTNY']
@@ -598,6 +600,7 @@ def _hive_fetch_temps():
 
 def _load_env():
     global BODS_API_KEY, LASTFM_API_KEY, SKYLINK_API_KEY, RTT_REFRESH_TOKEN
+    global NR_USERNAME, NR_PASSWORD
     try:
         with open(BODS_ENV_FILE) as f:
             for line in f:
@@ -613,6 +616,10 @@ def _load_env():
                         SKYLINK_API_KEY = v
                     elif k == 'RTT_REFRESH_TOKEN':
                         RTT_REFRESH_TOKEN = v
+                    elif k == 'NR_USERNAME':
+                        NR_USERNAME = v
+                    elif k == 'NR_PASSWORD':
+                        NR_PASSWORD = v
     except Exception:
         pass
 
@@ -1145,6 +1152,13 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
     }
 
 
+def _iso_to_ts(iso):
+    try:
+        return datetime.datetime.fromisoformat(iso).timestamp()
+    except Exception:
+        return 0.0
+
+
 def _rtt_build_trains():
     global _rtt_trains_ts, _rtt_trains_data
     now = time.time()
@@ -1165,7 +1179,7 @@ def _rtt_build_trains():
         uid = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
         seen.add(uid)
         t = _rtt_normalise(svc, confirmed=True)
-        if t['twy_sched']:
+        if t['twy_sched'] and not t['headcode'].startswith('2H'):
             trains.append(t)
 
     for svc in rdg_svcs:
@@ -1182,8 +1196,19 @@ def _rtt_build_trains():
         seen.add(uid)
         offset = _RTT_RDG_OFFSETS[line]
         t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
-        if t['twy_sched']:
+        if t['twy_sched'] and not t['headcode'].startswith('2H'):
             trains.append(t)
+
+    # Merge NR freight from STOMP buffer; prune entries older than 2 hours
+    cutoff = now - 7200
+    with _nr_lock:
+        stale = [uid for uid, e in _nr_buffer.items()
+                 if _iso_to_ts(e.get('twy_sched', '')) < cutoff]
+        for uid in stale:
+            del _nr_buffer[uid]
+        for uid, entry in _nr_buffer.items():
+            if uid not in seen:
+                trains.append(entry)
 
     trains.sort(key=lambda t: t.get('twy_sched') or '')
     result = {'trains': trains, 'ts': int(now)}
@@ -1192,6 +1217,167 @@ def _rtt_build_trains():
         _rtt_trains_data = result
         _rtt_trains_ts   = now
     return result
+
+
+# ── Network Rail STOMP (freight trains) ──────────────────────────────────────
+
+try:
+    import stomp as _stomp_module
+    _HAS_STOMP = True
+except ImportError:
+    _HAS_STOMP = False
+
+# STANOX → directional offset (minutes) to estimate Twyford pass time.
+# UP trains come from the west and have already passed Twyford by the time they reach the STANOX.
+# DOWN trains are heading west and will reach Twyford after the STANOX.
+# Maidenhead (74005) is ~4 min east of Twyford on the Main line.
+_NR_STANOX_WATCH = {
+    '74005': {'up_offset': -4, 'down_offset': 4},   # Maidenhead
+}
+
+_nr_lock      = threading.Lock()
+_nr_buffer    = {}   # uid → train dict
+_nr_conn      = None
+_nr_running   = False
+
+
+def _nr_freight_hc(hc):
+    return bool(hc) and hc[0] in '456789'
+
+
+class _NRListener:
+    def __init__(self):
+        self._conn_ref = None
+
+    def set_conn(self, conn):
+        self._conn_ref = conn
+
+    def on_message(self, frame):
+        try:
+            msgs = json.loads(frame.body)
+            if not isinstance(msgs, list):
+                msgs = [msgs]
+            for msg in msgs:
+                body = msg.get('body', {})
+                if msg.get('header', {}).get('msg_type') != '0003':
+                    continue
+                stanox = body.get('loc_stanox', '')
+                if stanox not in _NR_STANOX_WATCH:
+                    continue
+                hc = body.get('train_id', '')
+                # train_id in TRUST is a 10-char string; reporting identity is first 4 chars
+                reporting_hc = hc[:4] if len(hc) >= 4 else hc
+                if not _nr_freight_hc(reporting_hc):
+                    continue
+                direction = body.get('direction_ind', '').upper()
+                offsets = _NR_STANOX_WATCH[stanox]
+                if direction == 'UP':
+                    offset_min = offsets['up_offset']
+                elif direction == 'DOWN':
+                    offset_min = offsets['down_offset']
+                else:
+                    continue
+                ts_ms = body.get('actual_timestamp')
+                if not ts_ms:
+                    continue
+                try:
+                    ts_ms = int(ts_ms)
+                except (TypeError, ValueError):
+                    continue
+                twy_ms = ts_ms + offset_min * 60000
+                twy_dt = datetime.datetime.fromtimestamp(
+                    twy_ms / 1000.0, tz=datetime.timezone.utc)
+                twy_iso = twy_dt.isoformat()
+                try:
+                    variation = int(body.get('timetable_variation') or 0)
+                except (TypeError, ValueError):
+                    variation = 0
+                entry = {
+                    'uid':        'nr:' + hc,
+                    'headcode':   reporting_hc,
+                    'op_code':    '',
+                    'op_name':    '',
+                    'passenger':  False,
+                    'call_type':  'PASS',
+                    'direction':  'up' if direction == 'UP' else 'down',
+                    'track':      'Main',
+                    'origin':     '',
+                    'dest':       '',
+                    'orig_dep':   '',
+                    'dest_arr':   '',
+                    'twy_sched':  twy_iso,
+                    'twy_actual': twy_iso,
+                    'late_min':   variation,
+                    'cancelled':  False,
+                    'status':     body.get('variation_status'),
+                    'platform':   '',
+                    'confirmed':  True,
+                    'num_veh':    None,
+                }
+                with _nr_lock:
+                    _nr_buffer['nr:' + hc] = entry
+        except Exception as e:
+            print(f'NR STOMP on_message: {e}')
+
+    def on_disconnected(self):
+        print('NR STOMP disconnected; will reconnect')
+        threading.Thread(target=_nr_stomp_reconnect, daemon=True).start()
+
+    def on_error(self, frame):
+        print(f'NR STOMP error: {frame.body}')
+
+
+def _nr_stomp_connect():
+    global _nr_conn
+    if not _HAS_STOMP:
+        print('NR STOMP: stomp.py not installed, freight disabled')
+        return False
+    if not NR_USERNAME or not NR_PASSWORD:
+        print('NR STOMP: credentials not set, freight disabled')
+        return False
+    try:
+        listener = _NRListener()
+        conn = _stomp_module.Connection(
+            host_and_ports=[('publicdatafeeds.networkrail.co.uk', 61618)],
+            heartbeats=(10000, 10000),
+        )
+        listener.set_conn(conn)
+        conn.set_listener('', listener)
+        conn.connect(
+            username=NR_USERNAME,
+            passcode=NR_PASSWORD,
+            wait=True,
+            headers={'client-id': NR_USERNAME},
+        )
+        conn.subscribe(
+            destination='/topic/TRAIN_MVT_ALL_TOC',
+            id='1',
+            ack='auto',
+            headers={'activemq.subscriptionName': NR_USERNAME + '-mvt'},
+        )
+        _nr_conn = conn
+        print('NR STOMP connected and subscribed to TRAIN_MVT_ALL_TOC')
+        return True
+    except Exception as e:
+        print(f'NR STOMP connect failed: {e}')
+        return False
+
+
+def _nr_stomp_reconnect():
+    global _nr_running
+    delay = 10
+    while _nr_running:
+        time.sleep(delay)
+        print(f'NR STOMP reconnecting (delay was {delay}s)…')
+        if _nr_stomp_connect():
+            return
+        delay = min(delay * 2, 300)
+
+
+def _nr_stomp_start():
+    global _nr_running
+    _nr_running = True
+    threading.Thread(target=_nr_stomp_connect, daemon=True).start()
 
 
 # ── HTTP server ──────────────────────────────────────────────────────────────
@@ -1842,4 +2028,5 @@ class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 if __name__ == '__main__':
     _load_env()
+    _nr_stomp_start()
     ThreadedServer(('0.0.0.0', 5001), Handler).serve_forever()
