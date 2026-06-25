@@ -1229,10 +1229,8 @@ def _rtt_build_trains():
             del _nr_buffer[uid]
         for uid, entry in _nr_buffer.items():
             hc = entry.get('headcode', '')
-            ts = _iso_to_ts(entry.get('twy_sched', ''))
-            rtt_ts = rtt_hc_ts.get(hc)
-            if rtt_ts and abs(rtt_ts - ts) < 600:
-                continue   # RTT already has this train
+            if hc in rtt_hc_ts:
+                continue   # RTT already covers this train; TRUST entry is a duplicate
             trains.append(entry)
 
     trains.sort(key=lambda t: _iso_to_ts(t.get('twy_sched', '')))

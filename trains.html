@@ -292,6 +292,13 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.mv-meta {
+  font-size: clamp(10px, 1.2vw, 16px);
+  color: #5a8fad;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .mv-right {
   flex-shrink: 0;
   text-align: right;
@@ -713,16 +720,6 @@ function renderMulti(targets, now) {
       timeClass = isBadLate ? 'stat-late' : '';
     }
 
-    var schedDisp = (!t.twy_actual && !isEst && isBadLate) ? 'Sched ' + fmtTime(t.twy_sched) : '';
-    var actualNote = '';
-    if (t.twy_actual && !hasPassed) {
-      actualNote = '';
-    } else if (hasPassed) {
-      actualNote = 'Passed ' + fmtTime(t.twy_actual);
-    } else if (t.twy_actual) {
-      actualNote = '✓ ' + fmtTime(t.twy_actual);
-    }
-
     var routeStr = t.passenger === false
       ? freightClass(t.headcode)
       : (t.origin || '—') + ' → ' + (t.dest || '—');
@@ -735,7 +732,19 @@ function renderMulti(targets, now) {
     } else {
       callStr = isEst ? 'Passing through (est.)' : 'Passes Twyford';
     }
-    if (isBadLate && t.late_min) callStr += ' · +' + t.late_min + ' min';
+
+    // Meta line: vehicles + delay/actual confirmation
+    var metaParts = [];
+    if (t.num_veh) metaParts.push(t.num_veh + (t.num_veh === 1 ? ' coach' : ' coaches'));
+    if (t.twy_actual) {
+      var aNote = (hasPassed ? 'Passed ' : '✓ ') + fmtTime(t.twy_actual);
+      if (isBadLate) aNote += ' (+' + t.late_min + ' min)';
+      metaParts.push(aNote);
+    } else if (!isEst && !t.cancelled) {
+      if (t.late_min === 0) metaParts.push('On time');
+      else if (t.late_min) metaParts.push((t.late_min > 0 ? '+' : '') + t.late_min + ' min');
+    }
+    var metaStr = metaParts.join(' · ');
 
     html += '<div class="mv-card" style="background:linear-gradient(135deg,' + op.bg + '22 0%,transparent 60%)">' +
       '<div class="mv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
@@ -743,10 +752,10 @@ function renderMulti(targets, now) {
       '<div class="mv-middle">' +
         '<div class="mv-route-str">' + esc(routeStr) + '</div>' +
         '<div class="mv-call">' + esc(callStr) + '</div>' +
+        (metaStr ? '<div class="mv-meta">' + esc(metaStr) + '</div>' : '') +
       '</div>' +
       '<div class="mv-right">' +
         '<div class="mv-time ' + timeClass + '">' + esc(timeDisp) + '</div>' +
-        (schedDisp ? '<div class="mv-actual">' + esc(schedDisp) + '</div>' : '') +
         '<div class="mv-track">' + esc(trackLabel(t)) + '</div>' +
       '</div>' +
     '</div>';
