@@ -18,6 +18,9 @@ import re
 import subprocess
 import html as _html
 from urllib.parse import urlparse, parse_qs, quote
+from zoneinfo import ZoneInfo
+
+_TZ_LONDON = ZoneInfo('Europe/London')
 
 NR_TOKEN     = '32cf81aa-5b5f-4195-8a02-6dc47bc20ce5'
 SOAP_URL     = 'https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb12.asmx'
@@ -1121,7 +1124,9 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
         twy_actual = ''
         if sched_iso:
             try:
-                dt = datetime.datetime.fromisoformat(sched_iso.replace('Z', '+00:00'))
+                dt = datetime.datetime.fromisoformat(sched_iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=_TZ_LONDON)
                 twy_sched = (dt + datetime.timedelta(minutes=line_offset)).isoformat()
             except Exception:
                 twy_sched = sched_iso
@@ -1153,8 +1158,16 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
 
 
 def _iso_to_ts(iso):
+    """Convert an ISO datetime string to a UTC Unix timestamp.
+    RTT returns times in Europe/London local time without a timezone suffix.
+    TRUST buffer stores times in UTC with +00:00 suffix.
+    Naive strings are treated as Europe/London (handles BST/GMT automatically).
+    """
     try:
-        return datetime.datetime.fromisoformat(iso).timestamp()
+        dt = datetime.datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_TZ_LONDON)
+        return dt.timestamp()
     except Exception:
         return 0.0
 
