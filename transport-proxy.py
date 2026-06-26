@@ -253,7 +253,15 @@ def _parse(root, platform_filter, limit):
 
     out = {'station': _t(res, 'locationName') or '',
            'crs':     _t(res, 'crs') or '',
-           'services': []}
+           'services': [],
+           'nrccMessages': []}
+
+    nrcc_el = res.find('.//{*}nrccMessages')
+    if nrcc_el is not None:
+        for msg_el in nrcc_el.findall('.//{*}message'):
+            txt = ''.join(msg_el.itertext()).strip()
+            if txt:
+                out['nrccMessages'].append(txt)
 
     svcs = res.find('.//{*}trainServices')
     if svcs is None:
@@ -1020,11 +1028,16 @@ def _fetch_icy_nowplaying(stream_url):
 RTT_API_BASE     = 'https://data.rtt.io'
 RTT_TTL          = 30   # seconds proxy cache
 
-# Offset (minutes) from Reading departure to estimated Twyford pass time.
-# DOWN trains (ML/DML): train came from London, passed Twyford then arrived Reading.
-# UP trains (UML/UDL):  train left Reading heading east, passes Twyford on way to London.
-_RTT_RDG_OFFSETS = {'ML': -4, 'DML': -4, 'UML': 3, 'UDL': 3}
+# Offset (minutes) from Reading to estimated Twyford pass time.
+# Only UP trains from Reading are useful: DOWN trains already passed Twyford before Reading.
+# UML = Up Main Line; UDL = Up Diversion Line. Offset +3 = Twyford is 3 min after Reading.
+_RTT_RDG_OFFSETS = {'UML': 3, 'UDL': 3}
 _RTT_MAIN_CODES  = frozenset(_RTT_RDG_OFFSETS)
+
+# Offset (minutes) from Maidenhead departure to estimated Twyford pass time.
+# DOWN trains at Maidenhead approach Twyford ~5 min later (4.5 miles at ~55 mph).
+_RTT_MAD_OFFSETS = {'ML': 5, 'DML': 5}
+_RTT_MAD_CODES   = frozenset(_RTT_MAD_OFFSETS)
 
 # Destination descriptions that indicate an UP (towards London) service
 _RTT_UP_DESTS = {
@@ -1133,6 +1146,15 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
         else:
             twy_sched = ''
 
+    # For stopping trains, pass through arrival and departure separately so
+    # house_pass_ts can be computed correctly (house is east of station):
+    # - DOWN stop: house passed at arrival - 15s
+    # - UP stop:   house passed at departure + 15s
+    twy_arr_sched = arr.get('scheduleAdvertised', '') if confirmed and call_type == 'STOP' else ''
+    twy_dep_sched = dep.get('scheduleAdvertised', '') if confirmed and call_type == 'STOP' else ''
+    twy_arr_actual = (arr.get('realtimeActual', '') or arr.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else ''
+    twy_dep_actual = (dep.get('realtimeActual', '') or dep.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else ''
+
     return {
         'uid':       sm.get('uniqueIdentity', ''),
         'headcode':  sm.get('trainReportingIdentity', ''),
@@ -1148,6 +1170,10 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
         'dest_arr':  dest_arr,
         'twy_sched': twy_sched,
         'twy_actual': twy_actual,
+        'twy_arr_sched': twy_arr_sched,
+        'twy_dep_sched': twy_dep_sched,
+        'twy_arr_actual': twy_arr_actual,
+        'twy_dep_actual': twy_dep_actual,
         'late_min':  late_min if not cancelled else None,
         'cancelled': cancelled,
         'status':    td.get('status'),
@@ -1182,33 +1208,61 @@ def _rtt_build_trains():
     from_dt   = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)
     time_from = from_dt.strftime('%Y-%m-%dT%H:%M:%S')
 
-    twy_svcs = _rtt_location_query('TWYFORD', time_from, 100)
-    rdg_svcs = _rtt_location_query('RDG',     time_from, 100)
+    twy_svcs, rdg_svcs, mad_svcs = [None]*3
+    fetch_results = [None, None, None]
+    def _fetch_rtt(idx, code, tfrom, window):
+        fetch_results[idx] = _rtt_location_query(code, tfrom, window)
+    threads = [
+        threading.Thread(target=_fetch_rtt, args=(0, 'TWYFORD', time_from, 100)),
+        threading.Thread(target=_fetch_rtt, args=(1, 'RDG',     time_from, 100)),
+        threading.Thread(target=_fetch_rtt, args=(2, 'MAD',     time_from, 100)),
+    ]
+    for th in threads: th.start()
+    for th in threads: th.join(timeout=15)
+    twy_svcs, rdg_svcs, mad_svcs = fetch_results
 
     trains   = []
     seen     = set()
 
-    for svc in twy_svcs:
+    for svc in (twy_svcs or []):
         uid = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
         seen.add(uid)
         t = _rtt_normalise(svc, confirmed=True)
         if t['twy_sched'] and not t['headcode'].startswith('2H'):
             trains.append(t)
 
-    for svc in rdg_svcs:
+    for svc in (rdg_svcs or []):
         uid  = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
         if uid in seen:
             continue
         td   = svc.get('temporalData', {})
         lm   = svc.get('locationMetadata', {})
         line = lm.get('line', {}).get('planned', '')
-        if line not in _RTT_MAIN_CODES:
+        if line not in _RTT_MAIN_CODES:   # UML/UDL only — DOWN trains already passed Twyford
             continue
         if td.get('displayAs') != 'CALL':
             continue
         seen.add(uid)
         offset = _RTT_RDG_OFFSETS[line]
         t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
+        if t['twy_sched'] and not t['headcode'].startswith('2H'):
+            trains.append(t)
+
+    for svc in (mad_svcs or []):
+        uid  = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
+        if uid in seen:
+            continue
+        td   = svc.get('temporalData', {})
+        lm   = svc.get('locationMetadata', {})
+        line = lm.get('line', {}).get('planned', '')
+        if line not in _RTT_MAD_CODES:    # ML/DML only — DOWN trains approaching Twyford
+            continue
+        if td.get('displayAs') != 'CALL':
+            continue
+        seen.add(uid)
+        offset = _RTT_MAD_OFFSETS[line]
+        t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
+        t['track'] = 'Main'               # Maidenhead departures are Main Line
         if t['twy_sched'] and not t['headcode'].startswith('2H'):
             trains.append(t)
 
@@ -1233,7 +1287,27 @@ def _rtt_build_trains():
                 continue   # RTT already covers this train; TRUST entry is a duplicate
             trains.append(entry)
 
-    trains.sort(key=lambda t: _iso_to_ts(t.get('twy_sched', '')))
+    # Compute house_pass_ts for each train (unix seconds).
+    # House is ~100m east of Twyford east platform signal = ~15s before/after the stop.
+    # DOWN stop: train passes house on approach → arrival_sched - 15s
+    # UP stop:   train passes house after departing → departure_sched + 15s
+    # PASS/freight/Main: twy_sched/twy_actual is already the pass time
+    for t in trains:
+        call = t.get('call_type', 'PASS')
+        direction = t.get('direction', '')
+        if call == 'STOP':
+            if direction == 'down':
+                iso = t.get('twy_arr_actual') or t.get('twy_arr_sched') or t.get('twy_actual') or t.get('twy_sched')
+                ts = _iso_to_ts(iso) - 15 if iso else 0
+            else:
+                iso = t.get('twy_dep_actual') or t.get('twy_dep_sched') or t.get('twy_actual') or t.get('twy_sched')
+                ts = _iso_to_ts(iso) + 15 if iso else 0
+        else:
+            iso = t.get('twy_actual') or t.get('twy_sched')
+            ts = _iso_to_ts(iso) if iso else 0
+        t['house_pass_ts'] = int(ts) if ts else 0
+
+    trains.sort(key=lambda t: t.get('house_pass_ts') or _iso_to_ts(t.get('twy_sched', '')))
     result = {'trains': trains, 'ts': int(now)}
 
     with _lock:
@@ -1250,16 +1324,16 @@ try:
 except ImportError:
     _HAS_STOMP = False
 
-# STANOX → platform-aware offsets (minutes) to estimate Twyford pass time.
-# UP trains have already passed Twyford (offsets are negative = in the past).
-# DOWN trains will reach Twyford after the STANOX (offsets are positive = in the future).
-# Platforms 1/2 = Main Line; platforms 3/4 = Relief Line (freight/local).
-# Observed TRUST transit times (2026-06-25): Main DOWN ~3.5 min, Relief DOWN ~5 min.
+# STANOX → config for buffering TRUST movements to supplement RTT.
+# Watched stanoxes: only those where TRUST fires for trains RTT might miss (freight pass-through).
+# 74023 = Twyford (all trains incl. freight PASS). Offset=0: train is already at Twyford.
+# freight_only=False: buffer all trains (passenger deduped later against RTT headcode+time).
 _NR_STANOX_WATCH = {
-    '74005': {                   # Maidenhead (~4.5 miles east of Twyford)
-        'main_plats':  frozenset({'1', '2'}),
-        'up_fast':    -4,  'down_fast':   4,   # Main Line (IETs, ~67 mph) — observed 3.5 min
-        'up_slow':    -5,  'down_slow':   5,   # Relief Line (freight/local) — observed 5.2 min
+    '74023': {                   # Twyford: all WTT timing-point trains incl. freight
+        'main_plats':  frozenset(),  # no platform info for pass-through freight
+        'up_fast':    0,  'down_fast':  0,
+        'up_slow':    0,  'down_slow':  0,
+        'freight_only': False,
     },
 }
 
@@ -1349,23 +1423,23 @@ class _NRListener:
                 return
             for msg in msgs:
                 body = msg.get('body', {})
-                if msg.get('header', {}).get('msg_type') != '0003':
-                    continue
+                msg_type = msg.get('header', {}).get('msg_type', '')
                 stanox = body.get('loc_stanox', '')
                 # Twyford station (stopping trains). Invalidate RTT cache immediately
                 # so the next /api/trains request fetches fresh data with twy_actual,
                 # without waiting out the remaining 30s TTL.
-                if stanox == '87014':
+                if stanox == '87014' and msg_type == '0003':
                     with _lock:
                         _rtt_trains_ts = 0
                     continue
-                if stanox not in _NR_STANOX_WATCH:
+                if msg_type != '0003' or stanox not in _NR_STANOX_WATCH:
                     continue
                 hc = body.get('train_id', '')
                 # TRUST train_id is 10 chars: 2-char schedule prefix + 4-char headcode + 4-char suffix.
                 # e.g. "731G21MR25" → prefix "73", headcode "1G21", suffix "MR25".
                 reporting_hc = hc[2:6] if len(hc) >= 6 else hc
-                if not _nr_freight_hc(reporting_hc):
+                info = _NR_STANOX_WATCH[stanox]
+                if info.get('freight_only', True) and not _nr_freight_hc(reporting_hc):
                     continue
                 direction = body.get('direction_ind', '').upper()
                 platform  = body.get('platform', '').strip()
@@ -1580,6 +1654,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._static('/lineside.html')
         elif parsed.path == '/api/trains':
             self._trains(qs)
+        elif parsed.path == '/api/nrcc':
+            self._nrcc(qs)
         elif parsed.path == '/api/td-log':
             self._td_log(qs)
         elif parsed.path == '/api/td-live':
@@ -2142,6 +2218,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(data)
         except Exception as e:
             self._respond(502, 'text/plain', str(e).encode())
+
+    def _nrcc(self, qs):
+        """Return NRCC disruption messages for Twyford from Darwin, cached 5 min."""
+        key = ('nrcc', 'TWY')
+        now = time.time()
+        with _lock:
+            if key in _cache and now - _cache[key][0] < 300:
+                self._json(_cache[key][1])
+                return
+        try:
+            root = _soap('TWY', 1)
+            data = _parse(root, None, 0)   # limit=0: no services, just board metadata
+            result = {
+                'messages': data.get('nrccMessages', []) if data else [],
+                'ts': int(now),
+            }
+        except Exception:
+            result = {'messages': [], 'ts': int(now)}
+        with _lock:
+            _cache[key] = (now, result)
+        self._json(result)
 
     def _td_log(self, qs):
         limit = min(int(qs.get('n', ['100'])[0]), _TD_BUF_MAX)

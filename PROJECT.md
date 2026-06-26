@@ -553,16 +553,19 @@ information for all trains passing the house (~200 m east of Twyford station). T
 adjacent to four tracks: two Main Line tracks (fast GWR inter-city and freight) and two Relief
 Line tracks (GWR local and Elizabeth Line stopping services).
 
-**Data source:** Real Time Trains (RTT) API v2 (`data.rtt.io`). RTT is queried with two calls
-per 30-second polling cycle:
+**Data source:** Real Time Trains (RTT) API v2 (`data.rtt.io`). RTT is queried with three calls
+per 30-second polling cycle (run in parallel threads):
 
 1. **Twyford query** (`/gb-nr/location?code=TWYFORD`): all trains that call or pass Twyford —
    primarily Elizabeth Line and GWR local on the Relief Line. These are `confirmed=true`.
 
-2. **Reading estimation** (`/gb-nr/location?code=RDG`): Main Line trains (line codes `ML`,
-   `DML`, `UML`) not already returned by the Twyford query. A directional time offset is applied
-   to estimate the Twyford pass time: Down Main (DML → westbound) −4 min before Reading
-   departure; Up Main (UML → eastbound) +3 min after Reading departure. These are
+2. **Reading query** (`/gb-nr/location?code=RDG`): UP Main Line trains only (line codes `UML`,
+   `UDL`) from Reading, heading towards London. Offset: +3 min to estimate Twyford pass time.
+   These are `confirmed=false` (estimated pass). DOWN trains are NOT taken from Reading
+   (they have already passed Twyford by the time they appear in the Reading lineup).
+
+3. **Maidenhead query** (`/gb-nr/location?code=MAD`): DOWN Main Line trains (`ML`, `DML`)
+   approaching Twyford from the east. Offset: +5 min after Maidenhead. These are
    `confirmed=false` (estimated pass).
 
 **Why two sources:** Fast-line GWR IETs (Bristol, Cardiff, Swansea, etc.) do not have Twyford
@@ -571,12 +574,14 @@ working timetable. Signal berth points `TWYF112`, `TWYF632`, `TWYFDW` exist in R
 zero services (TRUST berth points are not WTT timing points). The Reading estimation approach
 adds ~26 extra trains per 2-hour window (44 total vs 18 from Twyford alone).
 
-**Freight trains via Network Rail STOMP:** Freight is absent from both RTT Twyford and RTT
-Reading queries. The proxy opens a persistent STOMP connection to the Network Rail TRUST feed
-on startup and buffers freight movements (headcodes starting with 4–9) passing Maidenhead
-(STANOX 74005). A ±4 min directional offset converts the Maidenhead timestamp to an estimated
-Twyford pass time. Freight entries from this buffer are merged into the `/api/trains` response
-alongside RTT passenger data. See the "Network Rail Open Data Feeds" section for STOMP details.
+**Freight trains via Network Rail STOMP:** Freight is absent from RTT queries. The proxy opens
+a persistent on-demand STOMP connection to the Network Rail TRUST feed and buffers ALL train
+movements passing Twyford (STANOX 74023) — `freight_only: False` so passenger trains are also
+captured (they are deduplicated against RTT by headcode+time matching). Freight entries not
+matched by RTT are merged into the `/api/trains` response. STANOX 87014 (Twyford station stops)
+additionally triggers an immediate RTT cache invalidation (`_rtt_trains_ts=0`) so confirmed
+pass times appear within 1–2 s of the TRUST event. See the "Network Rail Open Data Feeds"
+section for STOMP details.
 
 **Henley branch trains excluded:** Trains with headcode prefix `2H` are filtered out. These
 run on the Henley-on-Thames branch, diverging from the **west** end of Twyford station, and
@@ -723,6 +728,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /trains` | Static — trains.html | — | Standalone full-screen trains SPA |
 | `GET /lineside` | Static — lineside.html | — | Standalone visual track display SPA |
 | `GET /api/td-live` | In-memory TD/SF state | — | Live berth positions + signal aspects from NR TD feed. No TTL — returns current state. Positions expire after 10 min of inactivity. |
+| `GET /api/nrcc` | Darwin SOAP nrccMessages | 300 s | NRCC disruption messages for Twyford area. Extracted from existing Darwin SOAP response (`{*}nrccMessages/{*}message`). Returns `{messages:["…"], ts}`. |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
 **National Rail SOAP details:**
@@ -1354,7 +1360,7 @@ ssh of@172.16.10.168 'sudo of-expand'
 
 ## Current Status
 
-Everything working as of 2026-06-25.
+Everything working as of 2026-06-26.
 
 - [x] Joggler: Boot, WiFi, SSH
 - [x] Autologin → X → Openbox → kiosk chain (Chromium → Pi)
@@ -1419,7 +1425,18 @@ Everything working as of 2026-06-25.
 - [x] transport-proxy.py: on-demand STOMP — TD/SF feed only connects when trains pages are active (`_nr_touch()` on every `/api/trains` poll); auto-disconnects after 90 s idle (`_nr_idle_watcher`); `_nr_running=False` set before `disconnect()` to suppress reconnect loop
 - [x] lineside.html: standalone visual track display SPA at `/lineside` — 800×480 dark layout showing Reading→Maidenhead track strip with live train dots (operator colours) from `/api/td-live`; estimated positions from schedule when no TD data; signal aspect dots; house marker (★) at berth 571; next-train panel with ETA countdown; recent and also-coming strips
 - [x] lineside.html: signal positions updated from td_correlate.py empirical data (2 runs) — D6:12 x=416 (DOWN approach), D6:19 x=263 (DOWN at house), D6:15 x=158 (UP station departure), D6:1C x=263 (UP at house), D6:1B x=437 (UP east toward Maidenhead)
-- [ ] lineside.html: visual polish — text contrast too low on some elements; track diagram needs redesign for clarity; needs rework in next session
-- [ ] transport-proxy.py: switch TRUST watch from STANOX 74005 (Maidenhead, no freight) → 74023 (Twyford, freight)
+- [x] lineside.html: complete redesign (session 13) — CSS transform scaleToWindow(), 4 tracks (Down Main/Down Relief/Up Relief/Up Main), physical proportions from milepost data (Reading MP35.7 ↔ Maidenhead MP22.5), berth→x calibration, destination abbreviation labels, NRCC alert strip, house-flash when TD berth in 560-590 range, two-column next panel, 9 signal dots at accurate track/x positions, confBadge confidence indicators
+- [x] transport-proxy.py: switch TRUST watch 74005 (Maidenhead, no freight) → 74023 (Twyford, all trains); 87014 still used for RTT cache invalidation on stops
+- [x] transport-proxy.py: Maidenhead RTT (MAD, ML/DML, +5 min offset) added for DOWN main line trains; Reading RTT now UP only (UML/UDL); all three fetched in parallel threads
+- [x] transport-proxy.py: house_pass_ts field added to every train — DOWN STOP: arrival-15s, UP STOP: departure+15s, PASS: twy_actual or twy_sched; trains sorted by this before response
+- [x] transport-proxy.py: /api/nrcc endpoint — NRCC disruption messages from Darwin SOAP, 5-min cache; returns {messages:[…], ts}
+- [x] trains.html: labelLine() — destination as primary label for passengers, freightClass for freight
+- [x] trains.html: confBadge() — ● live (TD <120s), ✓ TRUST, · RTT, ~ est. confidence indicators
+- [x] trains.html: focus and multi-card views show destination as primary, headcode+operator+confBadge secondary
+- [x] trains.html: NRCC banner (amber/red dismissable bar above topbar); fetches /api/nrcc every 5 min
+- [x] trains.html: approach indicator bar (32px fixed footer, RDG→MAD strip, coloured dots per train from house_pass_ts with 62.9% Twyford position, 35-min window)
+- [x] trains.html: trainMs() uses house_pass_ts as first priority; tdPositions dict from /api/td-live every 5s
 - [ ] trains.html / lineside.html: run td_correlate.py again during busy morning service to confirm signal address mapping with more trains; update KEY_SIGNALS positions if needed
 - [ ] lineside.html: use SF signal aspects to indicate "clear road" / "signals at caution" for approaching trains once mapping is fully confirmed
+- [ ] transport-proxy.py: per-train cancelReason/delayReason from Darwin SOAP (extracted in _parse but not yet exposed in /api/trains response)
+- [ ] transport-proxy.py: TRUST msg_type 0001 (Activation) watch for freight headcode confirmation before arrival
