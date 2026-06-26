@@ -17,6 +17,8 @@ import os
 import re
 import subprocess
 import html as _html
+import gzip
+import base64
 from urllib.parse import urlparse, parse_qs, quote
 from zoneinfo import ZoneInfo
 
@@ -1039,6 +1041,20 @@ _RTT_MAIN_CODES  = frozenset(_RTT_RDG_OFFSETS)
 _RTT_MAD_OFFSETS = {'ML': 5, 'DML': 5}
 _RTT_MAD_CODES   = frozenset(_RTT_MAD_OFFSETS)
 
+# Paddington: fast DOWN expresses skip Maidenhead, so add PAD with a time offset.
+# Paddington → Twyford ≈ 33 min at express speed for GWR Main Line trains.
+# Exclude destinations that do NOT pass through Twyford (Heathrow branch, Windsor branch).
+_RTT_PAD_OFFSET = 33
+_PAD_EXCL_DESTS = frozenset({
+    'Windsor & Eton Central',
+    'Greenford',
+    'Hayes & Harlington', 'Hayes and Harlington',
+    'Heathrow Airport Terminal 4', 'Heathrow Airport Terminal 5',
+    'Heathrow Airport Terminals 2 & 3', 'Heathrow Airport Terminals 2&3',
+    'Heathrow Terminal 4', 'Heathrow Terminal 5',
+    'Heathrow Terminals 1-3', 'Heathrow Terminals 2 & 3',
+})
+
 # Destination descriptions that indicate an UP (towards London) service
 _RTT_UP_DESTS = {
     'London Paddington', 'Paddington', 'London Paddington (EL)',
@@ -1110,6 +1126,14 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
     actual_iso = best.get('realtimeActual', '')
     forecast_iso = best.get('realtimeForecast', '')
     late_min   = best.get('realtimeAdvertisedLateness') or 0
+    # RTT often omits realtimeAdvertisedLateness even when realtimeForecast differs
+    if not late_min and forecast_iso and sched_iso:
+        try:
+            fd = datetime.datetime.fromisoformat(forecast_iso)
+            sd = datetime.datetime.fromisoformat(sched_iso)
+            late_min = max(0, round((fd - sd).total_seconds() / 60))
+        except Exception:
+            pass
     cancelled  = best.get('isCancelled', False)
 
     dest_name  = (svc.get('destination') or [{}])[0].get('location', {}).get('description', '')
@@ -1208,18 +1232,17 @@ def _rtt_build_trains():
     from_dt   = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)
     time_from = from_dt.strftime('%Y-%m-%dT%H:%M:%S')
 
-    twy_svcs, rdg_svcs, mad_svcs = [None]*3
     fetch_results = [None, None, None]
     def _fetch_rtt(idx, code, tfrom, window):
         fetch_results[idx] = _rtt_location_query(code, tfrom, window)
     threads = [
         threading.Thread(target=_fetch_rtt, args=(0, 'TWYFORD', time_from, 100)),
         threading.Thread(target=_fetch_rtt, args=(1, 'RDG',     time_from, 100)),
-        threading.Thread(target=_fetch_rtt, args=(2, 'MAD',     time_from, 100)),
+        threading.Thread(target=_fetch_rtt, args=(2, 'PAD',     time_from, 100)),
     ]
     for th in threads: th.start()
     for th in threads: th.join(timeout=15)
-    twy_svcs, rdg_svcs, mad_svcs = fetch_results
+    twy_svcs, rdg_svcs, pad_svcs = fetch_results
 
     trains   = []
     seen     = set()
@@ -1235,47 +1258,40 @@ def _rtt_build_trains():
         uid  = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
         if uid in seen:
             continue
-        td   = svc.get('temporalData', {})
         lm   = svc.get('locationMetadata', {})
         line = lm.get('line', {}).get('planned', '')
-        if line not in _RTT_MAIN_CODES:   # UML/UDL only — DOWN trains already passed Twyford
+        offset = _RTT_RDG_OFFSETS.get(line, 3)   # default 3 min for unknown line code
+        t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
+        if t['direction'] != 'up':        # only UP trains from Reading approach Twyford
             continue
-        if td.get('displayAs') != 'CALL':
+        if not t['twy_sched'] or t['headcode'].startswith('2H'):
             continue
         seen.add(uid)
-        offset = _RTT_RDG_OFFSETS[line]
-        t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
-        if t['twy_sched'] and not t['headcode'].startswith('2H'):
-            trains.append(t)
+        trains.append(t)
 
-    for svc in (mad_svcs or []):
+
+
+    for svc in (pad_svcs or []):
         uid  = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
         if uid in seen:
             continue
-        td   = svc.get('temporalData', {})
-        lm   = svc.get('locationMetadata', {})
-        line = lm.get('line', {}).get('planned', '')
-        if line not in _RTT_MAD_CODES:    # ML/DML only — DOWN trains approaching Twyford
+        t = _rtt_normalise(svc, confirmed=False, line_offset=_RTT_PAD_OFFSET)
+        if t['direction'] != 'down':
             continue
-        if td.get('displayAs') != 'CALL':
+        if t['op_code'] == 'HX':               # Heathrow Express — own track, not via Twyford
+            continue
+        if t.get('dest', '') in _PAD_EXCL_DESTS:
+            continue
+        if not t['twy_sched'] or t['headcode'].startswith('2H'):
             continue
         seen.add(uid)
-        offset = _RTT_MAD_OFFSETS[line]
-        t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
-        t['track'] = 'Main'               # Maidenhead departures are Main Line
-        if t['twy_sched'] and not t['headcode'].startswith('2H'):
-            trains.append(t)
+        t['track'] = 'Main'
+        trains.append(t)
 
     # Merge NR STOMP buffer; prune entries older than 2 hours.
     # Deduplicate against RTT trains by headcode+time (10-min window) so that
     # GWR fast trains stopping at Maidenhead don't appear twice.
-    cutoff = now - 7200
-    rtt_hc_ts = {}   # headcode → scheduled twy timestamp from RTT
-    for t in trains:
-        hc_key = t.get('headcode', '')
-        ts = _iso_to_ts(t.get('twy_sched', ''))
-        if hc_key and ts:
-            rtt_hc_ts[hc_key] = ts
+    cutoff = now - 1800   # 30 min — purge old TRUST entries (they accumulate passenger trains)
     with _nr_lock:
         stale = [uid for uid, e in _nr_buffer.items()
                  if _iso_to_ts(e.get('twy_sched', '')) < cutoff]
@@ -1283,9 +1299,56 @@ def _rtt_build_trains():
             del _nr_buffer[uid]
         for uid, entry in _nr_buffer.items():
             hc = entry.get('headcode', '')
-            if hc in rtt_hc_ts:
-                continue   # RTT already covers this train; TRUST entry is a duplicate
+            if hc.startswith('2H'):
+                continue   # Henley branch — excluded everywhere
+            if not _nr_freight_hc(hc):
+                continue   # Passenger trains come from RTT, not TRUST buffer
             trains.append(entry)
+
+    # Add CIF-scheduled freight trains not yet seen via RTT or TRUST.
+    # These are trains approaching Twyford whose schedule is known but whose
+    # TRUST Movement (type 0003) at STANOX 74023 hasn't fired yet.
+    with _cif_lock:
+        rtt_hcs = {t.get('headcode') for t in trains}
+        for hc, entries in _cif_index.items():
+            if hc in rtt_hcs:
+                continue      # already tracked via RTT or TRUST
+            best = _cif_best(entries)
+            if not best:
+                continue      # cancelled or no valid schedule
+            twy_ts = _hhmm_to_ts(best['twy_hhmm'])
+            if twy_ts is None:
+                continue
+            if twy_ts < now - 600 or twy_ts > now + 10800:
+                continue      # more than 10 min past or 3 h future
+            twy_iso = datetime.datetime.fromtimestamp(
+                twy_ts, tz=_TZ_LONDON).isoformat()
+            trains.append({
+                'uid':         'cif:' + hc,
+                'headcode':    hc,
+                'passenger':   False,
+                'direction':   best.get('direction') or 'up',
+                'track':       'Relief',
+                'call_type':   'PASS',
+                'confirmed':   False,
+                'twy_sched':   twy_iso,
+                'twy_actual':  None,
+                'twy_arr_sched': '', 'twy_dep_sched': '',
+                'twy_arr_actual': '', 'twy_dep_actual': '',
+                'house_pass_ts': int(twy_ts),
+                'op_code':     None,
+                'op_name':     None,
+                'dest':        None,
+                'origin':      None,
+                'orig_dep':    None,
+                'dest_arr':    None,
+                'late_min':    None,
+                'cancelled':   False,
+                'status':      None,
+                'platform':    None,
+                'num_veh':     None,
+                'source':      'cif',
+            })
 
     # Compute house_pass_ts for each train (unix seconds).
     # House is ~100m east of Twyford east platform signal = ~15s before/after the stop.
@@ -1295,16 +1358,26 @@ def _rtt_build_trains():
     for t in trains:
         call = t.get('call_type', 'PASS')
         direction = t.get('direction', '')
+        late_sec = (t.get('late_min') or 0) * 60
         if call == 'STOP':
             if direction == 'down':
-                iso = t.get('twy_arr_actual') or t.get('twy_arr_sched') or t.get('twy_actual') or t.get('twy_sched')
+                actual = t.get('twy_arr_actual') or t.get('twy_actual')
+                iso = actual or t.get('twy_arr_sched') or t.get('twy_sched')
                 ts = _iso_to_ts(iso) - 15 if iso else 0
+                if not actual and late_sec:
+                    ts += late_sec
             else:
-                iso = t.get('twy_dep_actual') or t.get('twy_dep_sched') or t.get('twy_actual') or t.get('twy_sched')
+                actual = t.get('twy_dep_actual') or t.get('twy_actual')
+                iso = actual or t.get('twy_dep_sched') or t.get('twy_sched')
                 ts = _iso_to_ts(iso) + 15 if iso else 0
+                if not actual and late_sec:
+                    ts += late_sec
         else:
-            iso = t.get('twy_actual') or t.get('twy_sched')
+            actual = t.get('twy_actual')
+            iso = actual or t.get('twy_sched')
             ts = _iso_to_ts(iso) if iso else 0
+            if not actual and late_sec:
+                ts += late_sec
         t['house_pass_ts'] = int(ts) if ts else 0
 
     trains.sort(key=lambda t: t.get('house_pass_ts') or _iso_to_ts(t.get('twy_sched', '')))
@@ -1355,7 +1428,193 @@ _sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds}
 
 
 def _nr_freight_hc(hc):
-    return bool(hc) and hc[0] in '456789'
+    return bool(hc) and hc[0] in '45678'
+
+
+# ── CIF Freight Schedule (pre-arrival visibility) ──────────────────────────
+
+_CIF_URL = ('https://publicdatafeeds.networkrail.co.uk/ntrod/'
+            'CifFileAuthenticate?type=CIF_FREIGHT_FULL_DAILY&day=toc-full')
+
+# TIPLOCs east of Twyford (towards London) — used to infer UP direction
+_CIF_EAST = frozenset({
+    'MAIDNHD', 'TAPLOW', 'BURNHMB', 'SLOUGH', 'LANGLEY', 'IVER',
+    'WDRYTON', 'WSTDRTN', 'ACTNMLJ', 'ACTNCAN', 'ACTNMLN', 'ACTNWLJ',
+    'SOUTHLL', 'STLACTHN', 'LNGSF', 'PADTON', 'OLDOAKC',
+    'FELTHAM', 'STAINES', 'WLSDJN', 'WLSDNHJ', 'COLNBRK', 'HTRWAPT',
+})
+# TIPLOCs west of Twyford (towards Bristol) — used as origin fallback
+_CIF_WEST = frozenset({
+    'WHATLYQ', 'WESTBRY', 'FRMJNTN', 'FROME', 'AVNMTH', 'AVONMTH',
+    'BRSTLPW', 'BRSTOAL', 'BRSTLTM', 'SWINDON', 'SWNDON',
+    'DIDCOTP', 'RDNGWST', 'RDNGJSW', 'RDNG', 'THEALE', 'NEWBURY',
+    'BEDWYN', 'KEMBLE', 'STROUD', 'CHELTNM', 'GLSTRCA', 'HEREFD',
+    'WORCSTR', 'BRNGRVE', 'MKNTJN', 'SEVERNB', 'MEREHEAD',
+})
+
+_cif_lock  = threading.Lock()
+_cif_index = {}    # headcode → list of {uid, twy_hhmm, direction, stp}
+_cif_ts    = 0.0   # unix time of last successful load
+
+
+def _cif_direction(locs, twy_idx):
+    """Derive UP/DOWN from the TIPLOC sequence relative to Twyford."""
+    for loc in locs[twy_idx + 1:]:
+        tip = loc.get('tiploc_code', '').strip()
+        if tip in _CIF_EAST:
+            return 'up'
+        if tip in _CIF_WEST:
+            return 'down'
+    for loc in locs[:twy_idx]:
+        tip = loc.get('tiploc_code', '').strip()
+        if tip in _CIF_WEST:
+            return 'up'    # origin is west → heading east (UP)
+        if tip in _CIF_EAST:
+            return 'down'  # origin is east → heading west (DOWN)
+    return None
+
+
+def _cif_best(entries):
+    """Pick highest-priority non-cancelled schedule entry (O > N > P; skip C)."""
+    priority = {'O': 0, 'N': 1, 'P': 2}
+    valid = [e for e in entries if e.get('stp') != 'C']
+    if not valid:
+        return None
+    return min(valid, key=lambda e: priority.get(e.get('stp', 'P'), 99))
+
+
+def _hhmm_to_ts(hhmm):
+    """Convert CIF HHMM string (BST local) to Unix timestamp for today."""
+    try:
+        h, m = int(hhmm[:2]), int(hhmm[2:4])
+        today = datetime.date.today()
+        naive = datetime.datetime(today.year, today.month, today.day, h, m)
+        return naive.replace(tzinfo=_TZ_LONDON).timestamp()
+    except Exception:
+        return None
+
+
+def _load_cif():
+    """Download and parse the NR daily CIF freight schedule; populate _cif_index."""
+    global _cif_index, _cif_ts
+    nr_user = NR_USERNAME
+    nr_pass = NR_PASSWORD
+    if not nr_user or not nr_pass:
+        print('CIF: NR credentials not available, skipping')
+        return
+    try:
+        # Step 1: hit the auth endpoint (returns 302 to S3 pre-signed URL)
+        creds = base64.b64encode(f'{nr_user}:{nr_pass}'.encode()).decode()
+        req1 = urllib.request.Request(_CIF_URL)
+        req1.add_header('Authorization', f'Basic {creds}')
+        req1.add_header('User-Agent', 'twyford-dashboard/1.0')
+
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                return None
+
+        opener1 = urllib.request.build_opener(_NoRedirect())
+        data_url = None
+        try:
+            with opener1.open(req1, timeout=30) as resp:
+                data_url = resp.url   # no redirect — rare
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308):
+                data_url = e.headers.get('Location')
+            else:
+                raise
+
+        # Step 2: download from the S3 pre-signed URL WITHOUT auth header
+        print('CIF: downloading freight schedule…')
+        if data_url and data_url != _CIF_URL:
+            req2 = urllib.request.Request(data_url)
+            req2.add_header('User-Agent', 'twyford-dashboard/1.0')
+            with urllib.request.urlopen(req2, timeout=180) as resp2:
+                raw = resp2.read()
+
+        if raw is None:
+            raise RuntimeError('no data received')
+        data = gzip.decompress(raw)
+        print(f'CIF: {len(raw) // 1024} KB compressed → {len(data) // 1024} KB uncompressed')
+    except Exception as exc:
+        body = ''
+        if hasattr(exc, 'read'):
+            try: body = exc.read(200).decode('utf-8', errors='replace')
+            except Exception: pass
+        print(f'CIF: download failed: {exc} {body}')
+        return
+
+    today = datetime.date.today()
+    dow   = today.weekday()   # 0=Mon … 6=Sun
+    new_index: dict = {}
+
+    for line in data.split(b'\n'):
+        if not line or b'TWYFORD' not in line:   # fast pre-filter
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        v1 = rec.get('JsonScheduleV1')
+        if not v1:
+            continue
+        try:
+            start = datetime.date.fromisoformat(v1['schedule_start_date'])
+            end   = datetime.date.fromisoformat(v1['schedule_end_date'])
+        except Exception:
+            continue
+        if not (start <= today <= end):
+            continue
+        days = v1.get('schedule_days_runs', '1111111')
+        if len(days) > dow and days[dow] != '1':
+            continue
+
+        seg = v1.get('schedule_segment', {})
+        hc  = (seg.get('signalling_id') or '').strip()
+        if not hc or hc.startswith('2H'):
+            continue
+
+        uid = v1.get('CIF_train_uid', '')
+        stp = v1.get('CIF_stp_indicator', 'P')
+
+        locs    = seg.get('schedule_location', [])
+        twy_t   = None
+        twy_idx = None
+        for i, loc in enumerate(locs):
+            if loc.get('tiploc_code', '').startswith('TWYFORD'):
+                raw_t = (loc.get('pass') or loc.get('arrival')
+                         or loc.get('departure') or '')
+                if len(raw_t) >= 4:
+                    twy_t   = raw_t[:4]
+                    twy_idx = i
+                break
+        if twy_t is None:
+            continue
+
+        direction = _cif_direction(locs, twy_idx)
+        new_index.setdefault(hc, []).append({
+            'uid': uid, 'hc': hc, 'twy_hhmm': twy_t,
+            'direction': direction, 'stp': stp,
+        })
+
+    with _cif_lock:
+        _cif_index = new_index
+        _cif_ts    = time.time()
+
+    count = sum(1 for v in new_index.values() if _cif_best(v))
+    print(f'CIF: {count} freight trains passing Twyford today indexed')
+
+
+def _cif_refresh_loop():
+    """Load CIF at startup, then refresh daily at 02:30."""
+    _load_cif()
+    while True:
+        now = datetime.datetime.now()
+        nxt = (datetime.datetime(now.year, now.month, now.day, 2, 30)
+               + datetime.timedelta(days=1))
+        time.sleep((nxt - now).total_seconds())
+        _load_cif()
 
 
 class _NRListener:
@@ -1383,7 +1642,7 @@ class _NRListener:
                     continue
                 mtype = msg_key[:2]
                 try:
-                    ts = int(body.get('time', 0))
+                    ts = int(body.get('time', 0)) // 1000  # TD time is Unix ms → convert to s
                 except (TypeError, ValueError):
                     ts = 0
                 if mtype == 'CA':
@@ -2308,4 +2567,5 @@ class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 if __name__ == '__main__':
     _load_env()
     threading.Thread(target=_nr_idle_watcher, daemon=True).start()
+    threading.Thread(target=_cif_refresh_loop, daemon=True).start()
     ThreadedServer(('0.0.0.0', 5001), Handler).serve_forever()

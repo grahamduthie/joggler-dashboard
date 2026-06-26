@@ -558,30 +558,53 @@ per 30-second polling cycle (run in parallel threads):
 
 1. **Twyford query** (`/gb-nr/location?code=TWYFORD`): all trains that call or pass Twyford —
    primarily Elizabeth Line and GWR local on the Relief Line. These are `confirmed=true`.
+   Both `displayAs=CALL` (stopping) and `displayAs=PASS` (passing) trains are included —
+   **no `displayAs` filter** (removing it was essential to capture fast expresses).
 
-2. **Reading query** (`/gb-nr/location?code=RDG`): UP Main Line trains only (line codes `UML`,
-   `UDL`) from Reading, heading towards London. Offset: +3 min to estimate Twyford pass time.
-   These are `confirmed=false` (estimated pass). DOWN trains are NOT taken from Reading
-   (they have already passed Twyford by the time they appear in the Reading lineup).
+2. **Reading query** (`/gb-nr/location?code=RDG`): UP trains not already in the Twyford set.
+   Offset: +3 min for `UML`/`UDL` lines, 3 min default. Filter: `direction=up` only (heading
+   toward London). These are `confirmed=false` (estimated pass). DOWN trains not taken from
+   Reading — they have already passed Twyford. No `displayAs` filter.
 
-3. **Maidenhead query** (`/gb-nr/location?code=MAD`): DOWN Main Line trains (`ML`, `DML`)
-   approaching Twyford from the east. Offset: +5 min after Maidenhead. These are
-   `confirmed=false` (estimated pass).
+3. **Paddington query** (`/gb-nr/location?code=PAD`): DOWN trains originating at Paddington.
+   Offset: +33 min. Filter: `direction=down`; excludes `op_code=HX` (Heathrow Express, own
+   track) and destinations in `_PAD_EXCL_DESTS` (Heathrow airport terminals, Windsor & Eton
+   Central, Greenford, Hayes & Harlington — these go east from Paddington, not through Twyford).
+   These are `confirmed=false`. Replaced the old Maidenhead (MAD) query: fast DOWN expresses
+   (1C88, 1W33, etc.) don't stop at Maidenhead and never appeared in the MAD location feed.
 
-**Why two sources:** Fast-line GWR IETs (Bristol, Cardiff, Swansea, etc.) do not have Twyford
+**Why three sources:** Fast-line GWR IETs (Bristol, Cardiff, Swansea, etc.) do not have Twyford
 as a WTT timing point — Twyford is only a pass-through with no scheduled entry in their
 working timetable. Signal berth points `TWYF112`, `TWYF632`, `TWYFDW` exist in RTT but return
-zero services (TRUST berth points are not WTT timing points). The Reading estimation approach
-adds ~26 extra trains per 2-hour window (44 total vs 18 from Twyford alone).
+zero services (TRUST berth points are not WTT timing points). The multi-source approach adds
+~26 extra trains per 2-hour window (44 total vs 18 from Twyford alone).
 
-**Freight trains via Network Rail STOMP:** Freight is absent from RTT queries. The proxy opens
-a persistent on-demand STOMP connection to the Network Rail TRUST feed and buffers ALL train
-movements passing Twyford (STANOX 74023) — `freight_only: False` so passenger trains are also
-captured (they are deduplicated against RTT by headcode+time matching). Freight entries not
-matched by RTT are merged into the `/api/trains` response. STANOX 87014 (Twyford station stops)
-additionally triggers an immediate RTT cache invalidation (`_rtt_trains_ts=0`) so confirmed
-pass times appear within 1–2 s of the TRUST event. See the "Network Rail Open Data Feeds"
-section for STOMP details.
+**Freight trains via Network Rail STOMP + CIF schedule:** Freight is absent from RTT queries.
+The proxy uses two mechanisms:
+
+1. **STOMP TRUST buffer**: On-demand STOMP connection watches STANOX 74023 (Twyford) for
+   live movement events. `freight_only: False` — all train types are captured; passenger
+   trains are deduplicated against RTT by headcode+time matching. Headcodes beginning `9`
+   (departmental/engineering) are excluded from the TRUST freight buffer (`_nr_freight_hc`
+   checks `hc[0] in '45678'` only) to avoid duplicating engineering trains that also appear
+   in RTT. STANOX 87014 (Twyford stops) triggers immediate RTT cache invalidation so
+   confirmed pass times appear within 1–2 s of TRUST.
+
+2. **CIF_FREIGHT_FULL_DAILY**: The proxy downloads the NR daily freight schedule (~15 MB gzip
+   → ~370 MB) at startup and refreshes at 02:30 daily (`_cif_refresh_loop()`). Download URL:
+   `publicdatafeeds.networkrail.co.uk/ntrod/CifFileAuthenticate?type=CIF_FREIGHT_FULL_DAILY&day=toc-full`.
+   Auth note: the endpoint 302-redirects to an S3 pre-signed URL — the download must be done
+   in two steps: first request with `Authorization: Basic` to get the redirect Location, then
+   second request to S3 WITHOUT the auth header (S3 rejects requests with both auth mechanisms).
+   This is handled by `_NoRedirect` urllib handler in `_load_cif()`.
+   Trains with TWYFORD TIPLOC `pass` entries are indexed as `_cif_index[headcode]`.
+   CIF STP indicator priority: O (overlay) > P (permanent) > N (new); C (cancel) skipped.
+   Direction inferred from TIPLOC lists (`_CIF_EAST`, `_CIF_WEST`) relative to Twyford's index.
+   CIF trains show with `source='cif'`, `confirmed=False`, `track='Relief'` (approximate —
+   most freight uses Relief lines but not all). Filtered to ±3h window at serve time.
+   Trains already in RTT or TRUST buffer (matched by headcode) are not duplicated.
+
+See the "Network Rail Open Data Feeds" section for STOMP details.
 
 **Henley branch trains excluded:** Trains with headcode prefix `2H` are filtered out. These
 run on the Henley-on-Thames branch, diverging from the **west** end of Twyford station, and
@@ -644,6 +667,39 @@ once it has cleared its grace window (`ms < now - grace`). This avoids a confirm
 - Polling: trains.html polls proxy every 15 s; proxy only hits RTT every 30 s (TTL absorbs extra).
   When TRUST fires at STANOX 87014 (stopping train), proxy invalidates RTT cache immediately
   (`_rtt_trains_ts = 0`) so the confirmed pass time appears within 1–2 s of the TRUST event.
+
+**Delay handling:** RTT provides delay information via two mechanisms that must both be
+handled:
+
+- `realtimeActual` / `realtimeForecast`: ISO datetime for the actual/expected time at the
+  queried station. Present when RTT has real-time data.
+- `realtimeAdvertisedLateness`: integer minutes late. **Frequently absent** even when a
+  forecast is available — do not rely on this field alone.
+
+The proxy computes `late_min` in `_rtt_normalise()` as:
+```
+late_min = realtimeAdvertisedLateness or 0
+if not late_min and realtimeForecast and scheduleAdvertised:
+    late_min = max(0, round((forecast - scheduled).total_seconds() / 60))
+```
+
+`house_pass_ts` (Unix seconds, used for sorting and display) incorporates the delay when no
+confirmed actual time is available:
+```
+if not actual_time and late_min:
+    ts += late_min * 60
+```
+
+`trains.html` displays the expected time via `fmtExpected(t)`:
+- If `twy_actual` is set (TRUST/RTT confirmed): shows `✓ HH:MM`
+- If no `twy_actual` but `late_min > 0`: shows `~HH:MM` (twy_sched + late_min)
+- Otherwise: shows the scheduled time
+
+**Note on trains missing from Twyford RTT:** When a train is significantly delayed, its
+scheduled slot at Twyford may have already passed when the query runs — RTT's location API
+uses scheduled times for the query window. Such trains drop out of the Twyford feed and
+are only visible via the Reading or Paddington queries (as `confirmed=false`). The
+forecast-based `late_min` calculation is especially important in these cases.
 
 **Freight display:** Freight trains (`passenger=false`) show a green `FRET` badge (background
 `#2d3d1a`, text `#a0c060`) instead of the operator colour. The focus view shows the freight

@@ -16,26 +16,6 @@ html, body {
 }
 @media (hover: hover) and (pointer: fine) { * { cursor: none; } }
 
-/* ── NRCC disruption banner ─────────────────────────────── */
-#nrcc-banner {
-  display: none;
-  background: #1a0a00;
-  border-bottom: 2px solid #7a4000;
-  padding: 5px 36px 5px 14px;
-  font-size: clamp(10px, 1.3vw, 16px);
-  color: #e0a040;
-  position: relative;
-  flex-shrink: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#nrcc-close {
-  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-  color: #7a4000; cursor: pointer; font-size: 20px; line-height: 1; padding: 0 4px;
-}
-#nrcc-close:hover { color: #e0a040; }
-
 /* ── Top bar ─────────────────────────────────────────────── */
 #topbar {
   height: 56px;
@@ -136,9 +116,12 @@ html, body {
   gap: 4px;
 }
 .fv-headcode {
-  font-size: clamp(34px, 8vw, 110px);
+  font-size: clamp(22px, 4.5vw, 52px);
   font-weight: bold;
-  line-height: 1;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
 }
 .fv-op-name {
@@ -542,17 +525,13 @@ html, body {
 @media (max-height: 500px) {
   #topbar         { height: 44px; }
   .fv-op-badge    { width: 48px; height: 48px; }
-  .fv-headcode    { font-size: clamp(28px, 9vw, 80px); }
+  .fv-headcode    { font-size: clamp(20px, 4.5vw, 48px); }
   .fv-stat-card   { padding: 6px 4px; gap: 2px; }
 }
 </style>
 </head>
 <body>
 
-<div id="nrcc-banner">
-  <span id="nrcc-text"></span>
-  <span id="nrcc-close" onmousedown="dismissNrcc()">×</span>
-</div>
 <div id="topbar">
   <div id="back-btn" onmousedown="window.location.href='/'">&#8592; Dashboard</div>
   <div id="mode-btns">
@@ -694,18 +673,7 @@ function fetchNrcc() {
     .catch(function(){});
 }
 
-function renderNrcc(msgs) {
-  var banner = document.getElementById('nrcc-banner');
-  if (!msgs.length || nrccDismissed) { banner.style.display = 'none'; return; }
-  var msg = msgs[0].replace(/\s+/g, ' ').trim();
-  document.getElementById('nrcc-text').textContent = '⚠ ' + msg;
-  banner.style.display = 'block';
-}
-
-function dismissNrcc() {
-  nrccDismissed = true;
-  document.getElementById('nrcc-banner').style.display = 'none';
-}
+function renderNrcc(msgs) { /* NRCC shown on /lineside, not here */ }
 
 function tickTopbar() {
   var secs = Math.max(0, Math.round((nextFetchAt - Date.now()) / 1000));
@@ -754,6 +722,13 @@ function fmtTimeMs(ms) {
   if (!ms) return '—';
   var d = new Date(ms);
   return d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+function fmtExpected(t) {
+  // When no actual yet but lateness is known: show ~scheduled + late_min
+  if (!t.twy_sched || !(t.late_min > 0)) return fmtTime(t.twy_sched);
+  var ms = new Date(t.twy_sched).getTime() + t.late_min * 60000;
+  return '~' + fmtTimeMs(ms);
 }
 
 function trackLabel(t) {
@@ -831,6 +806,7 @@ function findTarget(trains, mode, now) {
   if (mode === 'recent') {
     var cutoff = now - 10 * 60000;
     var past = trains.filter(function(t) {
+      if (t.cancelled) return false;
       var ms = trainMs(t);
       if (ms < cutoff) return false;
       // Use the same grace thresholds as NEXT, but inverted:
@@ -845,6 +821,7 @@ function findTarget(trains, mode, now) {
     return past.length ? [past[0]] : [];
   } else {
     var upcoming = trains.filter(function(t) {
+      if (t.cancelled) return false;
       var ms = trainMs(t);
       // Down trains: house is east of Twyford — train passed the house *before*
       //   arriving at Twyford, so once twy_actual is set the train is gone (grace=0).
@@ -895,7 +872,7 @@ function renderFocus(t, now) {
                   '<span class="fv-route-time ' + lateClass + '"> ✓ ' + fmtTime(t.twy_actual) + lateNote + '</span>';
   } else {
     var lateClass2 = isBadLate ? 'fv-route-late' : '';
-    twyTimeHtml = '<span class="fv-route-time ' + lateClass2 + '">' + fmtTime(t.twy_sched) +
+    twyTimeHtml = '<span class="fv-route-time ' + lateClass2 + '">' + fmtExpected(t) +
                   (late && late !== 'On time' ? ' (' + late + ')' : '') + '</span>';
   }
 
@@ -905,7 +882,7 @@ function renderFocus(t, now) {
 
   /* Stat cards */
   var statLabel  = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
-  var statTime   = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtTime(t.twy_sched));
+  var statTime   = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtExpected(t));
   var statDelay  = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
                  : isEst ? '<span class="stat-est">N/A</span>'
                  : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
@@ -987,7 +964,7 @@ function renderMulti(targets, now) {
                     ' <span class="' + lateClassA + '"> ✓ ' + esc(fmtTime(t.twy_actual)) + esc(lateNoteA) + '</span>';
     } else {
       var lateClassB = isBadLate ? 'fv-route-late' : '';
-      twyTimeHtml = '<span class="' + lateClassB + '">' + esc(fmtTime(t.twy_sched)) +
+      twyTimeHtml = '<span class="' + lateClassB + '">' + esc(fmtExpected(t)) +
                     (late && late !== 'On time' ? ' (' + esc(late) + ')' : '') + '</span>';
     }
 
@@ -997,7 +974,7 @@ function renderMulti(targets, now) {
 
     // Stat cards — same as renderFocus
     var statLabel = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
-    var statTime  = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtTime(t.twy_sched));
+    var statTime  = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtExpected(t));
     var statDelay = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
                   : isEst ? '<span class="stat-est">N/A</span>'
                   : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
@@ -1083,8 +1060,8 @@ function renderList(trains, now) {
     // Scheduled time — always show the WTT/estimated sched; prefix ~ if estimated
     var schedDisp = isEst ? '~' + fmtTime(t.twy_sched) : fmtTime(t.twy_sched);
 
-    // Actual time — only set once TRUST confirms
-    var actualDisp = t.twy_actual ? fmtTime(t.twy_actual) : '—';
+    // Actual time — TRUST confirmed, or ~estimated when lateness is known
+    var actualDisp = t.twy_actual ? fmtTime(t.twy_actual) : (t.late_min > 0 ? fmtExpected(t) : '—');
 
     var lateClass = t.cancelled ? 'tr-cancel'
                   : isEst ? 'tr-est'

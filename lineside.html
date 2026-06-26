@@ -102,12 +102,12 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
     Scale: 690px / 13.2 miles = 52.3 px/mile
     For milepost M: x = 745 - (M - 22.5) * 52.3
 
-    Track y positions:
-      Down Main:   y=38
+    Track y positions (nearest-to-furthest from house, top-to-bottom):
+      Up Relief:   y=38   ← nearest to house
       Down Relief: y=78
-      Up Relief:   y=118
-      Up Main:     y=158
-    Station box (Relief tracks only): x=449-529, y=64-132
+      Up Main:     y=118
+      Down Main:   y=158  ← furthest from house
+    Station box (Relief tracks only): x=449-529, y=24-92
     House marker: x=499, spanning all tracks
   -->
   <svg id="track-svg" viewBox="0 0 800 210" xmlns="http://www.w3.org/2000/svg">
@@ -119,104 +119,108 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
     </defs>
 
     <!-- Direction labels -->
-    <text x="55"  y="13" fill="#1e3355" font-size="9" font-family="Arial">← Reading</text>
-    <text x="745" y="13" fill="#1e3355" font-size="9" font-family="Arial" text-anchor="end">Maidenhead →</text>
+    <text x="57"  y="13" fill="#2a4a70" font-size="9" font-family="Arial">← Reading</text>
+    <text x="743" y="13" fill="#2a4a70" font-size="9" font-family="Arial" text-anchor="end">Maidenhead →</text>
 
-    <!-- Track labels (right side) -->
-    <text x="795" y="41"  fill="#1e3a55" font-size="8" font-family="Arial" text-anchor="end">DM↓</text>
-    <text x="795" y="81"  fill="#1e3a55" font-size="8" font-family="Arial" text-anchor="end">DR↓</text>
-    <text x="795" y="121" fill="#1e3a55" font-size="8" font-family="Arial" text-anchor="end">UR↑</text>
-    <text x="795" y="161" fill="#1e3a55" font-size="8" font-family="Arial" text-anchor="end">UM↑</text>
+    <!-- Track labels: left side (anchor start) and right side (anchor end) -->
+    <text x="5" y="41"  fill="#1f6070" font-size="8" font-family="Arial">↑ SLOW</text>
+    <text x="5" y="81"  fill="#1f6070" font-size="8" font-family="Arial">↓ SLOW</text>
+    <text x="5" y="121" fill="#2a5888" font-size="8" font-family="Arial">↑ FAST</text>
+    <text x="5" y="161" fill="#2a5888" font-size="8" font-family="Arial">↓ FAST</text>
+    <text x="795" y="41"  fill="#1f6070" font-size="8" font-family="Arial" text-anchor="end">↑R</text>
+    <text x="795" y="81"  fill="#1f6070" font-size="8" font-family="Arial" text-anchor="end">↓R</text>
+    <text x="795" y="121" fill="#2a5888" font-size="8" font-family="Arial" text-anchor="end">↑M</text>
+    <text x="795" y="161" fill="#2a5888" font-size="8" font-family="Arial" text-anchor="end">↓M</text>
 
-    <!-- Down Main track (y=38) -->
-    <line x1="55" y1="38" x2="745" y2="38" stroke="#12233a" stroke-width="7"/>
-    <line x1="55" y1="38" x2="745" y2="38" stroke="#1a3555" stroke-width="2"/>
+    <!-- Up Relief track (y=38) — nearest to house, teal -->
+    <line x1="55" y1="38" x2="745" y2="38" stroke="#122a30" stroke-width="7"/>
+    <line x1="55" y1="38" x2="745" y2="38" stroke="#1f6070" stroke-width="2"/>
 
-    <!-- Down Relief track (y=78) -->
-    <line x1="55" y1="78" x2="745" y2="78" stroke="#12233a" stroke-width="7"/>
-    <line x1="55" y1="78" x2="745" y2="78" stroke="#1a3555" stroke-width="2"/>
+    <!-- Down Relief track (y=78) — teal -->
+    <line x1="55" y1="78" x2="745" y2="78" stroke="#122a30" stroke-width="7"/>
+    <line x1="55" y1="78" x2="745" y2="78" stroke="#1f6070" stroke-width="2"/>
 
-    <!-- Up Relief track (y=118) -->
-    <line x1="55" y1="118" x2="745" y2="118" stroke="#12233a" stroke-width="7"/>
-    <line x1="55" y1="118" x2="745" y2="118" stroke="#1a3555" stroke-width="2"/>
+    <!-- Up Main track (y=118) — blue -->
+    <line x1="55" y1="118" x2="745" y2="118" stroke="#152a45" stroke-width="7"/>
+    <line x1="55" y1="118" x2="745" y2="118" stroke="#2a5888" stroke-width="2"/>
 
-    <!-- Up Main track (y=158) -->
-    <line x1="55" y1="158" x2="745" y2="158" stroke="#12233a" stroke-width="7"/>
-    <line x1="55" y1="158" x2="745" y2="158" stroke="#1a3555" stroke-width="2"/>
+    <!-- Down Main track (y=158) — furthest from house, blue -->
+    <line x1="55" y1="158" x2="745" y2="158" stroke="#152a45" stroke-width="7"/>
+    <line x1="55" y1="158" x2="745" y2="158" stroke="#2a5888" stroke-width="2"/>
 
-    <!-- Twyford station box (wraps Down Relief + Up Relief only) -->
-    <rect id="stn-box" x="449" y="64" width="80" height="68" rx="3"
-          fill="#0a1520" stroke="#1a3355" stroke-width="1"/>
-    <text x="489" y="101" fill="#2a5070" font-size="8" font-family="Arial"
+    <!-- Twyford station box (wraps Up Relief + Down Relief only) -->
+    <rect id="stn-box" x="449" y="24" width="80" height="68" rx="3"
+          fill="#0a1822" stroke="#2a4a6a" stroke-width="1"/>
+    <text x="489" y="57" fill="#3a7090" font-size="8" font-family="Arial"
           text-anchor="middle" letter-spacing=".06em">TWYFORD</text>
-    <!-- Platforms cut through both Relief tracks -->
-    <rect x="449" y="74" width="80" height="8" rx="1" fill="#0e1e30" stroke="none"/>
-    <rect x="449" y="114" width="80" height="8" rx="1" fill="#0e1e30" stroke="none"/>
+    <!-- Platform edges -->
+    <rect x="449" y="34" width="80" height="8" rx="1" fill="#0e2030" stroke="none"/>
+    <rect x="449" y="74" width="80" height="8" rx="1" fill="#0e2030" stroke="none"/>
 
     <!-- House / crossover marker -->
-    <line x1="499" y1="20" x2="499" y2="175"
-          stroke="#3a5020" stroke-width="1" stroke-dasharray="3,3"/>
-    <text x="499" y="192" fill="#ffd080" font-size="18" text-anchor="middle"
+    <line x1="499" y1="20" x2="499" y2="182"
+          stroke="#4a6030" stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="499" y="196" fill="#ffd080" font-size="20" text-anchor="middle"
           filter="url(#glow)" id="house-star">★</text>
-    <text x="499" y="203" fill="#5a4010" font-size="7" font-family="Arial"
+    <text x="499" y="208" fill="#7a6020" font-size="7" font-family="Arial"
           text-anchor="middle">HOUSE</text>
 
     <!-- Ruscombe Jn landmark (MP ~26.5, x=536) -->
-    <line x1="536" y1="64" x2="536" y2="132" stroke="#141e2a" stroke-width="1"
+    <line x1="536" y1="24" x2="536" y2="92" stroke="#141e2a" stroke-width="1"
           stroke-dasharray="2,4"/>
     <text x="536" y="206" fill="#1a2a3a" font-size="7" font-family="Arial"
           text-anchor="middle">Ruscombe</text>
 
     <!-- Signal indicators — positions from td_correlate.py 2026-06-25 + milepost estimates -->
-    <!-- DOWN Main signals (above the Down Main track at y=38) -->
-    <!-- D6:11 — Down Main east approach, berths ~501-533, MP~25.5, x=588 -->
-    <g id="sig-D6-11" transform="translate(588, 30)">
+    <!-- UP Relief signals (above Up Relief track y=38, nearest to house) -->
+    <!-- D6:1A — Up Relief far east, berths ~490-516, MP~24.0, x=667 -->
+    <g id="sig-D6-1A" transform="translate(667, 26)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
     </g>
-    <!-- D6:12 — Down Main station approach, berths ~533-593, MP~26.5, x=536 -->
-    <g id="sig-D6-12" transform="translate(536, 30)">
+    <!-- D6:1B — Up Relief east of house, berths ~526-556, MP~26.8, x=520 -->
+    <g id="sig-D6-1B" transform="translate(520, 26)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
     </g>
-
-    <!-- DOWN Relief signals (above the Down Relief track at y=78) -->
-    <!-- D6:17 — Down Relief east approach, berths ~503-523, MP~25.5, x=588 -->
-    <g id="sig-D6-17" transform="translate(588, 70)">
+    <!-- D6:1C — Up Relief station east/house, berths ~556-598, x=499 -->
+    <g id="sig-D6-1C" transform="translate(499, 26)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
     </g>
-    <!-- D6:18 — Down Relief station approach, berths ~523-559, MP~26.5, x=536 -->
-    <g id="sig-D6-18" transform="translate(536, 70)">
-      <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-    <!-- D6:19 — Down at house/crossover, berths ~571-595, x=499 (between Main+Relief) -->
+    <!-- D6:19 — house/crossover signal, berths ~571-595, x=499 (between UR y=38 and DR y=78) -->
     <g id="sig-D6-19" transform="translate(499, 58)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
     </g>
 
-    <!-- UP Relief signals (below the Up Relief track at y=118) -->
-    <!-- D6:1A — Up Relief far east, berths ~490-516, MP~24.0, x=667 -->
-    <g id="sig-D6-1A" transform="translate(667, 126)">
+    <!-- DOWN Relief signals (between Down Relief y=78 and Up Main y=118) -->
+    <!-- D6:17 — Down Relief east approach, berths ~503-523, MP~25.5, x=588 -->
+    <g id="sig-D6-17" transform="translate(588, 90)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
     </g>
-    <!-- D6:1B — Up Relief east of house, berths ~526-556, MP~26.8, x=520 -->
-    <g id="sig-D6-1B" transform="translate(520, 126)">
-      <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-    <!-- D6:1C — Up Relief station east/house, berths ~556-598, x=499 -->
-    <g id="sig-D6-1C" transform="translate(499, 126)">
+    <!-- D6:18 — Down Relief station approach, berths ~523-559, MP~26.5, x=536 -->
+    <g id="sig-D6-18" transform="translate(536, 90)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
     </g>
 
-    <!-- UP Main signals (above the Up Main track at y=158) -->
+    <!-- UP Main signal (between Up Main y=118 and Down Main y=158) -->
     <!-- D6:15 — Up Main station departure, berths ~542-596, MP~27.6, x=478 -->
-    <g id="sig-D6-15" transform="translate(478, 150)">
+    <g id="sig-D6-15" transform="translate(478, 130)">
+      <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
+      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
+    </g>
+
+    <!-- DOWN Main signals (above Down Main track y=158, furthest from house) -->
+    <!-- D6:11 — Down Main east approach, berths ~501-533, MP~25.5, x=588 -->
+    <g id="sig-D6-11" transform="translate(588, 150)">
+      <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
+      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
+    </g>
+    <!-- D6:12 — Down Main station approach, berths ~533-593, MP~26.5, x=536 -->
+    <g id="sig-D6-12" transform="translate(536, 150)">
       <circle r="5" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
       <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
     </g>
@@ -228,15 +232,25 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
 
 <div id="next-wrap">
   <div id="next-cols">
-    <div class="next-col" id="col-down">
-      <div class="nc-hdr">↓ DOWN — To Reading / Bristol</div>
-      <div class="nc-empty" id="nd-empty">No trains due</div>
-      <div class="nc-card" id="nd-card" style="display:none"></div>
+    <div class="next-col" id="col-ur">
+      <div class="nc-hdr">↑ Up Relief</div>
+      <div class="nc-empty" id="nur-empty">No trains</div>
+      <div class="nc-card" id="nur-card" style="display:none"></div>
     </div>
-    <div class="next-col" id="col-up">
-      <div class="nc-hdr">↑ UP — To London / Heathrow</div>
-      <div class="nc-empty" id="nu-empty">No trains due</div>
-      <div class="nc-card" id="nu-card" style="display:none"></div>
+    <div class="next-col" id="col-dr">
+      <div class="nc-hdr">↓ Dn Relief</div>
+      <div class="nc-empty" id="ndr-empty">No trains</div>
+      <div class="nc-card" id="ndr-card" style="display:none"></div>
+    </div>
+    <div class="next-col" id="col-um">
+      <div class="nc-hdr">↑ Up Main</div>
+      <div class="nc-empty" id="num-empty">No trains</div>
+      <div class="nc-card" id="num-card" style="display:none"></div>
+    </div>
+    <div class="next-col" id="col-dm">
+      <div class="nc-hdr">↓ Dn Main</div>
+      <div class="nc-empty" id="ndm-empty">No trains</div>
+      <div class="nc-card" id="ndm-card" style="display:none"></div>
     </div>
   </div>
 </div>
@@ -321,12 +335,12 @@ function schedToX(msUntilHouse, direction, isMain) {
     : Math.round(HOUSE_X - px_away);  // approaching from west (left)
 }
 
-// Track y-centre for SVG train labels.
-// direction 'down': Down Main (isMain=true) y=38, Down Relief (isMain=false) y=78
-// direction 'up':   Up Relief (isMain=false) y=118, Up Main (isMain=true) y=158
+// Track y-centre for SVG train labels (nearest-to-furthest top-to-bottom).
+// direction 'up':   Up Relief (isMain=false) y=38, Up Main (isMain=true) y=118
+// direction 'down': Down Relief (isMain=false) y=78, Down Main (isMain=true) y=158
 function trackY(direction, isMain) {
-  if (direction === 'down') return isMain ? 38 : 78;
-  return isMain ? 158 : 118;
+  if (direction === 'up') return isMain ? 118 : 38;
+  return isMain ? 158 : 78;
 }
 
 // ── Signal aspect decoding (empirical TVSC bitmask) ───────────────────────
@@ -388,11 +402,13 @@ var alertCycle = 0;
 function scaleToWindow() {
   var sx = window.innerWidth / 800, sy = window.innerHeight / 480;
   var sc = Math.min(sx, sy);
-  var left = Math.round((window.innerWidth  - 800 * sc) / 2);
-  var top  = Math.round((window.innerHeight - 480 * sc) / 2);
+  // transform-origin defaults to 50% 50% (element centre).
+  // Setting left/top to centre the element PRE-transform:
+  //   we want element centre at window centre → left = windowW/2 − 400
+  document.body.style.transformOrigin = '0 0';
   document.body.style.transform = 'scale(' + sc + ')';
-  document.body.style.left = left + 'px';
-  document.body.style.top  = top  + 'px';
+  document.body.style.left = Math.round((window.innerWidth  - 800 * sc) / 2) + 'px';
+  document.body.style.top  = Math.round((window.innerHeight - 480 * sc) / 2) + 'px';
 }
 window.addEventListener('resize', scaleToWindow);
 scaleToWindow();
@@ -495,13 +511,14 @@ function renderTrackTrains() {
   while (layer.firstChild) layer.removeChild(layer.firstChild);
 
   var shown = {};
+  var W = 46, H = 22;  // label box dimensions
 
   // From RTT train list
   trains.forEach(function(t){
     var houseTs = t.house_pass_ts ? t.house_pass_ts * 1000
                  : new Date(t.twy_actual || t.twy_sched).getTime();
     var eta = houseTs - now;
-    if (eta < -120000 || eta > 25 * 60000) return;
+    if (eta < -90000 || eta > 30 * 60000) return;
 
     var op = opStyle(t.op_code, t.passenger);
     var td = tdPositions[t.headcode];
@@ -513,12 +530,20 @@ function renderTrackTrains() {
       x = td.x;
     } else if (eta > 0) {
       x = schedToX(eta, t.direction, isMain);
+      // Skip if the estimated position falls outside the diagram — train isn't visible yet
+      if (x < 60 || x > 740) return;
+    } else {
+      return;  // Past with no TD data — skip
     }
     if (x === null) return;
 
-    var dest = (t.passenger === false)
-      ? (t.headcode[0] === '4' ? 'HFRT' : t.headcode[0] === '6' ? 'IFRT' : 'FRT')
-      : destAbbr(t.dest);
+    var dest;
+    if (t.passenger === false) {
+      var c = t.headcode ? t.headcode[0] : '';
+      dest = c === '4' ? 'H.FRT' : c === '6' ? 'I.FRT' : c === '7' ? 'FRT' : c === '8' ? 'L.LCO' : 'FRT';
+    } else {
+      dest = destAbbr(t.dest);
+    }
 
     shown[t.headcode] = {
       headcode:t.headcode, dest:dest, x:x, op:op,
@@ -532,36 +557,69 @@ function renderTrackTrains() {
     if (shown[hc]) return;
     var td = tdPositions[hc];
     if (td.age_s > 120) return;
-    // Guess direction from berth movement: from_berth > berth means moving west (down)
+    if (td.x < 60 || td.x > 740) return;
+    // Guess direction from berth movement: from_berth > berth means decreasing → moving west (down)
     var fb = parseInt(td.from_berth, 10), tb = parseInt(td.berth, 10);
     var dir = (!isNaN(fb) && !isNaN(tb)) ? (fb > tb ? 'down' : 'up') : null;
-    var isMain = hc[0] === '1' && (hc[1] === 'A' || hc[1] === 'B');
+    // Guess track from headcode prefix
+    var c = hc ? hc[0] : '';
+    var isMain = (c === '1');
+    var isFrt = '456789'.indexOf(c) >= 0;
+    var dest = isFrt ? (c==='6'?'I.FRT':c==='4'?'H.FRT':'FRT') : hc.slice(0,4);
+    var op = isFrt ? {bg:'#2d3d1a',fg:'#a0c060',abbr:'FRT'}
+                   : {bg:'#1a2a3a',fg:'#8aa0b8',abbr:'?'};
     shown[hc] = {
-      headcode:hc, dest:'???', x:td.x, op:{bg:'#1a2a3a',fg:'#8aa0b8',abbr:'???'},
+      headcode:hc, dest:dest, x:td.x, op:op,
       direction:dir, isMain:isMain, hasTd:true, confirmed:false, cancelled:false,
     };
   });
 
+  // No-overtaking: trains on the same track cannot overlap or pass through each other.
+  // DOWN: closer = lower x (approaching from east). Sort ascending, enforce x[i] >= x[i-1]+W+3.
+  // UP:   closer = higher x (approaching from west). Sort descending, enforce x[i] <= x[i-1]-W-3.
+  var byTrack = {};
+  Object.values(shown).forEach(function(tr){
+    if (!tr.direction) {
+      var c2 = tr.headcode ? tr.headcode[0] : '';
+      tr.isMain = (c2 === '1');
+      tr.direction = tr.x > HOUSE_X ? 'down' : 'up';
+    }
+    var key = tr.direction + ':' + (tr.isMain ? 'M' : 'R');
+    if (!byTrack[key]) byTrack[key] = [];
+    byTrack[key].push(tr);
+  });
+  Object.keys(byTrack).forEach(function(key){
+    var isDown = key.indexOf('down') === 0;
+    var grp = byTrack[key];
+    if (isDown) {
+      grp.sort(function(a,b){ return a.x - b.x; });
+      for (var i = 1; i < grp.length; i++) {
+        var need = grp[i-1].x + W + 3;
+        if (grp[i].x < need) grp[i].x = need;
+        if (grp[i].x > 760) grp[i].hidden = true;
+      }
+    } else {
+      grp.sort(function(a,b){ return b.x - a.x; });
+      for (var i = 1; i < grp.length; i++) {
+        var need = grp[i-1].x - W - 3;
+        if (grp[i].x > need) grp[i].x = need;
+        if (grp[i].x < 40) grp[i].hidden = true;
+      }
+    }
+  });
+
   // Draw each train label
   Object.values(shown).forEach(function(tr){
+    if (tr.hidden) return;
     var x = tr.x;
     if (x === null || isNaN(x)) return;
     var direction = tr.direction;
     var isMain = tr.isMain;
 
-    // Infer track from headcode if direction unknown
-    if (!direction) {
-      var d = tr.headcode ? tr.headcode[0] : '';
-      isMain = (d === '1');
-      direction = x > HOUSE_X ? 'down' : 'up';
-    }
-
     var y = trackY(direction, isMain);
-    var w = 42, h = 20;
+    var w = W, h = H;
     var g = document.createElementNS(svgNS, 'g');
 
-    // Clamp x to SVG bounds
-    x = Math.max(w/2 + 30, Math.min(760 - w/2, x));
     g.setAttribute('transform', 'translate(' + (x - w/2) + ',' + (y - h/2) + ')');
 
     var bg = document.createElementNS(svgNS, 'rect');
@@ -572,9 +630,9 @@ function renderTrackTrains() {
     if (!tr.hasTd) { bg.setAttribute('stroke', tr.op.bg); bg.setAttribute('stroke-dasharray', '2,2'); }
     g.appendChild(bg);
 
-    // Primary text: destination abbreviation
+    // Primary text: destination abbreviation (or headcode for unknowns)
     var t1 = document.createElementNS(svgNS, 'text');
-    t1.setAttribute('x', String(w/2)); t1.setAttribute('y', '9');
+    t1.setAttribute('x', String(w/2)); t1.setAttribute('y', '10');
     t1.setAttribute('text-anchor', 'middle');
     t1.setAttribute('fill', tr.op.fg);
     t1.setAttribute('font-size', '9'); t1.setAttribute('font-family', 'Arial');
@@ -584,11 +642,11 @@ function renderTrackTrains() {
 
     // Secondary text: headcode
     var t2 = document.createElementNS(svgNS, 'text');
-    t2.setAttribute('x', String(w/2)); t2.setAttribute('y', '17');
+    t2.setAttribute('x', String(w/2)); t2.setAttribute('y', '19');
     t2.setAttribute('text-anchor', 'middle');
     t2.setAttribute('fill', tr.op.fg);
     t2.setAttribute('font-size', '7'); t2.setAttribute('font-family', 'Courier New');
-    t2.setAttribute('opacity', '0.75');
+    t2.setAttribute('opacity', '0.7');
     t2.textContent = tr.headcode;
     g.appendChild(t2);
 
@@ -673,14 +731,18 @@ function render() {
     return ta - tb;
   });
 
-  var downs = upcoming.filter(function(t){ return t.direction === 'down'; });
-  var ups   = upcoming.filter(function(t){ return t.direction === 'up'; });
+  var upRelief   = upcoming.filter(function(t){ return t.direction==='up'   && t.track!=='Main'; });
+  var downRelief = upcoming.filter(function(t){ return t.direction==='down' && t.track!=='Main'; });
+  var upMain     = upcoming.filter(function(t){ return t.direction==='up'   && t.track==='Main'; });
+  var downMain   = upcoming.filter(function(t){ return t.direction==='down' && t.track==='Main'; });
 
-  renderCol('nd', downs[0] || null, now);
-  renderCol('nu', ups[0] || null, now);
-  renderAlso(upcoming.slice(0, 8).filter(function(t){
-    return t !== downs[0] && t !== ups[0];
-  }), now);
+  renderCol('nur', upRelief[0]   || null, now);
+  renderCol('ndr', downRelief[0] || null, now);
+  renderCol('num', upMain[0]     || null, now);
+  renderCol('ndm', downMain[0]   || null, now);
+
+  var headTrains = [upRelief[0], downRelief[0], upMain[0], downMain[0]].filter(Boolean);
+  renderAlso(upcoming.filter(function(t){ return headTrains.indexOf(t) < 0; }).slice(0, 5), now);
 
   renderAlert();
   renderTrackTrains();
@@ -702,8 +764,8 @@ function renderCol(prefix, t, now) {
   var td = tdPositions[t.headcode];
   var hasTd = td && td.age_s < 120;
   var dest = t.passenger === false
-    ? (t.headcode[0]==='6' ? 'Intermodal Freight' : t.headcode[0]==='4' ? 'Heavy Freight' : 'Freight')
-    : (t.dest || '—');
+    ? (t.headcode[0]==='6' ? 'Intermodal' : t.headcode[0]==='4' ? 'Heavy Frt' : 'Freight')
+    : destAbbr(t.dest);
 
   // Confidence indicator
   var confClass = hasTd ? 'live' : (t.confirmed ? 'trust' : 'est');
@@ -719,7 +781,7 @@ function renderCol(prefix, t, now) {
     etaObj = fmtEta(eta);
   }
 
-  var trackStr = (t.track || '') + ' · ' + (t.call_type === 'STOP' ? 'Stop' : 'Pass');
+  var callStr = t.call_type === 'STOP' ? 'Stop' : 'Pass';
   var late = t.late_min;
   var lateStr = (t.cancelled) ? '<span style="color:#c03030">Cancelled</span>'
     : (late === null || late === undefined || isEst) ? ''
@@ -734,7 +796,7 @@ function renderCol(prefix, t, now) {
     '</div>' +
     '<div class="nc-sub">' +
       '<span class="nc-hc">' + esc(t.headcode) + '</span>' +
-      '<span class="nc-track">' + esc(trackStr) + '</span>' +
+      '<span class="nc-track">' + esc(callStr) + '</span>' +
       (lateStr ? '<span>' + lateStr + '</span>' : '') +
     '</div>' +
     '<div class="nc-eta-row">' +
@@ -752,7 +814,8 @@ function renderAlso(others, now) {
             : new Date(t.twy_actual || t.twy_sched).getTime();
     var eta = ms - now;
     var etaStr = eta > 0 ? 'in ' + fmtEta(eta).val + fmtEta(eta).unit : fmtHHMM(t.twy_sched);
-    var dir = t.direction === 'down' ? '↓' : '↑';
+    var isMainT = t.track === 'Main';
+    var dir = t.direction === 'down' ? (isMainT ? '↓M' : '↓R') : (isMainT ? '↑M' : '↑R');
     var dest = t.passenger === false ? 'FRT' : destAbbr(t.dest);
     return '<div class="also-train">' +
       '<span class="also-dir">' + dir + '</span>' +
