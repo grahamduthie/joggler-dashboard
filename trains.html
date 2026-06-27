@@ -242,7 +242,7 @@ html, body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
 }
 .mvc-card {
   flex: 1;
@@ -607,6 +607,7 @@ function freightClass(hc) {
 
 function confBadge(t) {
   if (t.at_station) return '<span style="color:#d08000;font-size:clamp(9px,1.1vw,15px)">⏸ at stn</span>';
+  if (t.held)       return '<span style="color:#c05000;font-size:clamp(9px,1.1vw,15px)">⏸ held</span>';
   var td = tdPositions[t.headcode];
   if (t.td_berth && td && td.age_s < 120) return '<span style="color:#2a9a50;font-size:clamp(9px,1.1vw,15px)">● live</span>';
   if (td && td.age_s < 120) return '<span style="color:#2a9a50;font-size:clamp(9px,1.1vw,15px)">● live</span>';
@@ -735,6 +736,12 @@ function fmtExpected(t) {
   if (t.td_eta_s !== undefined && !t.twy_actual && t.house_pass_ts) {
     return '~' + fmtTimeMs(t.house_pass_ts * 1000);
   }
+  // Held at signal: berth frozen, use RTT forecast with a held indicator
+  if (t.held) {
+    if (!t.twy_sched) return 'held';
+    var heldMs = new Date(t.twy_sched).getTime() + (t.late_min > 0 ? t.late_min * 60000 : 0);
+    return 'held (~' + fmtTimeMs(heldMs) + ')';
+  }
   // RTT lateness estimate
   if (!t.twy_sched || !(t.late_min > 0)) return fmtTime(t.twy_sched);
   var ms = new Date(t.twy_sched).getTime() + t.late_min * 60000;
@@ -846,8 +853,9 @@ function findTarget(trains, mode, now) {
     upcoming.sort(function(a, b) { return trainMs(a) - trainMs(b); });
     if (!upcoming.length) return [];
     var firstMs = trainMs(upcoming[0]);
-    // Include all trains within 90s of the first
-    return upcoming.filter(function(t) { return trainMs(t) <= firstMs + 90000; });
+    // Include trains within 90s of the first, but cap at 3 — multi-view can't render more
+    var window = upcoming.filter(function(t) { return trainMs(t) <= firstMs + 90000; });
+    return window.slice(0, 3);
   }
 }
 

@@ -1500,6 +1500,11 @@ Everything working as of 2026-06-26.
 - [x] transport-proxy.py: TD-derived `house_pass_ts` override — when live berth position available, `now + eta_s` replaces RTT schedule+lateness estimate; `td_eta_s` field exposed in `/api/trains`; condition: not twy_actual, not at_station, berth age <300 s, eta_s > -60 s
 - [x] trains.html: `fmtExpected()` uses `td_eta_s` path — when `td_eta_s` set and no `twy_actual`, shows `~HH:MM` from `house_pass_ts` (more accurate than RTT lateness, critical for CIF freight with bad CIF times); list view `actualDisp` shows TD ETA even when `late_min=0`
 - [x] trains.html: at_station display — "⏸ at stn" badge in confBadge(); fmtExpected() shows "dep HH:MM" from twy_dep_actual or twy_dep_sched; approach bar pins dot at house position with amber border
+- [x] transport-proxy.py: `held` train detection — D6 berth frozen >120s and train not yet past house sets `held=True`; house_pass_ts kept from RTT (berth ETA suppressed as meaningless for stationary train)
+- [x] transport-proxy.py: Up Relief pass-through detection — at_station dwell threshold raised 20s→45s; trains passing through platform berths (1612/1608/1604) without stopping are never wrongly marked at_station
+- [x] trains.html: `held` display — "⏸ held" amber badge in confBadge(); fmtExpected() shows "held (~HH:MM)" using RTT forecast time
+- [x] lineside.html: `held` display — `.nc-conf.held` CSS class (orange); etaObj shows "held" in ETA slot
+- [x] trains.html: NEXT multi-view capped at 3 trains — findTarget() was returning unbounded trains within 90s window; during delay pile-ups (5+ trains bunched) renderMulti overflowed and cards overlapped; hard cap at 3 prevents this
 - [ ] trains.html / lineside.html: run td_correlate.py again during busy morning service to confirm signal address mapping with more trains; update KEY_SIGNALS positions if needed
 - [ ] lineside.html: use SF signal aspects to indicate "clear road" / "signals at caution" for approaching trains once mapping is fully confirmed
 - [ ] transport-proxy.py: per-train cancelReason/delayReason from Darwin SOAP (extracted in _parse but not yet exposed in /api/trains response)

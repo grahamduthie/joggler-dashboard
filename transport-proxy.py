@@ -1497,28 +1497,34 @@ def _td_enrich_trains(trains, now):
             t['confirmed']    = True
             t['td_berth']     = pos['to']
             t['td_berth_age'] = int(now - pos['ts'])
+            berth_age = int(now - pos['ts'])
             if (pos['area'] == 'D6'
                     and pos['to'] in ('1612', '1608', '1604')
                     and t.get('direction') == 'up'
                     and t.get('call_type') == 'STOP'
-                    and int(now - pos['ts']) > 20
+                    and berth_age > 45
                     and not t.get('twy_actual')):
                 t['at_station'] = True
             # Refine house_pass_ts from live berth position when train is approaching.
             # _berth_eta_to_house_s handles area validation (D6, D1 1600+, D4 400-699).
             elif (not t.get('twy_actual')
                     and not t.get('at_station')
-                    and int(now - pos['ts']) < 300):
-                eta_s = _berth_eta_to_house_s(
-                    pos['area'], pos['to'],
-                    t.get('direction', ''),
-                    t.get('passenger'),
-                    t.get('track', '') == 'Main',
-                    int(now - pos['ts']),
-                )
-                if eta_s is not None and eta_s > -60:
-                    t['house_pass_ts'] = int(now + max(0, eta_s))
-                    t['td_eta_s'] = int(eta_s)
+                    and berth_age < 300):
+                if pos['area'] == 'D6' and berth_age > 120:
+                    # Berth frozen for 2+ minutes in approach area — train held at signal.
+                    # Keep RTT house_pass_ts; don't override with stale berth distance.
+                    t['held'] = True
+                else:
+                    eta_s = _berth_eta_to_house_s(
+                        pos['area'], pos['to'],
+                        t.get('direction', ''),
+                        t.get('passenger'),
+                        t.get('track', '') == 'Main',
+                        berth_age,
+                    )
+                    if eta_s is not None and eta_s > -60:
+                        t['house_pass_ts'] = int(now + max(0, eta_s))
+                        t['td_eta_s'] = int(eta_s)
     # Stubs for D6 headcodes not matched to any RTT/CIF/TRUST train
     for hc, pos in td_pos.items():
         if hc in train_hcs or hc.startswith('2H'):

@@ -56,6 +56,7 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
 .nc-conf.live{color:#2a9a50}
 .nc-conf.trust{color:#7a9a50}
 .nc-conf.est{color:#8a7020}
+.nc-conf.held{color:#c05000}
 .nc-sub{display:flex;align-items:center;gap:8px;font-size:10px;color:#4a7090}
 .nc-hc{font-family:'Courier New',monospace;color:#6090b0}
 .nc-track{color:#3a6080}
@@ -768,15 +769,15 @@ function renderCol(prefix, t, now) {
     : destAbbr(t.dest);
 
   // Confidence indicator
-  var confClass = hasTd ? 'live' : (t.confirmed ? 'trust' : 'est');
-  var confText  = hasTd ? '● live' : (t.confirmed ? '✓' : '~est');
+  var confClass = t.held ? 'held' : (hasTd ? 'live' : (t.confirmed ? 'trust' : 'est'));
+  var confText  = t.held ? '⏸ held' : (hasTd ? '● live' : (t.confirmed ? '✓' : '~est'));
 
   // ETA
   var etaObj;
   if (t.twy_actual && houseMs < now) {
     etaObj = {val:'passed', unit:''};
-  } else if (hasTd) {
-    etaObj = fmtEta(eta);
+  } else if (t.held) {
+    etaObj = {val:'held', unit:''};
   } else {
     etaObj = fmtEta(eta);
   }
