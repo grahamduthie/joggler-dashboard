@@ -36,7 +36,7 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
 #track-wrap{position:relative;width:800px;height:210px;background:#07090f}
 #track-svg{position:absolute;top:0;left:0;width:800px;height:210px}
 
-/* ── Next train panel (two-column) ── */
+/* ── Next train panel (four-column) ── */
 #next-wrap{height:165px;display:flex;flex-direction:column;border-top:1px solid #141c2a}
 #next-cols{display:flex;flex:1;min-height:0}
 .next-col{flex:1;display:flex;flex-direction:column;border-right:1px solid #141c2a}
@@ -60,11 +60,12 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
 .nc-sub{display:flex;align-items:center;gap:8px;font-size:10px;color:#4a7090}
 .nc-hc{font-family:'Courier New',monospace;color:#6090b0}
 .nc-track{color:#3a6080}
+.nc-pos{color:#3a6a8a;font-size:9px}
 .nc-eta-row{display:flex;align-items:baseline;gap:4px}
 .nc-eta{font-size:20px;font-weight:300;color:#e8f4ff;font-variant-numeric:tabular-nums}
 .nc-eta-unit{font-size:10px;color:#5a8090}
 
-/* ── Approach bar (replaces also strip) ── */
+/* ── Approach bar ── */
 #approach-bar{height:41px;display:flex;align-items:center;padding:0 8px;gap:6px;
   background:#07090f;border-top:1px solid #141c2a}
 .appr-end{font-size:9px;color:#3a5a7a;white-space:nowrap;flex-shrink:0}
@@ -97,18 +98,13 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
 
 <div id="track-wrap">
   <!--
-    SVG layout (800×210):
-    Physical proportions: Reading (MP 35.7) at x=55, Maidenhead (MP 22.5) at x=745.
-    Scale: 690px / 13.2 miles = 52.3 px/mile
-    For milepost M: x = 745 - (M - 22.5) * 52.3
-
-    Track y positions (nearest-to-furthest from house, top-to-bottom):
-      Up Relief:   y=38   ← nearest to house
-      Down Relief: y=78
-      Up Main:     y=118
-      Down Main:   y=158  ← furthest from house
-    Station box (Relief tracks only): x=449-529, y=24-92
-    House marker: x=499, spanning all tracks
+    SVG layout (800×210). X-axis = real distance from the house (Twyford), from
+    SMART/CA berth positions: + = WEST (toward Reading, LEFT), − = EAST (toward
+    Maidenhead/London, RIGHT). House centred at x=400, ~51 px/mile.
+      distToX(mi) = 400 − mi*51.1   →  Reading(+5.1)≈x139, Maidenhead(−6.7)≈x742.
+    Track rows (nearest-to-house first, top→bottom):
+      Up Relief y=38, Down Relief y=78, Up Main y=118, Down Main y=158.
+    UP trains travel west→east (left→right, arrow →); DOWN east→west (arrow ←).
   -->
   <svg id="track-svg" viewBox="0 0 800 210" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -118,11 +114,14 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
         <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
     </defs>
 
-    <!-- Direction labels -->
-    <text x="57"  y="13" fill="#2a4a70" font-size="9" font-family="Arial">← Reading</text>
-    <text x="743" y="13" fill="#2a4a70" font-size="9" font-family="Arial" text-anchor="end">Maidenhead →</text>
+    <!-- Edge direction hints -->
+    <text x="5" y="13" fill="#2a4a70" font-size="9" font-family="Arial">← West</text>
+    <text x="795" y="13" fill="#2a4a70" font-size="9" font-family="Arial" text-anchor="end">East →</text>
 
-    <!-- Track labels: left side (anchor start) and right side (anchor end) -->
+    <!-- Landmark guide lines + labels (positioned by distToX) -->
+    <g id="landmarks"></g>
+
+    <!-- Track labels: left (anchor start) and right (anchor end) -->
     <text x="5" y="41"  fill="#1f6070" font-size="8" font-family="Arial">↑ RELIEF</text>
     <text x="5" y="81"  fill="#1f6070" font-size="8" font-family="Arial">↓ RELIEF</text>
     <text x="5" y="121" fill="#2a5888" font-size="8" font-family="Arial">↑ MAIN</text>
@@ -132,98 +131,34 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
     <text x="795" y="121" fill="#2a5888" font-size="8" font-family="Arial" text-anchor="end">↑M</text>
     <text x="795" y="161" fill="#2a5888" font-size="8" font-family="Arial" text-anchor="end">↓M</text>
 
-    <!-- Up Relief track (y=38) — nearest to house, teal -->
+    <!-- Up Relief track (y=38) -->
     <line x1="55" y1="38" x2="745" y2="38" stroke="#122a30" stroke-width="7"/>
     <line x1="55" y1="38" x2="745" y2="38" stroke="#1f6070" stroke-width="2"/>
-
-    <!-- Down Relief track (y=78) — teal -->
+    <!-- Down Relief track (y=78) -->
     <line x1="55" y1="78" x2="745" y2="78" stroke="#122a30" stroke-width="7"/>
     <line x1="55" y1="78" x2="745" y2="78" stroke="#1f6070" stroke-width="2"/>
-
-    <!-- Up Main track (y=118) — blue -->
+    <!-- Up Main track (y=118) -->
     <line x1="55" y1="118" x2="745" y2="118" stroke="#152a45" stroke-width="7"/>
     <line x1="55" y1="118" x2="745" y2="118" stroke="#2a5888" stroke-width="2"/>
-
-    <!-- Down Main track (y=158) — furthest from house, blue -->
+    <!-- Down Main track (y=158) -->
     <line x1="55" y1="158" x2="745" y2="158" stroke="#152a45" stroke-width="7"/>
     <line x1="55" y1="158" x2="745" y2="158" stroke="#2a5888" stroke-width="2"/>
 
-    <!-- Twyford station box (wraps Up Relief + Down Relief only) -->
-    <rect id="stn-box" x="449" y="24" width="80" height="68" rx="3"
+    <!-- Twyford station box (Relief tracks), centred on the house at x=400 -->
+    <rect id="stn-box" x="360" y="24" width="80" height="68" rx="3"
           fill="#0a1822" stroke="#2a4a6a" stroke-width="1"/>
-    <text x="489" y="57" fill="#3a7090" font-size="8" font-family="Arial"
+    <text x="400" y="57" fill="#3a7090" font-size="8" font-family="Arial"
           text-anchor="middle" letter-spacing=".06em">TWYFORD</text>
-    <!-- Platform edges -->
-    <rect x="449" y="34" width="80" height="8" rx="1" fill="#0e2030" stroke="none"/>
-    <rect x="449" y="74" width="80" height="8" rx="1" fill="#0e2030" stroke="none"/>
+    <rect x="360" y="34" width="80" height="8" rx="1" fill="#0e2030" stroke="none"/>
+    <rect x="360" y="74" width="80" height="8" rx="1" fill="#0e2030" stroke="none"/>
 
-    <!-- House / crossover marker -->
-    <line x1="499" y1="20" x2="499" y2="182"
+    <!-- House / crossover marker at x=400 (the house is ~200 m east of the station) -->
+    <line x1="400" y1="20" x2="400" y2="182"
           stroke="#4a6030" stroke-width="1" stroke-dasharray="3,3"/>
-    <text x="499" y="196" fill="#ffd080" font-size="20" text-anchor="middle"
+    <text x="400" y="196" fill="#ffd080" font-size="20" text-anchor="middle"
           filter="url(#glow)" id="house-star">★</text>
-    <text x="499" y="208" fill="#7a6020" font-size="7" font-family="Arial"
+    <text x="400" y="208" fill="#7a6020" font-size="7" font-family="Arial"
           text-anchor="middle">HOUSE</text>
-
-    <!-- Ruscombe Jn landmark (MP ~26.5, x=536) -->
-    <line x1="536" y1="24" x2="536" y2="92" stroke="#141e2a" stroke-width="1"
-          stroke-dasharray="2,4"/>
-    <text x="536" y="206" fill="#1a2a3a" font-size="7" font-family="Arial"
-          text-anchor="middle">Ruscombe</text>
-
-    <!-- Signal indicators — positions from td_correlate.py 2026-06-25 + milepost estimates -->
-    <!-- UP Relief signals (above Up Relief track y=38, nearest to house) -->
-    <!-- D6:1A — Up Relief far east, berths ~490-516, MP~24.0, x=667 -->
-    <g id="sig-D6-1A" transform="translate(667, 26)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-    <!-- D6:1B — Up Relief east of house, berths ~526-556, MP~26.8, x=520 -->
-    <g id="sig-D6-1B" transform="translate(520, 26)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-    <!-- D6:1C — Up Relief station east/house, berths ~556-598, x=499 -->
-    <g id="sig-D6-1C" transform="translate(499, 26)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-    <!-- D6:19 — house/crossover signal, berths ~571-595, x=499 (between UR y=38 and DR y=78) -->
-    <g id="sig-D6-19" transform="translate(499, 58)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-
-    <!-- DOWN Relief signals (between Down Relief y=78 and Up Main y=118) -->
-    <!-- D6:17 — Down Relief east approach, berths ~503-523, MP~25.5, x=588 -->
-    <g id="sig-D6-17" transform="translate(588, 90)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-    <!-- D6:18 — Down Relief station approach, berths ~523-559, MP~26.5, x=536 -->
-    <g id="sig-D6-18" transform="translate(536, 90)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-
-    <!-- UP Main signal (between Up Main y=118 and Down Main y=158) -->
-    <!-- D6:15 — Up Main station departure, berths ~542-596, MP~27.6, x=478 -->
-    <g id="sig-D6-15" transform="translate(478, 130)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-
-    <!-- DOWN Main signals (above Down Main track y=158, furthest from house) -->
-    <!-- D6:11 — Down Main east approach, berths ~501-533, MP~25.5, x=588 -->
-    <g id="sig-D6-11" transform="translate(588, 150)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
-    <!-- D6:12 — Down Main station approach, berths ~533-593, MP~26.5, x=536 -->
-    <g id="sig-D6-12" transform="translate(536, 150)">
-      <circle r="7" fill="#1a2a3a" stroke="#2a4a6a" stroke-width="1"/>
-      <text y="3" fill="#2a4a6a" font-size="6" font-family="Arial" text-anchor="middle">S</text>
-    </g>
 
     <!-- Train icons layer (dynamic) -->
     <g id="trains-layer"></g>
@@ -258,11 +193,11 @@ html,body{width:800px;height:480px;overflow:hidden;background:#07090f;color:#c0d
 <div id="approach-bar">
   <span class="appr-end">RDG</span>
   <div id="appr-track">
-    <div class="appr-house-mark" style="left:62.9%"></div>
-    <span class="appr-twy-lbl" style="left:62.9%">TWY★</span>
+    <div class="appr-house-mark" id="appr-house" style="left:43.5%"></div>
+    <span class="appr-twy-lbl" id="appr-twy" style="left:43.5%">TWY★</span>
     <div id="appr-dots"></div>
   </div>
-  <span class="appr-end">MAD</span>
+  <span class="appr-end">MDH</span>
 </div>
 
 <script>
@@ -311,78 +246,70 @@ function destAbbr(dest) {
   var first = parts[0].replace(/[^A-Za-z]/g,'');
   return (first.slice(0,3)).toUpperCase() || '???';
 }
-
-// ── Berth → SVG x position ─────────────────────────────────────────────────
-// Calibrated: berth 476 (D4/D6 boundary, ~2mi east of Twyford) = x 601
-//             berth 574 (house position, MP ~27.2) = x 499
-// Slope: (499-601)/(574-476) = -102/98 ≈ -1.041 px/berth
-// x = 601 - (berth - 476) * 1.041
-function berthToX(berthStr) {
-  var b = parseInt(berthStr, 10);
-  if (isNaN(b)) return null;
-  if (b >= 1600) b = b - 1602 + 596;  // D1 Main line remap
-  var x = Math.round(601 - (b - 476) * 1.041);
-  if (x < 30 || x > 770) return null;
-  return x;
+function placeName(s) {
+  if (!s) return '';
+  var m = {'MAIDENHED':'Maidenhead','MDNHDMIDS':'Maidenhead','MDNHD CS':'Maidenhead',
+    'TWYFORD':'Twyford','READNG':'Reading','READGWEST':'Reading','READWTORJ':'Reading',
+    'RDGSPURJN':'Reading','TILEHURST':'Tilehurst','PANGBORNE':'Pangbourne','GORING&ST':'Goring',
+    'CHOLSEY':'Cholsey','SLOUGH':'Slough','BURNHAM':'Burnham','TAPLOW':'Taplow','LANGLEY':'Langley',
+    'IVER':'Iver','W DRAYTON':'W.Drayton','HAYES&HAR':'Hayes','SOUTHALL':'Southall','HANWELL':'Hanwell',
+    'AIRPORTJN':'Airport Jn','STOCKLYJN':'Stockley','HENLEYONT':'Henley'};
+  if (m[s]) return m[s];
+  if (s.indexOf('LHR') === 0) return 'Heathrow';
+  return s.charAt(0) + s.slice(1).toLowerCase();
 }
 
-// Estimated x from schedule ETA, direction, and track type.
-// Returns x position assuming constant speed from the house position.
-// Down approaches from east (higher x → lower x), Up approaches from west (lower x → higher x).
-// Relief ~33 m/s, Main ~49 m/s; ~100 px ≈ 2 miles ≈ 3.2 km so 1 px ≈ 32m.
-var HOUSE_X = 499;
-function schedToX(msUntilHouse, direction, isMain) {
-  var mps = isMain ? 49 : 33;
-  var metres_away = (msUntilHouse / 1000) * mps;
-  var px_away = metres_away / 32;  // 1px ≈ 32m at this scale
-  return direction === 'down'
-    ? Math.round(HOUSE_X + px_away)   // approaching from east (right)
-    : Math.round(HOUSE_X - px_away);  // approaching from west (left)
+// ── Distance (signed miles from house) → SVG x ──────────────────────────────
+// dist_mi: + = WEST (Reading, LEFT) ; − = EAST (Maidenhead/London, RIGHT).
+var HOUSE_X = 400, PX_PER_MI = 51.1;
+var X_MIN = 55, X_MAX = 745;
+function distToX(mi) { return HOUSE_X - mi * PX_PER_MI; }
+function inView(mi) { var x = distToX(mi); return x >= X_MIN - 4 && x <= X_MAX + 4; }
+
+// Estimated signed distance (miles) from a schedule ETA when no live berth fix.
+function schedDist(msUntilHouse, direction, isMain, isFreight) {
+  var mph = isMain ? (isFreight ? 50 : 90) : (isFreight ? 35 : 60);
+  var miles = (msUntilHouse / 3600000) * mph;       // future +, past −
+  return (direction === 'up' ? 1 : -1) * miles;     // up west(+), down east(−)
 }
 
-// Track y-centre for SVG train labels (nearest-to-furthest top-to-bottom).
-// direction 'up':   Up Relief (isMain=false) y=38, Up Main (isMain=true) y=118
-// direction 'down': Down Relief (isMain=false) y=78, Down Main (isMain=true) y=158
+// Track y-centre. nearest-to-house order: Up Relief, Down Relief, Up Main, Down Main.
 function trackY(direction, isMain) {
   if (direction === 'up') return isMain ? 118 : 38;
   return isMain ? 158 : 78;
 }
 
-// ── Signal aspect decoding (empirical TVSC bitmask) ───────────────────────
-function decodeAspect(hexData) {
-  var b = parseInt(hexData, 16);
-  if (isNaN(b)) return 'unknown';
-  if (b & 0x01) return 'red';
-  if (b & 0x02) return 'yellow';
-  if (b & 0x04) return 'double-yellow';
-  if (b & 0x08) return 'green';
-  return 'unknown';
-}
-var ASPECT_COL = {
-  'red':'#ff3333','yellow':'#ffcc00','double-yellow':'#ccee00',
-  'green':'#33ee66','unknown':'#1a2a3a'
-};
+// ── Track classification ────────────────────────────────────────────────────
+function isMainTrack(t) { return t.track === 'Main'; }  // backend authoritative
 
-// ── Track classification helper ────────────────────────────────────────────
-function isMainTrack(t) {
-  // Backend `track` is authoritative; don't re-derive from line_code (a Penzance
-  // Down-Main express carries the Reading throat code 'WL', not an ML code).
-  return t.track === 'Main';
+// ── Landmarks (drawn once, positioned by distToX) ──────────────────────────
+var LANDMARKS = [
+  {mi: 5.1,  label: 'Reading'},
+  {mi: 0.0,  label: ''},          // house — drawn separately
+  {mi: -6.7, label: 'Maidenhead'},
+];
+function drawLandmarks() {
+  var g = document.getElementById('landmarks');
+  if (!g) return;
+  var svgNS = 'http://www.w3.org/2000/svg', html = '';
+  LANDMARKS.forEach(function(lm){
+    if (!lm.label) return;
+    var x = Math.round(distToX(lm.mi));
+    if (x < X_MIN || x > X_MAX) return;
+    var line = document.createElementNS(svgNS,'line');
+    line.setAttribute('x1',x); line.setAttribute('y1','22');
+    line.setAttribute('x2',x); line.setAttribute('y2','178');
+    line.setAttribute('stroke','#10202c'); line.setAttribute('stroke-width','1');
+    line.setAttribute('stroke-dasharray','2,5');
+    g.appendChild(line);
+    var txt = document.createElementNS(svgNS,'text');
+    txt.setAttribute('x',x); txt.setAttribute('y','14');
+    txt.setAttribute('fill','#2a4a70'); txt.setAttribute('font-size','8');
+    txt.setAttribute('font-family','Arial'); txt.setAttribute('text-anchor','middle');
+    txt.textContent = lm.label;
+    g.appendChild(txt);
+  });
 }
-
-// ── Key signal addresses ───────────────────────────────────────────────────
-// Confirmed from td_correlate.py runs 2026-06-25
-var KEY_SIGNALS = {
-  'D6:11':'sig-D6-11',  // Down Main east approach
-  'D6:12':'sig-D6-12',  // Down Main station approach
-  'D6:17':'sig-D6-17',  // Down Relief east approach
-  'D6:18':'sig-D6-18',  // Down Relief station approach
-  'D6:19':'sig-D6-19',  // Down at house/crossover
-  'D6:1A':'sig-D6-1A',  // Up Relief far east
-  'D6:1B':'sig-D6-1B',  // Up Relief east of house
-  'D6:1C':'sig-D6-1C',  // Up Relief station east/house
-  'D6:15':'sig-D6-15',  // Up Main station departure
-};
 
 // ── Time helpers ───────────────────────────────────────────────────────────
 function fmtHHMM(iso) {
@@ -404,19 +331,15 @@ function fmtEta(ms) {
 
 // ── State ──────────────────────────────────────────────────────────────────
 var trains = [];
-var tdPositions = {};  // headcode → {berth, x, ts, age_s}
-var sfStates = {};     // "D6:12" → {data, aspect}
+var tdPositions = {};  // headcode → {berth, dist_mi, line, place, ts, age_s, from_berth}
 var nrccMsgs = [];
-var alertMode = 'recent';   // 'recent' or 'nrcc'
+var alertMode = 'recent';
 var alertCycle = 0;
 
 // ── Scale to fill window ───────────────────────────────────────────────────
 function scaleToWindow() {
   var sx = window.innerWidth / 800, sy = window.innerHeight / 480;
   var sc = Math.min(sx, sy);
-  // transform-origin defaults to 50% 50% (element centre).
-  // Setting left/top to centre the element PRE-transform:
-  //   we want element centre at window centre → left = windowW/2 − 400
   document.body.style.transformOrigin = '0 0';
   document.body.style.transform = 'scale(' + sc + ')';
   document.body.style.left = Math.round((window.innerWidth  - 800 * sc) / 2) + 'px';
@@ -425,15 +348,13 @@ function scaleToWindow() {
 window.addEventListener('resize', scaleToWindow);
 scaleToWindow();
 
-// ── Fetch trains ───────────────────────────────────────────────────────────
+// ── Fetches ──────────────────────────────────────────────────────────────
 function fetchTrains() {
   fetch('/api/trains')
     .then(function(r){ return r.json(); })
     .then(function(d){ trains = d.trains || []; render(); })
     .catch(function(){});
 }
-
-// ── Fetch TD live ──────────────────────────────────────────────────────────
 function fetchTdLive() {
   fetch('/api/td-live')
     .then(function(r){ return r.json(); })
@@ -441,34 +362,21 @@ function fetchTdLive() {
       tdPositions = {};
       (d.positions || []).forEach(function(p){
         if (p.age_s < 600) {
-          var x = berthToX(p.berth);
-          if (x !== null) {
-            tdPositions[p.headcode] = {berth:p.berth, x:x, ts:p.ts, age_s:p.age_s,
-                                       from_berth: p.from_berth};
-          }
+          tdPositions[p.headcode] = {berth:p.berth, dist_mi:p.dist_mi, line:p.line,
+            place:p.place, ts:p.ts, age_s:p.age_s, from_berth:p.from_berth};
         }
       });
-      sfStates = {};
-      Object.keys(d.signals || {}).forEach(function(k){
-        var s = d.signals[k];
-        sfStates[k] = {data:s.data, aspect:decodeAspect(s.data)};
-      });
-      renderSignals();
+      renderHouseStar();
       renderTrackTrains();
-      renderApproachBar(trains, Date.now());
+      renderApproachBar(Date.now());
       flashDot();
     })
     .catch(function(){});
 }
-
-// ── Fetch NRCC messages ────────────────────────────────────────────────────
 function fetchNrcc() {
   fetch('/api/nrcc')
     .then(function(r){ return r.json(); })
-    .then(function(d){
-      nrccMsgs = d.messages || [];
-      renderAlert();
-    })
+    .then(function(d){ nrccMsgs = d.messages || []; renderAlert(); })
     .catch(function(){});
 }
 
@@ -476,39 +384,35 @@ function fetchNrcc() {
 function renderClock() {
   document.getElementById('clock').textContent =
     new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  // Cycle alert strip: if NRCC present, alternate every 8s
   alertCycle++;
   if (nrccMsgs.length > 0 && alertCycle % 16 === 0) {
     alertMode = alertMode === 'recent' ? 'nrcc' : 'recent';
     renderAlert();
   }
 }
-
 function flashDot() {
   var dot = document.getElementById('refresh-dot');
   dot.classList.add('active');
   setTimeout(function(){ dot.classList.remove('active'); }, 400);
 }
 
-// ── Render signal indicators ───────────────────────────────────────────────
-function renderSignals() {
-  Object.keys(KEY_SIGNALS).forEach(function(addr){
-    var el = document.getElementById(KEY_SIGNALS[addr]);
-    if (!el) return;
-    var circle = el.querySelector('circle');
-    var sf = sfStates[addr];
-    var col = sf ? (ASPECT_COL[sf.aspect] || ASPECT_COL.unknown) : ASPECT_COL.unknown;
-    var lit = sf && sf.aspect !== 'unknown';
-    circle.setAttribute('fill', col);
-    circle.setAttribute('stroke', lit ? col : '#2a4a6a');
-    circle.setAttribute('r', lit ? '8' : '7');
-    el.setAttribute('filter', lit ? 'url(#glow-sm)' : '');
-  });
+// Live position (signed miles from house) for a train, or null. Prefers a fresh
+// SMART/CA berth fix; otherwise estimates from the schedule ETA.
+function trainDist(t, now) {
+  var td = tdPositions[t.headcode];
+  if (td && td.age_s < 150 && td.dist_mi != null) return {mi: td.dist_mi, live: true, place: td.place};
+  var houseTs = t.house_pass_ts ? t.house_pass_ts * 1000
+              : new Date(t.twy_actual || t.twy_sched).getTime();
+  if (!houseTs) return null;
+  return {mi: schedDist(houseTs - now, t.direction, isMainTrack(t), t.passenger === false),
+          live: false, place: ''};
+}
 
-  // Flash house star if a train is at/near house berths (D6 560-590)
-  var atHouse = Object.values(tdPositions).some(function(p){
-    var b = parseInt(p.berth, 10);
-    return b >= 560 && b <= 590 && p.age_s < 30;
+// ── House star: glow when a train is within ~0.4 mi ─────────────────────────
+function renderHouseStar() {
+  var atHouse = Object.keys(tdPositions).some(function(hc){
+    var p = tdPositions[hc];
+    return p.dist_mi != null && Math.abs(p.dist_mi) < 0.4 && p.age_s < 60;
   });
   var star = document.getElementById('house-star');
   if (star) {
@@ -517,7 +421,7 @@ function renderSignals() {
   }
 }
 
-// ── Render train icons on SVG track ───────────────────────────────────────
+// ── Render train icons on the SVG track ─────────────────────────────────────
 function renderTrackTrains() {
   var layer = document.getElementById('trains-layer');
   var now = Date.now();
@@ -525,165 +429,109 @@ function renderTrackTrains() {
   while (layer.firstChild) layer.removeChild(layer.firstChild);
 
   var shown = {};
-  var W = 46, H = 22;  // label box dimensions
+  var W = 46, H = 22;
 
-  // From RTT train list
+  // 1) RTT-identified trains
   trains.forEach(function(t){
-    var houseTs = t.house_pass_ts ? t.house_pass_ts * 1000
-                 : new Date(t.twy_actual || t.twy_sched).getTime();
-    var eta = houseTs - now;
-    if (eta < -90000 || eta > 30 * 60000) return;
-
-    var op = opStyle(t.op_code, t.passenger);
-    var td = tdPositions[t.headcode];
-    var hasTd = td && td.age_s < 120;
-    var x = null;
-    var isMain = t.track === 'Main';
-
-    if (hasTd) {
-      x = td.x;
-    } else if (eta > 0) {
-      x = schedToX(eta, t.direction, isMain);
-      // Skip if the estimated position falls outside the diagram — train isn't visible yet
-      if (x < 60 || x > 740) return;
-    } else {
-      return;  // Past with no TD data — skip
-    }
-    if (x === null) return;
-
-    var dest;
-    if (t.passenger === false) {
-      var c = t.headcode ? t.headcode[0] : '';
-      dest = c === '4' ? 'H.FRT' : c === '6' ? 'I.FRT' : c === '7' ? 'FRT' : c === '8' ? 'L.LCO' : 'FRT';
-    } else {
-      dest = destAbbr(t.dest);
-    }
-
+    if (t.cancelled) return;
+    var d = trainDist(t, now);
+    if (!d || !inView(d.mi)) return;
+    var dir = t.direction;
+    if (!dir) return;
     shown[t.headcode] = {
-      headcode:t.headcode, dest:dest, x:x, op:op,
-      direction:t.direction, isMain:isMain,
-      hasTd:hasTd, confirmed:t.confirmed, cancelled:t.cancelled,
+      headcode: t.headcode,
+      dest: t.passenger === false ? freightLabel(t.headcode) : destAbbr(t.dest),
+      mi: d.mi, op: opStyle(t.op_code, t.passenger),
+      direction: dir, isMain: isMainTrack(t),
+      live: d.live, held: t.held, cancelled: t.cancelled,
     };
   });
 
-  // Unknown TD-tracked trains not in RTT
+  // 2) Live TD trains with no RTT identity (positioned by SMART/CA — accurate)
   Object.keys(tdPositions).forEach(function(hc){
     if (shown[hc]) return;
-    var td = tdPositions[hc];
-    if (td.age_s > 120) return;
-    if (td.x < 60 || td.x > 740) return;
-    // Guess direction from berth movement: from_berth > berth means decreasing → moving west (down)
-    var fb = parseInt(td.from_berth, 10), tb = parseInt(td.berth, 10);
-    var dir = (!isNaN(fb) && !isNaN(tb)) ? (fb > tb ? 'down' : 'up') : null;
-    // Guess track from headcode prefix
-    var c = hc ? hc[0] : '';
-    var isMain = (c === '1');
-    var isFrt = '456789'.indexOf(c) >= 0;
-    var dest = isFrt ? (c==='6'?'I.FRT':c==='4'?'H.FRT':'FRT') : hc.slice(0,4);
-    var op = isFrt ? {bg:'#2d3d1a',fg:'#a0c060',abbr:'FRT'}
-                   : {bg:'#1a2a3a',fg:'#8aa0b8',abbr:'?'};
+    var p = tdPositions[hc];
+    if (p.age_s > 120 || p.dist_mi == null || !inView(p.dist_mi)) return;
+    var fb = parseInt(p.from_berth, 10), tb = parseInt(p.berth, 10);
+    // direction from berth step: numbers increase westbound (down), decrease eastbound (up)
+    var dir = (!isNaN(fb) && !isNaN(tb) && fb !== tb) ? (tb > fb ? 'down' : 'up') : null;
+    if (!dir) return;
+    var isMain = p.line ? (p.line === 'Main') : (hc[0] === '1');
+    var c = hc[0], frt = '456789'.indexOf(c) >= 0;
     shown[hc] = {
-      headcode:hc, dest:dest, x:td.x, op:op,
-      direction:dir, isMain:isMain, hasTd:true, confirmed:false, cancelled:false,
+      headcode: hc, dest: frt ? freightLabel(hc) : hc,
+      mi: p.dist_mi, op: frt ? {bg:'#2d3d1a',fg:'#a0c060',abbr:'FRT'} : {bg:'#1a2a3a',fg:'#8aa0b8',abbr:'?'},
+      direction: dir, isMain: isMain, live: true, held: false, cancelled: false,
     };
   });
 
-  // No-overtaking: trains on the same track cannot overlap or pass through each other.
-  // DOWN: closer = lower x (approaching from east). Sort ascending, enforce x[i] >= x[i-1]+W+3.
-  // UP:   closer = higher x (approaching from west). Sort descending, enforce x[i] <= x[i-1]-W-3.
+  // Compute x; declutter overlaps per track (no two labels on the same line overlap)
   var byTrack = {};
-  Object.values(shown).forEach(function(tr){
-    if (!tr.direction) {
-      var c2 = tr.headcode ? tr.headcode[0] : '';
-      tr.isMain = (c2 === '1');
-      tr.direction = tr.x > HOUSE_X ? 'down' : 'up';
-    }
+  Object.keys(shown).forEach(function(hc){
+    var tr = shown[hc];
+    tr.x = Math.max(X_MIN, Math.min(X_MAX, distToX(tr.mi)));
     var key = tr.direction + ':' + (tr.isMain ? 'M' : 'R');
-    if (!byTrack[key]) byTrack[key] = [];
-    byTrack[key].push(tr);
+    (byTrack[key] = byTrack[key] || []).push(tr);
   });
   Object.keys(byTrack).forEach(function(key){
-    var isDown = key.indexOf('down') === 0;
-    var grp = byTrack[key];
-    if (isDown) {
-      grp.sort(function(a,b){ return a.x - b.x; });
-      for (var i = 1; i < grp.length; i++) {
-        var need = grp[i-1].x + W + 3;
-        if (grp[i].x < need) grp[i].x = need;
-        if (grp[i].x > 760) grp[i].hidden = true;
-      }
-    } else {
-      grp.sort(function(a,b){ return b.x - a.x; });
-      for (var i = 1; i < grp.length; i++) {
-        var need = grp[i-1].x - W - 3;
-        if (grp[i].x > need) grp[i].x = need;
-        if (grp[i].x < 40) grp[i].hidden = true;
-      }
+    var grp = byTrack[key].sort(function(a,b){ return a.x - b.x; });
+    for (var i = 1; i < grp.length; i++) {
+      if (grp[i].x - grp[i-1].x < W + 3) grp[i].x = grp[i-1].x + W + 3;
+      if (grp[i].x > X_MAX) grp[i].hidden = true;
     }
   });
 
-  // Draw each train label
-  Object.values(shown).forEach(function(tr){
+  Object.keys(shown).forEach(function(hc){
+    var tr = shown[hc];
     if (tr.hidden) return;
-    var x = tr.x;
-    if (x === null || isNaN(x)) return;
-    var direction = tr.direction;
-    var isMain = tr.isMain;
-
-    var y = trackY(direction, isMain);
-    var w = W, h = H;
+    var y = trackY(tr.direction, tr.isMain);
     var g = document.createElementNS(svgNS, 'g');
-
-    g.setAttribute('transform', 'translate(' + (x - w/2) + ',' + (y - h/2) + ')');
+    g.setAttribute('transform', 'translate(' + (tr.x - W/2) + ',' + (y - H/2) + ')');
 
     var bg = document.createElementNS(svgNS, 'rect');
-    bg.setAttribute('width', String(w)); bg.setAttribute('height', String(h));
-    bg.setAttribute('rx', '3');
-    bg.setAttribute('fill', tr.cancelled ? '#2a0f0f' : tr.op.bg);
-    bg.setAttribute('opacity', tr.hasTd ? '1' : '0.5');
-    if (!tr.hasTd) { bg.setAttribute('stroke', tr.op.bg); bg.setAttribute('stroke-dasharray', '2,2'); }
+    bg.setAttribute('width', W); bg.setAttribute('height', H); bg.setAttribute('rx', '3');
+    bg.setAttribute('fill', tr.cancelled ? '#2a0f0f' : (tr.held ? '#3a2a10' : tr.op.bg));
+    bg.setAttribute('opacity', tr.live ? '1' : '0.5');
+    if (!tr.live) { bg.setAttribute('stroke', tr.op.bg); bg.setAttribute('stroke-dasharray', '2,2'); }
+    if (tr.live)  { bg.setAttribute('stroke', '#2a9a50'); bg.setAttribute('stroke-width', '1'); }
     g.appendChild(bg);
 
-    // Primary text: destination abbreviation (or headcode for unknowns)
     var t1 = document.createElementNS(svgNS, 'text');
-    t1.setAttribute('x', String(w/2)); t1.setAttribute('y', '10');
-    t1.setAttribute('text-anchor', 'middle');
-    t1.setAttribute('fill', tr.op.fg);
-    t1.setAttribute('font-size', '9'); t1.setAttribute('font-family', 'Arial');
-    t1.setAttribute('font-weight', '700');
-    t1.textContent = tr.dest;
+    t1.setAttribute('x', W/2); t1.setAttribute('y', '10'); t1.setAttribute('text-anchor', 'middle');
+    t1.setAttribute('fill', tr.op.fg); t1.setAttribute('font-size', '9');
+    t1.setAttribute('font-family', 'Arial'); t1.setAttribute('font-weight', '700');
+    t1.textContent = tr.held ? '⏸' + tr.dest : tr.dest;
     g.appendChild(t1);
 
-    // Secondary text: headcode
     var t2 = document.createElementNS(svgNS, 'text');
-    t2.setAttribute('x', String(w/2)); t2.setAttribute('y', '19');
-    t2.setAttribute('text-anchor', 'middle');
-    t2.setAttribute('fill', tr.op.fg);
-    t2.setAttribute('font-size', '7'); t2.setAttribute('font-family', 'Courier New');
-    t2.setAttribute('opacity', '0.7');
+    t2.setAttribute('x', W/2); t2.setAttribute('y', '19'); t2.setAttribute('text-anchor', 'middle');
+    t2.setAttribute('fill', tr.op.fg); t2.setAttribute('font-size', '7');
+    t2.setAttribute('font-family', 'Courier New'); t2.setAttribute('opacity', '0.7');
     t2.textContent = tr.headcode;
     g.appendChild(t2);
 
-    // Direction arrow
-    if (direction) {
-      var isDown = direction === 'down';
-      var arr = document.createElementNS(svgNS, 'polygon');
-      var ax = isDown ? -6 : w + 6;
-      var ay = h/2;
-      var pts = isDown
-        ? (ax+5)+','+(ay-3)+' '+ax+','+ay+' '+(ax+5)+','+(ay+3)
-        : (ax-5)+','+(ay-3)+' '+ax+','+ay+' '+(ax-5)+','+(ay+3);
-      arr.setAttribute('points', pts);
-      arr.setAttribute('fill', tr.op.bg);
-      arr.setAttribute('opacity', tr.hasTd ? '0.8' : '0.4');
-      g.appendChild(arr);
-    }
+    // Direction arrow: UP travels right (→), DOWN travels left (←)
+    var isDown = tr.direction === 'down';
+    var arr = document.createElementNS(svgNS, 'polygon');
+    var ax = isDown ? -6 : W + 6, ay = H/2;
+    arr.setAttribute('points', isDown
+      ? (ax+5)+','+(ay-3)+' '+ax+','+ay+' '+(ax+5)+','+(ay+3)
+      : (ax-5)+','+(ay-3)+' '+ax+','+ay+' '+(ax-5)+','+(ay+3));
+    arr.setAttribute('fill', tr.op.bg);
+    arr.setAttribute('opacity', tr.live ? '0.85' : '0.4');
+    g.appendChild(arr);
 
     layer.appendChild(g);
   });
 }
 
-// ── Alert strip ────────────────────────────────────────────────────────────
+function freightLabel(hc) {
+  var c = hc ? hc[0] : '';
+  return c === '4' ? 'H.FRT' : c === '6' ? 'I.FRT' : c === '7' ? 'FRT'
+       : c === '8' ? 'L.LCO' : c === '5' ? 'ECS' : 'FRT';
+}
+
+// ── Alert strip (last train / NRCC) ─────────────────────────────────────────
 function renderAlert() {
   var strip = document.getElementById('alert-strip');
   var label = document.getElementById('alert-label');
@@ -692,12 +540,10 @@ function renderAlert() {
   if (alertMode === 'nrcc' && nrccMsgs.length > 0) {
     strip.classList.add('nrcc-mode');
     label.textContent = 'Alert';
-    // Truncate to 120 chars for single-line display
     var msg = nrccMsgs[0].replace(/\s+/g, ' ').trim();
     content.innerHTML = '<span class="nrcc-text">⚠ ' + esc(msg.slice(0, 120)) + (msg.length > 120 ? '…' : '') + '</span>';
     return;
   }
-
   strip.classList.remove('nrcc-mode');
   label.textContent = 'Last';
 
@@ -714,7 +560,6 @@ function renderAlert() {
 
   var t = recent[0];
   if (!t) { content.innerHTML = '<span class="rc-info" style="color:#1e3a5a">—</span>'; return; }
-
   var op = opStyle(t.op_code, t.passenger);
   var ms = t.house_pass_ts ? t.house_pass_ts * 1000 : new Date(t.twy_actual || t.twy_sched).getTime();
   var agoS = Math.round((now - ms) / 1000);
@@ -722,18 +567,15 @@ function renderAlert() {
   var dest = t.passenger === false ? (t.headcode[0]==='6'?'Intermodal':'Freight') : (t.dest||'');
   var actStr = t.twy_actual ? ' · ✓ ' + fmtHHMM(t.twy_actual) : '';
   var dirStr = t.direction === 'down' ? '↓' : '↑';
-
   content.innerHTML =
     '<span class="rc-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</span>' +
     '<span class="rc-info">' + dirStr + ' ' + esc(t.headcode) + '  ' + esc(dest) + esc(actStr) + '</span>' +
     '<span class="rc-time">' + esc(agoStr) + '</span>';
 }
 
-// ── Next train panel (two columns) ────────────────────────────────────────
+// ── Next-train panel (four columns, one per line) ───────────────────────────
 function render() {
   var now = Date.now();
-
-  // Split upcoming trains into DOWN and UP, sorted by house_pass_ts
   var upcoming = trains.filter(function(t){
     if (t.cancelled) return false;
     var ms = t.house_pass_ts ? t.house_pass_ts * 1000
@@ -755,8 +597,7 @@ function render() {
   renderCol('num', upMain[0]     || null, now);
   renderCol('ndm', downMain[0]   || null, now);
 
-  renderApproachBar(upcoming, now);
-
+  renderApproachBar(now);
   renderAlert();
   renderTrackTrains();
 }
@@ -764,9 +605,7 @@ function render() {
 function renderCol(prefix, t, now) {
   var empty = document.getElementById(prefix + '-empty');
   var card  = document.getElementById(prefix + '-card');
-  if (!t) {
-    empty.style.display = 'flex'; card.style.display = 'none'; return;
-  }
+  if (!t) { empty.style.display = 'flex'; card.style.display = 'none'; return; }
   empty.style.display = 'none'; card.style.display = 'flex';
 
   var op = opStyle(t.op_code, t.passenger);
@@ -774,27 +613,25 @@ function renderCol(prefix, t, now) {
                : new Date(t.twy_actual || t.twy_sched).getTime();
   var eta = houseMs - now;
   var isEst = !t.confirmed;
-  var td = tdPositions[t.headcode];
-  var hasTd = td && td.age_s < 120;
-  var dest = t.passenger === false
-    ? (t.headcode[0]==='6' ? 'Intermodal' : t.headcode[0]==='4' ? 'Heavy Frt' : 'Freight')
-    : destAbbr(t.dest);
+  var d = trainDist(t, now);
+  var dest = t.passenger === false ? freightLabel(t.headcode) : destAbbr(t.dest);
 
-  // Confidence indicator
-  var confClass = t.held ? 'held' : (hasTd ? 'live' : (t.confirmed ? 'trust' : 'est'));
-  var confText  = t.held ? '⏸ held' : (hasTd ? '● live' : (t.confirmed ? '✓' : '~est'));
+  var confClass = t.held ? 'held' : (d && d.live ? 'live' : (t.confirmed ? 'trust' : 'est'));
+  var confText  = t.held ? '⏸ held' : (d && d.live ? '● live' : (t.confirmed ? '✓' : '~est'));
 
-  // ETA
   var etaObj;
-  if (t.twy_actual && houseMs < now) {
-    etaObj = {val:'passed', unit:''};
-  } else if (t.held) {
-    etaObj = {val:'held', unit:''};
-  } else {
-    etaObj = fmtEta(eta);
-  }
+  if (t.twy_actual && houseMs < now) etaObj = {val:'passed', unit:''};
+  else if (t.held)                   etaObj = {val:'held', unit:''};
+  else                               etaObj = fmtEta(eta);
 
-  var callStr = t.call_type === 'STOP' ? 'Stop' : 'Pass';
+  // position line: real place + miles when live, else call type
+  var posStr;
+  if (d && d.live) {
+    posStr = (Math.abs(d.mi) < 0.4 ? 'passing' : Math.abs(d.mi).toFixed(1) + ' mi')
+           + (d.place ? ' · ' + esc(placeName(d.place)) : '');
+  } else {
+    posStr = t.call_type === 'STOP' ? 'Stops' : 'Passes';
+  }
   var late = t.late_min;
   var lateStr = (t.cancelled) ? '<span style="color:#c03030">Cancelled</span>'
     : (late === null || late === undefined || isEst) ? ''
@@ -809,7 +646,7 @@ function renderCol(prefix, t, now) {
     '</div>' +
     '<div class="nc-sub">' +
       '<span class="nc-hc">' + esc(t.headcode) + '</span>' +
-      '<span class="nc-track">' + esc(callStr) + '</span>' +
+      '<span class="nc-pos">' + posStr + '</span>' +
       (lateStr ? '<span>' + lateStr + '</span>' : '') +
     '</div>' +
     '<div class="nc-eta-row">' +
@@ -818,50 +655,41 @@ function renderCol(prefix, t, now) {
     '</div>';
 }
 
-var APPR_HOUSE_PCT = 62.9;  // 8.3mi from Reading / 13.2mi total
-
-function renderApproachBar(allUpcoming, now) {
+// ── Approach bar ─────────────────────────────────────────────────────────────
+// Reading(+5.1mi) at 2%, Maidenhead(−6.7mi) at 98%, house(0) at 43.5%.
+var APPR_W = 5.1, APPR_E = -6.7;
+function apprPct(mi) {
+  var pct = 2 + (APPR_W - mi) / (APPR_W - APPR_E) * 96;
+  return Math.max(1.5, Math.min(98.5, pct));
+}
+function renderApproachBar(now) {
   var dots = document.getElementById('appr-dots');
   if (!dots) return;
+  var house = document.getElementById('appr-house');
+  var twy = document.getElementById('appr-twy');
+  var hp = apprPct(0).toFixed(1) + '%';
+  if (house) house.style.left = hp;
+  if (twy) twy.style.left = hp;
+
   var html = '';
-  // Show all trains in 5-min past to 35-min future window
-  var full = trains.filter(function(t) {
-    if (t.cancelled) return false;
+  trains.forEach(function(t){
+    if (t.cancelled) return;
     var houseMs = (t.house_pass_ts || 0) * 1000;
-    if (!houseMs) return false;
+    if (!houseMs) return;
     var dtSec = (houseMs - now) / 1000;
-    return dtSec >= -300 && dtSec <= 2100;
-  });
-  full.forEach(function(t) {
-    var houseMs = t.house_pass_ts * 1000;
-    var dtSec   = (houseMs - now) / 1000;
-
-    var pct;
-    if (t.at_station) {
-      pct = APPR_HOUSE_PCT;
-    } else {
-      var mainLine = isMainTrack(t);
-      var speedMph = mainLine ? 75 : 55;
-      var milesAway = Math.abs(dtSec) / 3600 * speedMph;
-      var pctAway   = milesAway / 13.2 * 100;
-      pct = t.direction === 'down'
-        ? APPR_HOUSE_PCT + (dtSec > 0 ? pctAway : -pctAway)
-        : APPR_HOUSE_PCT - (dtSec > 0 ? pctAway : -pctAway);
-    }
-    pct = Math.max(1.5, Math.min(98.5, pct));
-
+    if (dtSec < -300 || dtSec > 2400) return;          // 5 min past → 40 min future
+    var d = trainDist(t, now);
+    if (!d) return;
+    var pct = t.at_station ? apprPct(0) : apprPct(d.mi);
     var op = opStyle(t.op_code, t.passenger);
-    var td = tdPositions[t.headcode];
-    var hasTd = td && td.age_s < 120;
     var border = t.at_station ? '2px solid #d08000'
-               : hasTd        ? '2px solid #2a9a50'
-               :                '1px solid rgba(255,255,255,.25)';
-    var mainL = isMainTrack(t);
-    var dir   = (t.direction === 'up' ? '↑' : '↓') + (mainL ? 'M' : 'R');
-    var dest  = t.passenger === false
+               : t.held       ? '2px solid #c05000'
+               : d.live        ? '2px solid #2a9a50'
+               :                 '1px solid rgba(255,255,255,.25)';
+    var dir  = (t.direction === 'up' ? '↑' : '↓') + (isMainTrack(t) ? 'M' : 'R');
+    var dest = t.passenger === false
       ? (t.headcode && t.headcode[0]==='6' ? 'IFT' : 'FRT')
       : destAbbr(t.dest).slice(0, 3);
-
     html += '<div class="appr-dot" style="left:' + pct.toFixed(1) + '%;' +
       'background:' + op.bg + ';border:' + border + '">' +
       '<div class="appr-dot-dir">' + esc(dir) + '</div>' +
@@ -872,6 +700,7 @@ function renderApproachBar(allUpcoming, now) {
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────
+drawLandmarks();
 setInterval(renderClock, 1000);
 renderClock();
 
@@ -881,7 +710,7 @@ fetchNrcc();
 
 setInterval(fetchTrains,  15000);
 setInterval(fetchTdLive,   5000);
-setInterval(fetchNrcc, 300000);   // NRCC every 5 min
+setInterval(fetchNrcc, 300000);
 setInterval(function(){ render(); }, 1000);
 </script>
 </body>

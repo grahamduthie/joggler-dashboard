@@ -748,6 +748,31 @@ The proxy caches the access token and refreshes it 60 s before expiry without bl
 
 **Rate limits:** 30 req/min, 750/hr, 9000/day. Two queries per 30 s = 5,760/day (within limit).
 
+### lineside.html — Standalone Full-Screen Track Diagram SPA
+
+Served at `GET /lineside` (800×480). A live "where are the trains right now" view of the
+immediate Twyford vicinity. Rebuilt 2026-06-27 around real distances.
+
+- **Coordinate system:** x-axis = signed miles from the house (`dist_mi` from `/api/td-live`,
+  SMART/CA-derived). `distToX(mi) = 400 − mi·51.1` — house centred at x=400, **WEST (+, toward
+  Reading) = LEFT, EAST (−, toward Maidenhead/London) = RIGHT**; visible range ≈ ±6.75 mi
+  (Reading ≈ x139, Maidenhead ≈ x742). Trains beyond that are off-scale and not drawn (they're
+  in the panel/approach bar). This replaced the old broken `berthToX` (which wrongly put
+  berth 574 = Maidenhead at "the house").
+- **Four track rows** (nearest-to-house first): Up Relief (y38), Down Relief (y78), Up Main
+  (y118), Down Main (y158). UP arrow → (travels left→right), DOWN ← (right→left).
+- **Trains:** positioned from the live berth `dist_mi` (solid, green-edged) or a schedule-ETA
+  estimate (dashed) when no live fix; row from the backend `track`; held/dwelling trains marked
+  ⏸. **Unmatched live TD trains** (those dropped from `/api/trains` because they have no route to
+  corridor-validate) ARE shown here at their true position/line — e.g. a Maidenhead terminator
+  correctly sits at the right edge, not at the house.
+- **Four-column next-train panel** (one per line) with operator badge, live `X.X mi · <place>`,
+  ETA. **Approach bar** at the bottom: Reading (+5.1 mi) → 2%, Maidenhead (−6.7) → 98%, house
+  → 43.5%. **Alert strip** cycles last-train / NRCC disruption text.
+- The 9 speculative signal-aspect dots were **removed** in the rebuild (their positions came from
+  the discredited calibration and the SF aspect decode was empirical). `/api/td-live` still
+  returns `signals`, so they can be reinstated once signal positions are confirmed.
+
 ### Buses View
 
 Two tabs: **Departures** and **Map**. The Buses tile opens on Departures.
