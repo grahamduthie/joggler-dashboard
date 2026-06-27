@@ -1053,6 +1053,7 @@ _PAD_EXCL_DESTS = frozenset({
     'Heathrow Airport Terminals 2 & 3', 'Heathrow Airport Terminals 2&3',
     'Heathrow Terminal 4', 'Heathrow Terminal 5',
     'Heathrow Terminals 1-3', 'Heathrow Terminals 2 & 3',
+    'Maidenhead',   # terminates east of Twyford; never passes the house
 })
 
 # Destination descriptions that indicate an UP (towards London) service
@@ -1380,6 +1381,7 @@ def _rtt_build_trains():
                 ts += late_sec
         t['house_pass_ts'] = int(ts) if ts else 0
 
+    _td_enrich_trains(trains, now)
     trains.sort(key=lambda t: t.get('house_pass_ts') or _iso_to_ts(t.get('twy_sched', '')))
     result = {'trains': trains, 'ts': int(now)}
 
@@ -1387,6 +1389,188 @@ def _rtt_build_trains():
         _rtt_trains_data = result
         _rtt_trains_ts   = now
     return result
+
+
+_D6_HOUSE_X   = 499.0
+_D6_PX_PER_MI = 680.0 / 13.2    # lineside x=60..740 = Reading MP35.7..Maidenhead MP22.5
+
+
+def _d6_berth_to_x(berth_str):
+    """
+    Convert a D6/D1 area berth string to lineside x-coordinate, or None if out of range.
+    D6 berths 400-700 are Twyford area (directly calibrated).
+    D1 berths 1600-1800 remap to the same scale via the lineside formula.
+    """
+    try:
+        b = int(berth_str)
+    except (TypeError, ValueError):
+        return None
+    if b >= 1600:
+        b = b - 1602 + 596       # D6 high-range and D1 1600+ berths (e.g. 1612→606, 1700→694)
+    if not (400 <= b <= 800):
+        return None
+    return 601.0 - (b - 476) * 1.041
+
+
+def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age_s):
+    """
+    Estimate seconds until a train at this berth reaches the house.
+    DOWN trains travel westward (decreasing x); UP trains travel eastward (increasing x).
+    The house is at x=499 (east end of Twyford station, on the crossover).
+    Supported areas:
+      D6 — Twyford area (all calibrated berths)
+      D1 — 1600+ berths only (Reading→Twyford approach for UP trains, ~1-3 min window)
+      D4 — 400-699 berths only (Maidenhead→Twyford approach for DOWN trains, ~2-4 min window)
+    Returns None if position is unusable. May return negative (just passed).
+    """
+    if area == 'D1':
+        try:
+            if int(berth_str) < 1600:
+                return None     # D1 low-range berths are out of our calibrated range
+        except (TypeError, ValueError):
+            return None
+    elif area == 'D4':
+        try:
+            b = int(berth_str)
+            if not (400 <= b <= 699):
+                return None     # D4 berths outside this range are too far east or uncalibrated
+        except (TypeError, ValueError):
+            return None
+    elif area != 'D6':
+        return None
+    x_b = _d6_berth_to_x(berth_str)
+    if x_b is None:
+        return None
+    if direction == 'down':
+        dist_px = x_b - _D6_HOUSE_X    # positive = east of house = approaching
+    elif direction == 'up':
+        dist_px = _D6_HOUSE_X - x_b    # positive = west of house = approaching
+    else:
+        return None
+    dist_mi = dist_px / _D6_PX_PER_MI
+    if dist_mi < -0.5:
+        return None                     # well past the house; not useful
+    if is_passenger is False:           # explicit freight — runs slower
+        speed_mph = 55.0 if is_main else 38.0
+    else:
+        speed_mph = 80.0 if is_main else 65.0
+    travel_s = dist_mi / speed_mph * 3600.0
+    return travel_s - age_s             # subtract time already spent in this berth
+
+
+def _td_enrich_trains(trains, now):
+    """Enrich train list with TD house-crossing events and live berth positions."""
+    cutoff_pos   = now - 300
+    cutoff_house = now - 3600
+    td_pos = {}
+    with _td_lock:
+        for entry in reversed(_td_buffer):
+            hc = entry['descr']
+            if hc not in td_pos and entry['ts'] > cutoff_pos:
+                td_pos[hc] = entry
+    with _td_house_lock:
+        house_evts = {hc: e for hc, e in _td_house_events.items()
+                      if e['ts'] > cutoff_house}
+    train_hcs = set()
+    for t in trains:
+        hc = t.get('headcode', '')
+        if not hc:
+            continue
+        train_hcs.add(hc)
+        h = house_evts.get(hc)
+        if h:
+            expected = t.get('house_pass_ts') or 0
+            if not expected or abs(h['ts'] - expected) < 1800:
+                evt = h['event']
+                t['confirmed'] = True
+                t['td_track']  = h['track']
+                if evt == 'at_house':
+                    if not t.get('twy_actual'):
+                        t['twy_actual']    = datetime.datetime.fromtimestamp(
+                            h['ts'], tz=datetime.timezone.utc).isoformat()
+                        t['house_pass_ts'] = int(h['ts'])
+                    t['at_station'] = False
+                elif evt == 'approaching':
+                    t['at_station'] = False
+        pos = td_pos.get(hc)
+        if pos:
+            t['confirmed']    = True
+            t['td_berth']     = pos['to']
+            t['td_berth_age'] = int(now - pos['ts'])
+            if (pos['area'] == 'D6'
+                    and pos['to'] in ('1612', '1608', '1604')
+                    and t.get('direction') == 'up'
+                    and t.get('call_type') == 'STOP'
+                    and int(now - pos['ts']) > 20
+                    and not t.get('twy_actual')):
+                t['at_station'] = True
+            # Refine house_pass_ts from live berth position when train is approaching.
+            # _berth_eta_to_house_s handles area validation (D6, D1 1600+, D4 400-699).
+            elif (not t.get('twy_actual')
+                    and not t.get('at_station')
+                    and int(now - pos['ts']) < 300):
+                eta_s = _berth_eta_to_house_s(
+                    pos['area'], pos['to'],
+                    t.get('direction', ''),
+                    t.get('passenger'),
+                    t.get('track', '') == 'Main',
+                    int(now - pos['ts']),
+                )
+                if eta_s is not None and eta_s > -60:
+                    t['house_pass_ts'] = int(now + max(0, eta_s))
+                    t['td_eta_s'] = int(eta_s)
+    # Stubs for D6 headcodes not matched to any RTT/CIF/TRUST train
+    for hc, pos in td_pos.items():
+        if hc in train_hcs or hc.startswith('2H'):
+            continue
+        if pos['area'] != 'D6':
+            continue
+        h = house_evts.get(hc)
+        track_name = h['track'] if h else 'Unknown'
+        dirn = 'up' if 'Up' in track_name else ('down' if 'Down' in track_name else '')
+        # Infer direction from berth transition when no house event is available
+        if not dirn:
+            try:
+                if int(pos['to']) > int(pos['from']):
+                    dirn = 'down'   # berth numbers increase going westward (toward Bristol)
+                elif int(pos['to']) < int(pos['from']):
+                    dirn = 'up'     # berth numbers decrease going eastward (toward London)
+            except (TypeError, ValueError):
+                pass
+        if h and h['event'] == 'at_house':
+            twy_ts     = int(h['ts'])
+            twy_iso    = datetime.datetime.fromtimestamp(twy_ts, tz=datetime.timezone.utc).isoformat()
+            twy_actual = twy_iso
+            stub_eta_s = None
+        else:
+            # Compute ETA from current berth position
+            stub_eta_s = _berth_eta_to_house_s(
+                pos['area'], pos['to'], dirn, None,
+                'Main' in track_name,
+                int(now - pos['ts']),
+            )
+            if stub_eta_s is not None and stub_eta_s > -60:
+                twy_ts = int(now + max(0, stub_eta_s))
+            else:
+                twy_ts = 0
+            twy_iso = ''; twy_actual = ''
+        stub = {
+            'uid': 'td:' + hc, 'headcode': hc, 'op_code': '', 'op_name': '',
+            'passenger': None, 'call_type': 'PASS', 'direction': dirn,
+            'track': 'Main' if 'Main' in track_name else 'Relief',
+            'origin': '', 'dest': '', 'orig_dep': '', 'dest_arr': '',
+            'twy_sched': twy_iso, 'twy_actual': twy_actual,
+            'twy_arr_sched': '', 'twy_dep_sched': '',
+            'twy_arr_actual': '', 'twy_dep_actual': '',
+            'late_min': None, 'cancelled': False, 'status': None,
+            'platform': '', 'num_veh': None, 'confirmed': True,
+            'td_berth': pos['to'], 'td_berth_age': int(now - pos['ts']),
+            'td_track': track_name, 'source': 'td', 'house_pass_ts': twy_ts,
+        }
+        if stub_eta_s is not None and stub_eta_s > -60:
+            stub['td_eta_s'] = int(stub_eta_s)
+        trains.append(stub)
+        train_hcs.add(hc)
 
 
 # ── Network Rail STOMP (freight trains) ──────────────────────────────────────
@@ -1425,6 +1609,21 @@ _TD_AREAS     = {'D1', 'D4', 'D6'}   # Thames Valley SC: Reading, Hayes, Maidenh
 
 _sf_lock      = threading.Lock()
 _sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds}
+
+# D6 berth transitions that indicate a train passing or approaching the house.
+# House is ~200 m east of Twyford station, at the Up/Down Relief crossover.
+# DOWN trains: berths increase (toward Bristol). UP trains: berths decrease (toward London).
+_TD_HOUSE_TRANSITIONS = {
+    ('0533', '0545'): ('Down Main',   'approaching'),
+    ('0569', '0573'): ('Down Main',   'at_house'),
+    ('0547', '0551'): ('Down Relief', 'approaching'),
+    ('0571', '0577'): ('Down Relief', 'at_house'),
+    ('1606', '1602'): ('Up Main',     'approaching'),
+    ('0566', '0554'): ('Up Main',     'at_house'),
+    ('0594', '0574'): ('Up Relief',   'at_house'),
+}
+_td_house_lock   = threading.Lock()
+_td_house_events = {}   # headcode → {ts, track, event} — most recent event only
 
 
 def _nr_freight_hc(hc):
@@ -1669,6 +1868,19 @@ class _NRListener:
         if sf_updates:
             with _sf_lock:
                 _sf_state.update(sf_updates)
+        for evt in new_ca:
+            if evt['area'] != 'D6':
+                continue
+            key = (evt['from'], evt['to'])
+            if key not in _TD_HOUSE_TRANSITIONS:
+                continue
+            track, event_type = _TD_HOUSE_TRANSITIONS[key]
+            hc = evt['descr']
+            with _td_house_lock:
+                _td_house_events[hc] = {'ts': evt['ts'], 'track': track, 'event': event_type}
+            if event_type == 'at_house':
+                with _lock:
+                    _rtt_trains_ts = 0   # force immediate RTT refresh
 
     def on_message(self, frame):
         global _rtt_trains_ts

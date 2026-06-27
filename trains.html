@@ -606,7 +606,9 @@ function freightClass(hc) {
 }
 
 function confBadge(t) {
+  if (t.at_station) return '<span style="color:#d08000;font-size:clamp(9px,1.1vw,15px)">⏸ at stn</span>';
   var td = tdPositions[t.headcode];
+  if (t.td_berth && td && td.age_s < 120) return '<span style="color:#2a9a50;font-size:clamp(9px,1.1vw,15px)">● live</span>';
   if (td && td.age_s < 120) return '<span style="color:#2a9a50;font-size:clamp(9px,1.1vw,15px)">● live</span>';
   if (t.confirmed && t.twy_actual) return '<span style="color:#5a9a70;font-size:clamp(9px,1.1vw,15px)">✓ TRUST</span>';
   if (t.confirmed) return '<span style="color:#4a7aaa;font-size:clamp(9px,1.1vw,15px)">· RTT</span>';
@@ -725,7 +727,15 @@ function fmtTimeMs(ms) {
 }
 
 function fmtExpected(t) {
-  // When no actual yet but lateness is known: show ~scheduled + late_min
+  if (t.at_station) {
+    var dep = t.twy_dep_actual || t.twy_dep_sched;
+    return dep ? 'dep ' + fmtTime(dep) : 'at Twyford';
+  }
+  // TD-derived ETA from live D6 berth — more accurate than RTT schedule + lateness
+  if (t.td_eta_s !== undefined && !t.twy_actual && t.house_pass_ts) {
+    return '~' + fmtTimeMs(t.house_pass_ts * 1000);
+  }
+  // RTT lateness estimate
   if (!t.twy_sched || !(t.late_min > 0)) return fmtTime(t.twy_sched);
   var ms = new Date(t.twy_sched).getTime() + t.late_min * 60000;
   return '~' + fmtTimeMs(ms);
@@ -1060,8 +1070,9 @@ function renderList(trains, now) {
     // Scheduled time — always show the WTT/estimated sched; prefix ~ if estimated
     var schedDisp = isEst ? '~' + fmtTime(t.twy_sched) : fmtTime(t.twy_sched);
 
-    // Actual time — TRUST confirmed, or ~estimated when lateness is known
-    var actualDisp = t.twy_actual ? fmtTime(t.twy_actual) : (t.late_min > 0 ? fmtExpected(t) : '—');
+    // Actual time — TRUST confirmed, TD-derived ETA, or RTT lateness estimate
+    var actualDisp = t.twy_actual ? fmtTime(t.twy_actual)
+        : (t.td_eta_s !== undefined || t.late_min > 0) ? fmtExpected(t) : '—';
 
     var lateClass = t.cancelled ? 'tr-cancel'
                   : isEst ? 'tr-est'
@@ -1125,25 +1136,30 @@ function renderApproachBar(trains, now) {
     var dtSec = (houseMs - now) / 1000;
     if (dtSec < -300 || dtSec > 2100) return;  // 5 min past → 35 min future
 
-    var isMain = (t.track === 'Main');
-    var speedMph = isMain ? 49 : 33;
-    var milesAway = Math.abs(dtSec) / 3600 * speedMph;
-    var pctAway = milesAway / 13.2 * 100;
-
     var pct;
-    if (t.direction === 'down') {
-      // DOWN: arrives from Maidenhead side (right=high pct), moves left
-      pct = APPR_HOUSE_PCT + (dtSec > 0 ? pctAway : -pctAway);
+    if (t.at_station) {
+      pct = APPR_HOUSE_PCT;   // pin at house marker while stopped at Twyford
     } else {
-      // UP: arrives from Reading side (left=low pct), moves right
-      pct = APPR_HOUSE_PCT - (dtSec > 0 ? pctAway : -pctAway);
+      var isMain = (t.track === 'Main');
+      var speedMph = isMain ? 49 : 33;
+      var milesAway = Math.abs(dtSec) / 3600 * speedMph;
+      var pctAway = milesAway / 13.2 * 100;
+      if (t.direction === 'down') {
+        // DOWN: arrives from Maidenhead side (right=high pct), moves left
+        pct = APPR_HOUSE_PCT + (dtSec > 0 ? pctAway : -pctAway);
+      } else {
+        // UP: arrives from Reading side (left=low pct), moves right
+        pct = APPR_HOUSE_PCT - (dtSec > 0 ? pctAway : -pctAway);
+      }
     }
     pct = Math.max(1, Math.min(99, pct));
 
     var op = opStyle(t.op_code, t.passenger);
     var td = tdPositions[t.headcode];
-    var hasTd = td && td.age_s < 120;
-    var border = hasTd ? '2px solid #2a9a50' : '1px solid ' + op.fg + '55';
+    var hasTd = t.td_berth && td && td.age_s < 120;
+    var border = t.at_station  ? '2px solid #d08000'
+               : hasTd         ? '2px solid #2a9a50'
+               :                 '1px solid ' + op.fg + '55';
     var label = (t.passenger === false ? freightClass(t.headcode) : (t.dest || ''))
                   .slice(0, 3).toUpperCase();
     dots += '<div class="appr-dot" style="left:' + pct.toFixed(1) + '%;background:' + op.bg + ';border:' + border + '">' + esc(label) + '</div>';

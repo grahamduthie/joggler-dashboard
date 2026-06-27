@@ -692,6 +692,7 @@ if not actual_time and late_min:
 
 `trains.html` displays the expected time via `fmtExpected(t)`:
 - If `twy_actual` is set (TRUST/RTT confirmed): shows `✓ HH:MM`
+- If `td_eta_s` is set (live berth position available): shows `~HH:MM` from `house_pass_ts` — more accurate than RTT lateness
 - If no `twy_actual` but `late_min > 0`: shows `~HH:MM` (twy_sched + late_min)
 - Otherwise: shows the scheduled time
 
@@ -1093,9 +1094,9 @@ All three areas are part of Thames Valley Signalling Centre (TVSC). The former a
 
 | TD area_id | TVSC panel name | Geography | Confirmed trains |
 |------------|-----------------|-----------|-----------------|
-| `D4` | Hayes Area Scalable IECC | East of Twyford → Maidenhead | 1P36 (up Main) entered D4 at berth 0470 heading east |
+| `D4` | Hayes Area Scalable IECC | East of Twyford → Maidenhead (DOWN trains approach from here) | 1P36 (up Main) entered D4 at berth 0470 heading east; D4 berths 400-699 used for DOWN ETA |
 | `D6` | Maidenhead Area Scalable IECC | Twyford corridor — **Relief Line both directions + Up Main** | 9R78, 9R26, 9U35 (Relief); 1A31, 1P36 (up Main) |
-| `D1` | Reading IECC A | Reading area + **Down Main through Twyford** | 1G29 (down Main) was in D1 throughout its Twyford arrival |
+| `D1` | Reading IECC A | Reading area west of Twyford (UP trains approach from here); D1 1600+ berths remap to x=330-476 | 1G29 (down Main) was in D1 throughout its Twyford arrival; D1 1600+ used for UP ETA |
 
 **D6 berth geography** (berths increase going west/toward Reading on Relief Line):
 - Down Relief at Twyford station: ~0577→0595
@@ -1492,6 +1493,13 @@ Everything working as of 2026-06-26.
 - [x] trains.html: NRCC banner (amber/red dismissable bar above topbar); fetches /api/nrcc every 5 min
 - [x] trains.html: approach indicator bar (32px fixed footer, RDG→MAD strip, coloured dots per train from house_pass_ts with 62.9% Twyford position, 35-min window)
 - [x] trains.html: trainMs() uses house_pass_ts as first priority; tdPositions dict from /api/td-live every 5s
+- [x] transport-proxy.py: switch MAD (Maidenhead) RTT → PAD (Paddington) for DOWN trains; +33 min offset; exclude HX (Heathrow), Windsor, Greenford, Hayes, Bourne End destinations via `_PAD_EXCL_DESTS`; catches fast expresses that don't stop at Maidenhead
+- [x] transport-proxy.py: CIF freight daily download + Twyford PASS index — startup fetch of CIF_FREIGHT_FULL_DAILY, indexed by headcode, refreshed 02:30 daily; two-step auth (NR → S3 redirect without forwarding Authorization header); source='cif', track='Relief', confirmed=False
+- [x] transport-proxy.py: `_td_enrich_trains()` — live TD berth positions enriching the train list; `at_station` detection for UP STOP trains at D6 berths 1612/1608/1604 (>20s dwell); `_TD_HOUSE_TRANSITIONS` for immediate approaching/at_house events on STOMP thread; stub train creation for headcodes in D6 buffer not matched to any RTT/CIF/TRUST train
+- [x] transport-proxy.py: `_d6_berth_to_x()` + `_berth_eta_to_house_s()` helpers — berth→lineside x-coordinate (`x = 601-(b-476)*1.041`); ETA to house from D6 (Twyford area), D1 1600+ (Reading approach, UP trains), D4 400-699 (Maidenhead approach, DOWN trains); speed model: 80 mph main/65 mph relief for passenger, 55/38 for freight
+- [x] transport-proxy.py: TD-derived `house_pass_ts` override — when live berth position available, `now + eta_s` replaces RTT schedule+lateness estimate; `td_eta_s` field exposed in `/api/trains`; condition: not twy_actual, not at_station, berth age <300 s, eta_s > -60 s
+- [x] trains.html: `fmtExpected()` uses `td_eta_s` path — when `td_eta_s` set and no `twy_actual`, shows `~HH:MM` from `house_pass_ts` (more accurate than RTT lateness, critical for CIF freight with bad CIF times); list view `actualDisp` shows TD ETA even when `late_min=0`
+- [x] trains.html: at_station display — "⏸ at stn" badge in confBadge(); fmtExpected() shows "dep HH:MM" from twy_dep_actual or twy_dep_sched; approach bar pins dot at house position with amber border
 - [ ] trains.html / lineside.html: run td_correlate.py again during busy morning service to confirm signal address mapping with more trains; update KEY_SIGNALS positions if needed
 - [ ] lineside.html: use SF signal aspects to indicate "clear road" / "signals at caution" for approaching trains once mapping is fully confirmed
 - [ ] transport-proxy.py: per-train cancelReason/delayReason from Darwin SOAP (extracted in _parse but not yet exposed in /api/trains response)
