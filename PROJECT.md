@@ -582,7 +582,11 @@ ends east). `_TWY_EAST_TOKENS` lists strictly-east places (Paddington…Maidenhe
 is layered — operator (XR/HX→Relief, XC→Main) → line code ending `ML`→Main → genuine relief codes
 (`_RELIEF_CODES`: RL/URL/UDL/DDL/…)→Relief → destination character (`_MAIN_DESTS`/`_RELIEF_DESTS`)
 → headcode class (1xxx express=Main, else Relief). Reading throat codes like `WL`/`FVL` are NOT
-trusted (a Penzance Down-Main express carries `lc=WL`). Frontend `isMainTrack(t)` just returns
+trusted (a Penzance Down-Main express carries `lc=WL`). "Reading" is deliberately absent from
+`_RELIEF_DESTS` (both fast GWR expresses and local stoppers terminate there, so the headcode class
+decides). **A live SMART berth line overrides this heuristic** — once a train has a berth fix the
+physical line is authoritative (e.g. fast Paddington→Reading express `1R41` reads as Main from its
+berth, not Relief from its "Reading" destination). Frontend `isMainTrack(t)` just returns
 `t.track==='Main'` (backend is authoritative).
 
 **SMART berth → line + position model** (`_load_smart`, `_berth_info`): the NR **SMART** open-data
@@ -605,10 +609,18 @@ every 120 s; the model persists across restarts and sharpens over time.
 
 **Live-berth ETA refinement** (`_berth_eta_to_house_s`, `_td_enrich_trains`): for a matched train
 with a live berth, `house_pass_ts` is refined from the real distance (speed by line/passenger),
-capped at 8 mi out (constant-speed estimate unreliable further, with intermediate stops). A train
-**dwelling at a station or held at a signal** (age in berth ≥ expected transit) is floored at the
-travel-from-here time and flagged `held` — it never shows "now" while miles away (this fixed a
-bug where a train sitting at Reading platform showed as passing now).
+capped at 8 mi out (constant-speed estimate unreliable further, with intermediate stops). The live
+berth is **authoritative over the schedule** — `house_pass_ts = now + eta` whether the train is
+approaching (+) or has already passed (−). Three subtleties it handles:
+- **Dwelling / held:** a CA berth is a *point*, not a section the train slides along, so the time
+  a train has sat in a berth (`age_s`) is credited as progress only up to one berth-step
+  (`_BERTH_STEP_S`=50 s). Beyond that it's dwelling at a station or held at a signal — it gets the
+  full travel-from-here time and is flagged `held` (fixed a train at Reading platform showing
+  "1 min" while 5 mi away).
+- **Passed:** a train past the house (down now west / up now east, `to_go < −0.3 mi`) returns a
+  negative ETA so a stale schedule + lateness can't keep showing it as upcoming (fixed a 25-min-late
+  down train at Reading reading as +15 s).
+- **8-mile cap / unknown berth:** falls back to the RTT schedule estimate.
 
 **Freight trains via Network Rail STOMP + CIF schedule:** Freight is absent from RTT queries.
 The proxy uses two mechanisms:
