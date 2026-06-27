@@ -1030,31 +1030,10 @@ def _fetch_icy_nowplaying(stream_url):
 RTT_API_BASE     = 'https://data.rtt.io'
 RTT_TTL          = 30   # seconds proxy cache
 
-# Offset (minutes) from Reading to estimated Twyford pass time.
-# Only UP trains from Reading are useful: DOWN trains already passed Twyford before Reading.
-# UML = Up Main Line; UDL = Up Diversion Line. Offset +3 = Twyford is 3 min after Reading.
-_RTT_RDG_OFFSETS = {'UML': 3, 'UDL': 3}
-_RTT_MAIN_CODES  = frozenset(_RTT_RDG_OFFSETS)
-
-# Offset (minutes) from Maidenhead departure to estimated Twyford pass time.
-# DOWN trains at Maidenhead approach Twyford ~5 min later (4.5 miles at ~55 mph).
-_RTT_MAD_OFFSETS = {'ML': 5, 'DML': 5}
-_RTT_MAD_CODES   = frozenset(_RTT_MAD_OFFSETS)
-
-# Paddington: fast DOWN expresses skip Maidenhead, so add PAD with a time offset.
-# Paddington → Twyford ≈ 33 min at express speed for GWR Main Line trains.
-# Exclude destinations that do NOT pass through Twyford (Heathrow branch, Windsor branch).
-_RTT_PAD_OFFSET = 33
-_PAD_EXCL_DESTS = frozenset({
-    'Windsor & Eton Central',
-    'Greenford',
-    'Hayes & Harlington', 'Hayes and Harlington',
-    'Heathrow Airport Terminal 4', 'Heathrow Airport Terminal 5',
-    'Heathrow Airport Terminals 2 & 3', 'Heathrow Airport Terminals 2&3',
-    'Heathrow Terminal 4', 'Heathrow Terminal 5',
-    'Heathrow Terminals 1-3', 'Heathrow Terminals 2 & 3',
-    'Maidenhead',   # terminates east of Twyford; never passes the house
-})
+# Reading↔Twyford is ~4 min.  _rtt_normalise applies a signed offset from the
+# Reading schedule time: UP trains reach Twyford AFTER Reading (+), DOWN trains
+# pass Twyford BEFORE arriving Reading (−); Main expresses are faster than Relief
+# stoppers.  The values live inline in _rtt_normalise (3 min Main / 5 min Relief).
 
 # Destination descriptions that indicate an UP (towards London) service
 _RTT_UP_DESTS = {
@@ -1062,6 +1041,96 @@ _RTT_UP_DESTS = {
     'Abbey Wood', 'Shenfield',
     'Heathrow Terminal 4', 'Heathrow Terminal 5', 'Heathrow Terminals 1-3',
 }
+
+# Long-distance / express terminals served by GWR & XC trains running the FAST
+# (Main) lines through Twyford.  Used to classify Main vs Relief when no TD
+# berth position and no usable line code are available.
+_MAIN_DESTS = frozenset({
+    'Bristol Temple Meads', 'Bristol Parkway', 'Cardiff Central',
+    'Swansea', 'Carmarthen', 'Pembroke Dock', 'Fishguard Harbour',
+    'Milford Haven', 'Cheltenham Spa', 'Gloucester', 'Hereford',
+    'Worcester Foregate Street', 'Worcester Shrub Hill', 'Great Malvern',
+    'Taunton', 'Exeter St Davids', 'Plymouth', 'Penzance', 'Paignton',
+    'Newquay', 'Weston-super-Mare', 'Westbury', 'Frome', 'Castle Cary',
+})
+# Local / stopping terminals served on the SLOW (Relief) lines through Twyford.
+_RELIEF_DESTS = frozenset({
+    'Didcot Parkway', 'Newbury', 'Bedwyn', 'Basingstoke',
+    'Reading', 'Slough', 'Maidenhead', 'Henley-on-Thames',
+    'Bourne End', 'Marlow', 'Greenford', 'West Ealing',
+    'Ealing Broadway', 'Hayes & Harlington', 'Gatwick Airport', 'Redhill',
+})
+
+
+# Location-name tokens strictly EAST of Twyford (the London side).  A train
+# runs through Twyford only if exactly one of {origin, destination} is east of
+# it — i.e. Twyford lies between the two ends.  This rejects both Reading-
+# junction traffic that never reaches Twyford (Newbury, Basingstoke,
+# Gatwick/Redhill, CrossCountry to the north) AND trains that terminate east of
+# Twyford and turn back (e.g. Paddington→Maidenhead Elizabeth Line — Maidenhead
+# is east of Twyford, so the train never reaches the house).
+# NB: Twyford itself is NOT in this set, so trains starting/ending at Twyford
+# still count as passing it.
+_TWY_EAST_TOKENS = (
+    'Paddington', 'Abbey Wood', 'Heathrow', 'Shenfield', 'Stratford',
+    'Ealing', 'Acton', 'West Drayton', 'Hayes', 'Southall', 'Hanwell',
+    'Maidenhead', 'Taplow', 'Burnham', 'Slough', 'Langley', 'Iver',
+)
+
+
+def _is_east(name):
+    """True if a location name is strictly east (London side) of Twyford."""
+    return any(tok in name for tok in _TWY_EAST_TOKENS)
+
+
+def _passes_twyford(direction, origin, dest):
+    """A train runs through Twyford only if Twyford lies between its two ends:
+    exactly one endpoint is east of Twyford.  Both-east (e.g. Paddington→
+    Maidenhead) or both-west (e.g. Reading→Newbury) never reach the house."""
+    return _is_east(origin) != _is_east(dest)
+
+
+def _classify_direction(line_code, dest):
+    """UP (toward London) or DOWN.  Prefers the line-code U/D prefix when the
+    code is a directional one (UML/DML/RL/URL…); otherwise uses the destination."""
+    lc = line_code or ''
+    if lc[:1] == 'U':
+        return 'up'
+    if lc[:1] == 'D':
+        return 'down'
+    if (dest in _RTT_UP_DESTS or 'Paddington' in dest
+            or 'Abbey Wood' in dest or 'Heathrow' in dest):
+        return 'up'
+    return 'down'
+
+
+# Genuine Relief/slow-line code designations at Twyford (as opposed to Reading
+# junction-throat codes like WL/FVL which say nothing about the Twyford line).
+_RELIEF_CODES = frozenset({
+    'RL', 'URL', 'DRL', 'UDL', 'DDL', 'UBL', 'DBL', 'SL', 'EL',
+})
+
+
+def _classify_track(line_code, op_code, headcode, dest):
+    """Main (fast) or Relief (slow) line at Twyford.  Layered fallbacks:
+    operator → line code (ML-suffix) → destination character → headcode class
+    (1xxx express = Main, everything else = Relief)."""
+    if op_code in ('XR', 'HX'):      # Elizabeth Line / Heathrow Express — relief/electric lines
+        return 'Relief'
+    if op_code == 'XC':              # CrossCountry — always Main line
+        return 'Main'
+    lc = line_code or ''
+    if lc.endswith('ML'):            # UML / DML / ML — definitely Main
+        return 'Main'
+    if lc in _RELIEF_CODES:          # genuine relief/slow-line designations
+        return 'Relief'
+    # Other codes (WL/FVL/numeric…) reflect the Reading junction throat, not the
+    # Twyford line — ignore them and classify by train character.
+    if dest in _MAIN_DESTS:
+        return 'Main'
+    if dest in _RELIEF_DESTS:
+        return 'Relief'
+    return 'Main' if headcode[:1] == '1' else 'Relief'
 
 _rtt_lock         = threading.Lock()
 _rtt_access_token = ''
@@ -1114,7 +1183,7 @@ def _rtt_location_query(code, time_from_iso, window_min=100):
         return []
 
 
-def _rtt_normalise(svc, confirmed, line_offset=0):
+def _rtt_normalise(svc, confirmed):
     sm  = svc.get('scheduleMetadata', {})
     td  = svc.get('temporalData', {})
     lm  = svc.get('locationMetadata', {})
@@ -1142,30 +1211,34 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
     orig_dep   = ((svc.get('origin') or [{}])[0].get('temporalData') or {}).get('scheduleAdvertised', '')
     dest_arr   = ((svc.get('destination') or [{}])[0].get('temporalData') or {}).get('scheduleAdvertised', '')
 
-    is_up = (dest_name in _RTT_UP_DESTS
-             or 'London Paddington' in dest_name
-             or 'Abbey Wood' in dest_name)
-    direction = 'up' if is_up else 'down'
-
     line_code  = lm.get('line', {}).get('planned', '')
     platform   = lm.get('platform', {}).get('planned', '')
     num_veh    = lm.get('numberOfVehicles')
+    op_code    = sm.get('operator', {}).get('code', '')
+    headcode   = sm.get('trainReportingIdentity', '')
+
+    direction = _classify_direction(line_code, dest_name)
+    track     = _classify_track(line_code, op_code, headcode, dest_name)
 
     if confirmed:
-        track      = 'Relief'
         call_type  = 'STOP' if td.get('displayAs') == 'CALL' else 'PASS'
         twy_sched  = sched_iso
         twy_actual = actual_iso or forecast_iso
     else:
-        track      = 'Main'
+        # Reading is ~4 min from Twyford.  UP trains depart Reading and reach
+        # Twyford AFTER (add offset); DOWN trains pass Twyford BEFORE arriving
+        # Reading (subtract offset).  Main expresses run faster than Relief
+        # stoppers, so the offset is smaller.
         call_type  = 'PASS'
         twy_actual = ''
+        offset = 3 if track == 'Main' else 5
+        delta  = offset if direction == 'up' else -offset
         if sched_iso:
             try:
                 dt = datetime.datetime.fromisoformat(sched_iso)
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=_TZ_LONDON)
-                twy_sched = (dt + datetime.timedelta(minutes=line_offset)).isoformat()
+                twy_sched = (dt + datetime.timedelta(minutes=delta)).isoformat()
             except Exception:
                 twy_sched = sched_iso
         else:
@@ -1189,6 +1262,7 @@ def _rtt_normalise(svc, confirmed, line_offset=0):
         'call_type': call_type,
         'direction': direction,
         'track':     track,
+        'line_code': line_code,
         'origin':    orig_name,
         'dest':      dest_name,
         'orig_dep':  orig_dep,
@@ -1233,17 +1307,24 @@ def _rtt_build_trains():
     from_dt   = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)
     time_from = from_dt.strftime('%Y-%m-%dT%H:%M:%S')
 
-    fetch_results = [None, None, None]
+    # Two RTT location queries (parallel):
+    #  • TWYFORD — trains that actually CALL or PASS Twyford (Relief/stopping);
+    #    gives confirmed pass times.  Fast Main-line trains have no Twyford
+    #    timing point and never appear here.
+    #  • RDG (Reading) — bi-directional predictor.  Reading is ~4 min from
+    #    Twyford: UP trains reach Twyford AFTER departing Reading; DOWN trains
+    #    pass Twyford BEFORE arriving Reading.  This is the only feed that
+    #    surfaces fast Down-Main expresses (Bristol/Cardiff/Plymouth/etc.).
+    fetch_results = [None, None]
     def _fetch_rtt(idx, code, tfrom, window):
         fetch_results[idx] = _rtt_location_query(code, tfrom, window)
     threads = [
         threading.Thread(target=_fetch_rtt, args=(0, 'TWYFORD', time_from, 100)),
         threading.Thread(target=_fetch_rtt, args=(1, 'RDG',     time_from, 100)),
-        threading.Thread(target=_fetch_rtt, args=(2, 'PAD',     time_from, 100)),
     ]
     for th in threads: th.start()
     for th in threads: th.join(timeout=15)
-    twy_svcs, rdg_svcs, pad_svcs = fetch_results
+    twy_svcs, rdg_svcs = fetch_results
 
     trains   = []
     seen     = set()
@@ -1259,34 +1340,19 @@ def _rtt_build_trains():
         uid  = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
         if uid in seen:
             continue
-        lm   = svc.get('locationMetadata', {})
-        line = lm.get('line', {}).get('planned', '')
-        offset = _RTT_RDG_OFFSETS.get(line, 3)   # default 3 min for unknown line code
-        t = _rtt_normalise(svc, confirmed=False, line_offset=offset)
-        if t['direction'] != 'up':        # only UP trains from Reading approach Twyford
+        # _rtt_normalise applies a signed Reading→Twyford offset based on the
+        # train's own direction (UP +, DOWN −), so both directions are kept.
+        t = _rtt_normalise(svc, confirmed=False)
+        hc = t['headcode']
+        if not t['twy_sched'] or hc.startswith('2H') or hc[:1] == '0':
+            continue                      # no time / Henley branch / light-loco-bus moves
+        if t['op_code'] == 'HX':          # Heathrow Express — own track, not via Twyford
             continue
-        if not t['twy_sched'] or t['headcode'].startswith('2H'):
-            continue
+        if (t.get('line_code') or '') == 'BUS':
+            continue                      # rail-replacement bus
+        if not _passes_twyford(t['direction'], t.get('origin', ''), t.get('dest', '')):
+            continue                      # Reading-junction traffic that bypasses Twyford
         seen.add(uid)
-        trains.append(t)
-
-
-
-    for svc in (pad_svcs or []):
-        uid  = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
-        if uid in seen:
-            continue
-        t = _rtt_normalise(svc, confirmed=False, line_offset=_RTT_PAD_OFFSET)
-        if t['direction'] != 'down':
-            continue
-        if t['op_code'] == 'HX':               # Heathrow Express — own track, not via Twyford
-            continue
-        if t.get('dest', '') in _PAD_EXCL_DESTS:
-            continue
-        if not t['twy_sched'] or t['headcode'].startswith('2H'):
-            continue
-        seen.add(uid)
-        t['track'] = 'Main'
         trains.append(t)
 
     # Merge NR STOMP buffer; prune entries older than 2 hours.
@@ -1391,71 +1457,294 @@ def _rtt_build_trains():
     return result
 
 
-_D6_HOUSE_X   = 499.0
-_D6_PX_PER_MI = 680.0 / 13.2    # lineside x=60..740 = Reading MP35.7..Maidenhead MP22.5
-
-
-def _d6_berth_to_x(berth_str):
-    """
-    Convert a D6/D1 area berth string to lineside x-coordinate, or None if out of range.
-    D6 berths 400-700 are Twyford area (directly calibrated).
-    D1 berths 1600-1800 remap to the same scale via the lineside formula.
-    """
-    try:
-        b = int(berth_str)
-    except (TypeError, ValueError):
-        return None
-    if b >= 1600:
-        b = b - 1602 + 596       # D6 high-range and D1 1600+ berths (e.g. 1612→606, 1700→694)
-    if not (400 <= b <= 800):
-        return None
-    return 601.0 - (b - 476) * 1.041
-
-
 def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age_s):
     """
-    Estimate seconds until a train at this berth reaches the house.
-    DOWN trains travel westward (decreasing x); UP trains travel eastward (increasing x).
-    The house is at x=499 (east end of Twyford station, on the crossover).
-    Supported areas:
-      D6 — Twyford area (all calibrated berths)
-      D1 — 1600+ berths only (Reading→Twyford approach for UP trains, ~1-3 min window)
-      D4 — 400-699 berths only (Maidenhead→Twyford approach for DOWN trains, ~2-4 min window)
-    Returns None if position is unusable. May return negative (just passed).
+    Estimate seconds until a train at this berth reaches the house, using the
+    SMART berth model (real chainage distance).  Returns None if the berth is
+    unknown or the train has already passed the house.  May be slightly negative.
+    The line (Main/Relief) is taken from SMART, not the caller's `is_main`.
     """
-    if area == 'D1':
-        try:
-            if int(berth_str) < 1600:
-                return None     # D1 low-range berths are out of our calibrated range
-        except (TypeError, ValueError):
-            return None
-    elif area == 'D4':
-        try:
-            b = int(berth_str)
-            if not (400 <= b <= 699):
-                return None     # D4 berths outside this range are too far east or uncalibrated
-        except (TypeError, ValueError):
-            return None
-    elif area != 'D6':
+    info = _berth_info(area, berth_str)
+    if not info or info['dist_mi'] is None:
         return None
-    x_b = _d6_berth_to_x(berth_str)
-    if x_b is None:
-        return None
-    if direction == 'down':
-        dist_px = x_b - _D6_HOUSE_X    # positive = east of house = approaching
-    elif direction == 'up':
-        dist_px = _D6_HOUSE_X - x_b    # positive = west of house = approaching
+    dist_mi = info['dist_mi']            # signed: + = west of house, − = east of house
+    if direction == 'down':              # approaches from the east (negative side)
+        if dist_mi > 0.3:
+            return None                  # already west of the house — passed
+        to_go = -dist_mi
+    elif direction == 'up':              # approaches from the west (positive side)
+        if dist_mi < -0.3:
+            return None
+        to_go = dist_mi
     else:
         return None
-    dist_mi = dist_px / _D6_PX_PER_MI
-    if dist_mi < -0.5:
-        return None                     # well past the house; not useful
-    if is_passenger is False:           # explicit freight — runs slower
-        speed_mph = 55.0 if is_main else 38.0
+    if to_go > 8.0:
+        return None                      # too far out: constant-speed estimate is
+                                         # unreliable (intermediate stops) — keep the
+                                         # RTT schedule instead
+    main = (info['line'] == 'Main') if info['line'] else is_main
+    if is_passenger is False:            # explicit freight — runs slower
+        speed_mph = 50.0 if main else 35.0
     else:
-        speed_mph = 80.0 if is_main else 65.0
-    travel_s = dist_mi / speed_mph * 3600.0
-    return travel_s - age_s             # subtract time already spent in this berth
+        speed_mph = 90.0 if main else 60.0
+    travel_s = to_go / speed_mph * 3600.0
+    eta = travel_s - age_s               # subtract time already moving in this berth
+    # A train physically cannot pass sooner than the time to travel from its
+    # current berth.  If age_s has consumed the whole transit, the train is
+    # dwelling at a station or held at a signal (not moving) — floor the ETA at
+    # the remaining travel time so it never shows "now"/passed while miles away,
+    # and flag it as held/dwelling.
+    if eta < 0 and to_go > 0.5:
+        return (travel_s, True)
+    return (eta, False)
+
+
+# ── SMART berth → line & position model ──────────────────────────────────────
+# SMART (NR open data) maps every TD berth step to a line (via FROMLINE U/D +
+# PLATFORM) and a STANOX/location.  Combined with BPLAN chainage (validated:
+# kmvalue ÷ 1000 ≈ miles × 1.609 from Paddington) this gives each berth its
+# line (Main/Relief) and signed distance from the house.
+_SMART_URL = ('https://publicdatafeeds.networkrail.co.uk/ntrod/'
+              'SupportingFileAuthenticate?type=SMART')
+
+# Miles from London Paddington for SMART STANMEs on/near the GWML through
+# Twyford (house ≈ Twyford station + 200 m east).  Anchors validated vs BPLAN.
+_HOUSE_MI = 30.9
+_STANME_MI = {
+    'HANWELL': 7.1, 'SOUTHALL': 9.1, 'STHALLOCO': 9.1, 'HAYES&HAR': 10.4,
+    'STOCKLYJN': 10.8, 'AIRPORTJN': 11.0, 'LHR TUN J': 11.5, 'LHR T 2&3': 13.0,
+    'LHR TML 4': 13.5, 'LHR TML 5': 14.5, 'W DRAYTON': 13.2, 'IVER': 14.5,
+    'LANGLEY': 15.6, 'SLOUGH': 18.4, 'BURNHAM': 19.9, 'TAPLOW': 21.8,
+    'MAIDENHED': 24.2, 'MDNHDMIDS': 24.4, 'MDNHD CS': 24.4,
+    'TWYFORD': 31.0, 'HENLEYONT': 31.0,
+    'READWTORJ': 35.5, 'RDGSPURJN': 35.7, 'READNG': 36.0, 'READGWEST': 36.4,
+    'TILEHURST': 38.7, 'PANGBORNE': 41.6, 'GORING&ST': 44.8, 'CHOLSEY': 48.3,
+}
+
+_smart_lock  = threading.Lock()
+_smart_berth = {}   # (area, berth) → {'dir','line','stanme','dist_mi'}
+_smart_ts    = 0.0
+
+
+def _smart_line(plat, fromline):
+    """Map a SMART platform / FROMLINE to Main or Relief at the Twyford corridor.
+    GWML convention: platform 1=Down Main, 2=Up Main, 3=Down Relief, 4/5=Up Relief."""
+    if plat in ('1', '2'):
+        return 'Main'
+    if plat in ('3', '4', '5'):
+        return 'Relief'
+    if fromline == 'M':
+        return 'Main'
+    if fromline == 'R':
+        return 'Relief'
+    return ''
+
+
+def _load_smart():
+    """Download the NR SMART berth reference, build the berth → line/position map."""
+    global _smart_berth, _smart_ts
+    if not NR_USERNAME or not NR_PASSWORD:
+        print('SMART: NR credentials not available, skipping')
+        return
+    try:
+        creds = base64.b64encode(f'{NR_USERNAME}:{NR_PASSWORD}'.encode()).decode()
+        req = urllib.request.Request(_SMART_URL, headers={
+            'Authorization': 'Basic ' + creds, 'User-Agent': 'twyford-dashboard/1.0'})
+
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                return None
+
+        opener = urllib.request.build_opener(_NoRedirect())
+        s3_url = None
+        try:
+            with opener.open(req, timeout=30) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308):
+                s3_url = e.headers.get('Location')
+            else:
+                raise
+        if s3_url:
+            with urllib.request.urlopen(s3_url, timeout=90) as resp:
+                raw = resp.read()
+        try:
+            raw = gzip.decompress(raw)
+        except Exception:
+            pass
+        data = json.loads(raw)
+        recs = data['BERTHDATA'] if isinstance(data, dict) and 'BERTHDATA' in data else data
+
+        # Aggregate every (area, berth) seen in a step.  The FROMLINE/PLATFORM/
+        # STANME describe the step's line & place; index BOTH the from and to
+        # berths so destination-only berths (e.g. the Twyford throat 1650/1668)
+        # are also covered.  FROM berths get a higher weight (more authoritative).
+        from collections import Counter
+        agg = {}
+        for r in recs:
+            td = r.get('TD')
+            if td not in ('D1', 'D4', 'D6'):
+                continue
+            fl = (r.get('FROMLINE') or '').strip()
+            pl = (r.get('PLATFORM') or '').strip()
+            sm = (r.get('STANME') or '').strip()
+            for b, w in ((r.get('FROMBERTH', ''), 2), (r.get('TOBERTH', ''), 1)):
+                if not b:
+                    continue
+                d = agg.setdefault((td, b), {'dir': Counter(), 'plat': Counter(),
+                                             'stanme': Counter(), 'fl': Counter()})
+                if fl in ('U', 'D'):
+                    d['dir'][fl] += w
+                if fl:
+                    d['fl'][fl] += w
+                if pl:
+                    d['plat'][pl] += w
+                if sm:
+                    d['stanme'][sm] += w
+
+        table = {}
+        for key, d in agg.items():
+            direction = (d['dir'].most_common(1)[0][0] if d['dir'] else '')
+            plat      = (d['plat'].most_common(1)[0][0] if d['plat'] else '')
+            fl        = (d['fl'].most_common(1)[0][0] if d['fl'] else '')
+            stanme    = (d['stanme'].most_common(1)[0][0] if d['stanme'] else '')
+            line      = _smart_line(plat, fl)
+            mi        = _STANME_MI.get(stanme)
+            table[key] = {
+                'dir':     'down' if direction == 'D' else ('up' if direction == 'U' else ''),
+                'line':    line,
+                'stanme':  stanme,
+                'dist_mi': (mi - _HOUSE_MI) if mi is not None else None,
+            }
+        with _smart_lock:
+            _smart_berth = table
+            _smart_ts = time.time()
+        print(f'SMART: loaded {len(table)} D1/D4/D6 berths')
+    except Exception as e:
+        print(f'SMART load failed: {e}')
+
+
+def _berth_info(area, berth_str):
+    """Return {'dir','line','stanme','dist_mi'} for a TD berth, or None.
+    SMART is authoritative for line/place; CA-interpolated positions fill in
+    dist_mi for intermediate berths SMART doesn't carry."""
+    with _smart_lock:
+        info = _smart_berth.get((area, berth_str))
+    if info and info.get('dist_mi') is not None:
+        return info
+    with _chain_lock:
+        cd = _chain_pos.get((area, berth_str))
+    if cd is None:
+        return info                      # unknown position → caller falls back to schedule
+    if info:
+        info = dict(info); info['dist_mi'] = cd
+        return info
+    return {'dir': '', 'line': '', 'stanme': '', 'dist_mi': cd}
+
+
+def _rebuild_chain_positions():
+    """Interpolate dist_mi for berths SMART doesn't anchor, by walking the CA
+    adjacency to the nearest anchored berths up- and down-stream and dividing the
+    distance by cumulative transit time.  Conservative: only assigns a position
+    when the berth is bracketed by two anchors within a few hops on both sides."""
+    with _smart_lock:
+        anchors = {k: v['dist_mi'] for k, v in _smart_berth.items()
+                   if v.get('dist_mi') is not None}
+    with _chain_lock:
+        succ = {k: dict(v) for k, v in _ca_succ.items()}
+        pred = {k: dict(v) for k, v in _ca_pred.items()}
+        transit = {k: v[0] for k, v in _ca_transit.items()}
+
+    def walk(start, graph):
+        """From `start`, follow the most-travelled edge until an anchor; return
+        (anchor_key, cumulative_transit_seconds) or None.  Max 12 hops."""
+        cum = 0.0
+        cur = start
+        seen = {cur}
+        for _ in range(12):
+            nxt = graph.get(cur)
+            if not nxt:
+                return None
+            best = max(nxt, key=nxt.get)
+            nkey = (cur[0], best)
+            if nkey in seen:
+                return None
+            cum += transit.get(cur, 30.0)    # time spent in `cur` before stepping
+            if nkey in anchors:
+                return (nkey, cum)
+            seen.add(nkey)
+            cur = nkey
+        return None
+
+    out = {}
+    berths = set(succ) | set(pred)
+    for key in berths:
+        if key in anchors:
+            continue
+        fwd = walk(key, succ)              # downstream toward an anchor
+        bwd = walk(key, pred)              # upstream toward an anchor
+        if not fwd or not bwd:
+            continue
+        a_fwd, t_fwd = fwd
+        a_bwd, t_bwd = bwd
+        if a_fwd == a_bwd or (t_fwd + t_bwd) <= 0:
+            continue
+        d_fwd, d_bwd = anchors[a_fwd], anchors[a_bwd]
+        # position = bwd anchor + fraction of the way (by transit time) to fwd anchor
+        frac = t_bwd / (t_bwd + t_fwd)
+        dist = d_bwd + (d_fwd - d_bwd) * frac
+        # sanity: must lie between the two bracketing anchor distances
+        lo, hi = sorted((d_fwd, d_bwd))
+        if lo - 0.2 <= dist <= hi + 0.2:
+            out[key] = round(dist, 2)
+    with _chain_lock:
+        _chain_pos.clear()
+        _chain_pos.update(out)
+    return len(out)
+
+
+def _save_chain():
+    try:
+        with _chain_lock:
+            data = {
+                'succ': {f'{a}|{b}': v for (a, b), v in _ca_succ.items()},
+                'pred': {f'{a}|{b}': v for (a, b), v in _ca_pred.items()},
+                'transit': {f'{a}|{b}': v for (a, b), v in _ca_transit.items()},
+            }
+        with open(_CHAIN_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f'chain save failed: {e}')
+
+
+def _load_chain():
+    global _ca_succ, _ca_pred, _ca_transit
+    try:
+        with open(_CHAIN_FILE) as f:
+            data = json.load(f)
+        def unkey(d):
+            return {tuple(k.split('|', 1)): v for k, v in d.items()}
+        with _chain_lock:
+            _ca_succ = unkey(data.get('succ', {}))
+            _ca_pred = unkey(data.get('pred', {}))
+            _ca_transit = unkey(data.get('transit', {}))
+        print(f'chain: loaded {len(_ca_succ)} berth edges')
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f'chain load failed: {e}')
+
+
+def _chain_refresh_loop():
+    """Periodically rebuild interpolated positions and persist the learned model."""
+    _load_chain()
+    while True:
+        time.sleep(120)
+        try:
+            n = _rebuild_chain_positions()
+            _save_chain()
+        except Exception as e:
+            print(f'chain refresh: {e}')
 
 
 def _td_enrich_trains(trains, now):
@@ -1505,78 +1794,34 @@ def _td_enrich_trains(trains, now):
                     and berth_age > 45
                     and not t.get('twy_actual')):
                 t['at_station'] = True
-            # Refine house_pass_ts from live berth position when train is approaching.
-            # _berth_eta_to_house_s handles area validation (D6, D1 1600+, D4 400-699).
+            # Refine house_pass_ts from the live berth position (SMART distance).
             elif (not t.get('twy_actual')
                     and not t.get('at_station')
                     and berth_age < 300):
-                if pos['area'] == 'D6' and berth_age > 120:
-                    # Berth frozen for 2+ minutes in approach area — train held at signal.
-                    # Keep RTT house_pass_ts; don't override with stale berth distance.
-                    t['held'] = True
-                else:
-                    eta_s = _berth_eta_to_house_s(
-                        pos['area'], pos['to'],
-                        t.get('direction', ''),
-                        t.get('passenger'),
-                        t.get('track', '') == 'Main',
-                        berth_age,
-                    )
-                    if eta_s is not None and eta_s > -60:
+                res = _berth_eta_to_house_s(
+                    pos['area'], pos['to'],
+                    t.get('direction', ''),
+                    t.get('passenger'),
+                    t.get('track', '') == 'Main',
+                    berth_age,
+                )
+                if res is not None:
+                    eta_s, held = res
+                    if held:
+                        # Dwelling at a station / held at a signal: floor the ETA
+                        # (can't pass before the travel time) and flag it.
+                        t['held'] = True
+                    if eta_s > -60:
                         t['house_pass_ts'] = int(now + max(0, eta_s))
                         t['td_eta_s'] = int(eta_s)
-    # Stubs for D6 headcodes not matched to any RTT/CIF/TRUST train
-    for hc, pos in td_pos.items():
-        if hc in train_hcs or hc.startswith('2H'):
-            continue
-        if pos['area'] != 'D6':
-            continue
-        h = house_evts.get(hc)
-        track_name = h['track'] if h else 'Unknown'
-        dirn = 'up' if 'Up' in track_name else ('down' if 'Down' in track_name else '')
-        # Infer direction from berth transition when no house event is available
-        if not dirn:
-            try:
-                if int(pos['to']) > int(pos['from']):
-                    dirn = 'down'   # berth numbers increase going westward (toward Bristol)
-                elif int(pos['to']) < int(pos['from']):
-                    dirn = 'up'     # berth numbers decrease going eastward (toward London)
-            except (TypeError, ValueError):
-                pass
-        if h and h['event'] == 'at_house':
-            twy_ts     = int(h['ts'])
-            twy_iso    = datetime.datetime.fromtimestamp(twy_ts, tz=datetime.timezone.utc).isoformat()
-            twy_actual = twy_iso
-            stub_eta_s = None
-        else:
-            # Compute ETA from current berth position
-            stub_eta_s = _berth_eta_to_house_s(
-                pos['area'], pos['to'], dirn, None,
-                'Main' in track_name,
-                int(now - pos['ts']),
-            )
-            if stub_eta_s is not None and stub_eta_s > -60:
-                twy_ts = int(now + max(0, stub_eta_s))
-            else:
-                twy_ts = 0
-            twy_iso = ''; twy_actual = ''
-        stub = {
-            'uid': 'td:' + hc, 'headcode': hc, 'op_code': '', 'op_name': '',
-            'passenger': None, 'call_type': 'PASS', 'direction': dirn,
-            'track': 'Main' if 'Main' in track_name else 'Relief',
-            'origin': '', 'dest': '', 'orig_dep': '', 'dest_arr': '',
-            'twy_sched': twy_iso, 'twy_actual': twy_actual,
-            'twy_arr_sched': '', 'twy_dep_sched': '',
-            'twy_arr_actual': '', 'twy_dep_actual': '',
-            'late_min': None, 'cancelled': False, 'status': None,
-            'platform': '', 'num_veh': None, 'confirmed': True,
-            'td_berth': pos['to'], 'td_berth_age': int(now - pos['ts']),
-            'td_track': track_name, 'source': 'td', 'house_pass_ts': twy_ts,
-        }
-        if stub_eta_s is not None and stub_eta_s > -60:
-            stub['td_eta_s'] = int(stub_eta_s)
-        trains.append(stub)
-        train_hcs.add(hc)
+    # NOTE: we deliberately do NOT synthesise "stub" trains for TD berths that
+    # have no RTT/CIF/TRUST identity.  Without an origin/destination they can't
+    # be corridor-validated (they'd include e.g. Elizabeth Line trains that
+    # terminate at Maidenhead, east of Twyford, and never reach the house), and
+    # their position is derived from a single-formula berth calibration that is
+    # wrong across independently-numbered Main/Relief lines.  The /lineside live
+    # diagram reads raw positions from /api/td-live directly, so it is unaffected;
+    # identified trains above still get live-berth ETA refinement.
 
 
 # ── Network Rail STOMP (freight trains) ──────────────────────────────────────
@@ -1612,6 +1857,46 @@ _td_lock      = threading.Lock()
 _td_buffer    = []   # recent TD CA (berth step) messages, newest last, D1/D4/D6 only
 _TD_BUF_MAX   = 3000
 _TD_AREAS     = {'D1', 'D4', 'D6'}   # Thames Valley SC: Reading, Hayes, Maidenhead
+
+# ── CA berth-chain learning ──────────────────────────────────────────────────
+# SMART only positions berths that are TRUST reporting points; intermediate
+# signal berths (e.g. the Ruscombe/Twyford throat 1606/1614/1650) have no SMART
+# row.  The CA stream steps every train through every berth, so we learn the
+# berth adjacency + per-berth transit time from it and interpolate the missing
+# positions along the chain between SMART anchors.  Persisted to disk so it
+# survives restarts and keeps improving.
+_CHAIN_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'berth_chain.json')
+_chain_lock   = threading.Lock()
+_ca_succ      = {}   # (area, berth) → {next_berth: count}
+_ca_pred      = {}   # (area, berth) → {prev_berth: count}
+_ca_transit   = {}   # (area, berth) → [ewma_seconds, samples]
+_ca_last_pos  = {}   # headcode → (area, berth, ts) — to measure transit time
+_chain_pos    = {}   # (area, berth) → dist_mi   (interpolated; merged into _berth_info)
+_chain_dirty  = False
+
+
+def _ca_observe(area, frm, to, hc, ts):
+    """Record one CA berth step into the adjacency + transit-time model."""
+    global _chain_dirty
+    with _chain_lock:
+        if frm and to:
+            _ca_succ.setdefault((area, frm), {})
+            _ca_succ[(area, frm)][to] = _ca_succ[(area, frm)].get(to, 0) + 1
+            _ca_pred.setdefault((area, to), {})
+            _ca_pred[(area, to)][frm] = _ca_pred[(area, to)].get(frm, 0) + 1
+            _chain_dirty = True
+        # transit time of `frm` = now − when this train entered `frm`
+        prev = _ca_last_pos.get(hc)
+        if prev and prev[0] == area and prev[1] == frm and ts > prev[2]:
+            dt = ts - prev[2]
+            if 2 <= dt <= 600:
+                cur = _ca_transit.get((area, frm))
+                if cur is None:
+                    _ca_transit[(area, frm)] = [float(dt), 1]
+                else:
+                    cur[0] = cur[0] * 0.8 + dt * 0.2   # EWMA
+                    cur[1] += 1
+        _ca_last_pos[hc] = (area, to, ts)
 
 _sf_lock      = threading.Lock()
 _sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds}
@@ -1812,13 +2097,15 @@ def _load_cif():
 
 
 def _cif_refresh_loop():
-    """Load CIF at startup, then refresh daily at 02:30."""
+    """Load SMART + CIF at startup, then refresh daily at 02:30."""
+    _load_smart()
     _load_cif()
     while True:
         now = datetime.datetime.now()
         nxt = (datetime.datetime(now.year, now.month, now.day, 2, 30)
                + datetime.timedelta(days=1))
         time.sleep((nxt - now).total_seconds())
+        _load_smart()
         _load_cif()
 
 
@@ -1871,6 +2158,8 @@ class _NRListener:
                 _td_buffer.extend(new_ca)
                 if len(_td_buffer) > _TD_BUF_MAX:
                     _td_buffer = _td_buffer[-_TD_BUF_MAX:]
+            for evt in new_ca:
+                _ca_observe(evt['area'], evt['from'], evt['to'], evt['descr'], evt['ts'])
         if sf_updates:
             with _sf_lock:
                 _sf_state.update(sf_updates)
@@ -2731,6 +3020,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             for entry in reversed(_td_buffer):
                 hc = entry['descr']
                 if hc not in positions and now_ts - entry['ts'] < 600:
+                    info = _berth_info(entry['area'], entry['to'])
                     positions[hc] = {
                         'headcode':   hc,
                         'area':       entry['area'],
@@ -2738,6 +3028,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         'from_berth': entry['from'],
                         'ts':         entry['ts'],
                         'age_s':      int(now_ts - entry['ts']),
+                        # SMART-derived line + position (None when berth unknown)
+                        'line':       info['line']    if info else '',
+                        'place':      info['stanme']  if info else '',
+                        'dist_mi':    info['dist_mi'] if info else None,
                     }
         with _sf_lock:
             signals = {f"{a}:{addr}": {'data': d, 'ts': t}
@@ -2786,4 +3080,5 @@ if __name__ == '__main__':
     _load_env()
     threading.Thread(target=_nr_idle_watcher, daemon=True).start()
     threading.Thread(target=_cif_refresh_loop, daemon=True).start()
+    threading.Thread(target=_chain_refresh_loop, daemon=True).start()
     ThreadedServer(('0.0.0.0', 5001), Handler).serve_forever()

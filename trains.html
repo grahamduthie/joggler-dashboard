@@ -16,7 +16,7 @@ html, body {
 }
 @media (hover: hover) and (pointer: fine) { * { cursor: none; } }
 
-/* ── Top bar ─────────────────────────────────────────────── */
+/* ── Topbar ─────────────────────────────────────────────── */
 #topbar {
   height: 56px;
   display: flex;
@@ -24,406 +24,182 @@ html, body {
   justify-content: space-between;
   background: #111e2e;
   border-bottom: 2px solid #1e3a5a;
-  padding: 0 20px;
+  padding: 0 16px;
   flex-shrink: 0;
+  gap: 8px;
 }
 #back-btn {
-  font-size: clamp(14px, 2vw, 26px);
+  font-size: clamp(13px, 1.8vw, 22px);
   font-weight: bold;
   color: #7fb3d3;
   cursor: pointer;
-  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 #back-btn:hover, #back-btn:active { color: #ffffff; }
-#mode-btns {
-  display: flex;
-  gap: 6px;
+#topbar-title {
+  flex: 1;
+  text-align: center;
+  font-size: clamp(13px, 1.8vw, 22px);
+  font-weight: 600;
+  color: #a0c8e8;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
 }
-.mode-btn {
-  padding: 5px 16px;
+#topbar-right { display: flex; align-items: center; gap: 10px; }
+#list-btn {
+  padding: 5px 14px;
   border-radius: 20px;
-  font-size: clamp(12px, 1.6vw, 22px);
+  font-size: clamp(11px, 1.4vw, 18px);
   font-weight: bold;
   letter-spacing: 1px;
   color: #5a8fad;
   border: 1.5px solid #1e3a5a;
   cursor: pointer;
   text-transform: uppercase;
-  transition: background 0.1s;
 }
-.mode-btn:hover { background: rgba(30,58,90,0.5); color: #a0c8e8; }
-.mode-btn.active { background: #1e3a5a; color: #ffffff; border-color: #4a7aaa; }
-#updated {
-  font-size: clamp(11px, 1.3vw, 18px);
-  color: #4a7a9a;
-  text-align: right;
-}
+#list-btn:hover { background: rgba(30,58,90,0.5); color: #a0c8e8; }
+#list-btn.active { background: #1e3a5a; color: #ffffff; border-color: #4a7aaa; }
+#updated { font-size: clamp(10px, 1.2vw, 16px); color: #4a7a9a; white-space: nowrap; }
 
-/* ── Page layout ─────────────────────────────────────────── */
-#page {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 56px - 32px);
-  overflow: hidden;
-}
+/* ── Page ────────────────────────────────────────────────── */
+#page { position: relative; height: calc(100vh - 56px); overflow: hidden; }
 
-/* ── No-data / error state ───────────────────────────────── */
-#no-data {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: clamp(16px, 2.5vw, 36px);
-  color: #4a7a9a;
-  font-style: italic;
+/* ── 4-Track Grid ───────────────────────────────────────── */
+#grid-view {
+  position: absolute; inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  background: #0a1420;
 }
-
-/* ── Focus view ──────────────────────────────────────────── */
-#focus-view {
-  flex: 1;
+.track-card {
+  background: #0d1b2a;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  cursor: pointer;
 }
+.track-card:hover  { filter: brightness(1.06); }
+.track-card:active { filter: brightness(1.12); }
 
-/* Header: operator colour band */
-.fv-header {
+.tc-hdr {
   flex-shrink: 0;
+  height: 28px;
   display: flex;
   align-items: center;
-  gap: clamp(10px, 2vw, 28px);
-  padding: clamp(10px, 2vh, 20px) clamp(14px, 2.5vw, 32px);
-  border-bottom: 2px solid rgba(255,255,255,0.12);
-}
-.fv-op-badge {
-  flex-shrink: 0;
-  width: clamp(56px, 9vw, 120px);
-  height: clamp(56px, 9vw, 120px);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: clamp(18px, 3.5vw, 52px);
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: -1px;
-}
-.fv-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.fv-headcode {
-  font-size: clamp(22px, 4.5vw, 52px);
-  font-weight: bold;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-}
-.fv-op-name {
-  font-size: clamp(16px, 3vw, 44px);
-  opacity: 0.85;
-}
-.fv-right {
-  flex-shrink: 0;
-  text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: clamp(3px, 0.8vh, 10px);
-}
-.fv-track-badge {
-  font-size: clamp(12px, 2vw, 28px);
-  font-weight: bold;
-  letter-spacing: 1px;
-  padding: 4px 14px;
-  border-radius: 20px;
-  border: 1.5px solid rgba(255,255,255,0.3);
-  white-space: nowrap;
-}
-.fv-call-badge {
-  font-size: clamp(11px, 1.6vw, 22px);
+  padding: 0 14px;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  opacity: 0.7;
-  white-space: nowrap;
 }
-.badge-stop  { color: #7fd3a8; border-color: #3a8a60; }
-.badge-pass  { color: #f0b85a; border-color: #a07030; }
-.badge-est   { color: #a0c0e0; border-color: #3a6080; }
+.tc-hdr-main   { background: #0c1e36; color: #3a7aaf; border-bottom: 1px solid #1a3560; }
+.tc-hdr-relief { background: #091b22; color: #2a8090; border-bottom: 1px solid #0e2830; }
 
-/* Route section */
-.fv-route {
+.tc-body {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px 14px;
   min-height: 0;
-  padding: clamp(8px, 2vh, 24px) clamp(14px, 3vw, 40px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  border-bottom: 2px solid #1e3a5a;
-}
-.fv-route-station {
-  font-size: clamp(14px, 3.5vw, 50px);
-  font-weight: bold;
-  color: #e8eaf0;
-  line-height: 1.2;
-}
-.fv-route-station.twyford {
-  color: #ffd080;
-  font-size: clamp(16px, 4.5vw, 64px);
-}
-.fv-route-time {
-  font-size: clamp(12px, 2vw, 30px);
-  color: #7fb3d3;
-  margin-top: 2px;
-  margin-bottom: 2px;
-}
-.fv-route-arrow {
-  font-size: clamp(11px, 1.6vw, 22px);
-  color: #3a6a8a;
-  padding: clamp(2px, 0.5vh, 6px) 0;
-}
-.fv-route-late {
-  color: #f0a060;
-}
-.fv-route-ontime {
-  color: #7fd3a8;
-}
-.fv-route-est {
-  color: #a0c0e0;
-  font-style: italic;
 }
 
-/* Stats row */
-.fv-stats {
+/* headline row: operator badge · headcode · ETA */
+.tc-top { display: flex; align-items: center; gap: clamp(8px,1.4vw,12px); flex-shrink: 0; }
+.tc-op-badge {
   flex-shrink: 0;
-  display: flex;
-  border-top: 0;
+  width: clamp(34px,5vw,46px); height: clamp(34px,5vw,46px);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(9px,1.2vw,13px); font-weight: 900; line-height: 1;
 }
-.fv-stat-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border-right: 1px solid #1e3a5a;
-  padding: clamp(8px, 1.5vh, 20px) clamp(6px, 1vw, 16px);
-  gap: clamp(3px, 0.6vh, 8px);
-}
-.fv-stat-card:last-child { border-right: none; }
-.fv-stat-label {
-  font-size: clamp(10px, 1.3vw, 18px);
-  color: #4a7a9a;
-  text-transform: uppercase;
-  letter-spacing: 2.5px;
-}
-.fv-stat-value {
-  font-size: clamp(22px, 3.8vw, 56px);
-  font-weight: bold;
-  color: #ffffff;
-  line-height: 1;
+.tc-hc {
+  flex: 1; min-width: 0;
+  font-size: clamp(15px,2.6vw,26px); font-weight: 700; letter-spacing: 0.5px;
   font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+  color: #cfe0f2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.fv-stat-unit {
-  font-size: clamp(11px, 1.4vw, 20px);
-  color: #5a8fad;
+.tc-eta-wrap { flex-shrink: 0; display: flex; align-items: baseline; gap: 4px; }
+.tc-eta-val {
+  font-size: clamp(30px,7.5vh,60px);
+  font-weight: 200; color: #ffffff; line-height: 0.9; letter-spacing: -1px;
 }
-.stat-late    { color: #f0a060; }
-.stat-ontime  { color: #7fd3a8; }
-.stat-est     { color: #a0c0e0; }
-.stat-cancel  { color: #e05050; }
+.tc-eta-unit { font-size: clamp(12px,2.6vh,22px); color: #7fb3d3; font-weight: 300; }
+.tc-eta-val.eta-now  { color: #7fd3a8; font-weight: 400; }
+.tc-eta-val.eta-past { color: #3a6a8a; font-size: clamp(20px,5vh,40px); }
+.tc-eta-val.eta-held { color: #c07030; }
+.tc-eta-val.eta-stn  { color: #d08000; }
 
-/* ── Multi-train view ────────────────────────────────────── */
-#multi-view {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
+/* from → to route */
+.tc-route {
+  flex-shrink: 0;
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: clamp(13px,2.6vh,24px); line-height: 1.15;
+  overflow: hidden; white-space: nowrap;
 }
-.mvc-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-bottom: 2px solid #1e3a5a;
-}
-.mvc-card:last-child { border-bottom: none; }
+.tc-from  { color: #8fb0cc; flex-shrink: 1; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; }
+.tc-arrow { color: #46708e; flex-shrink: 0; }
+.tc-to    { color: #ffffff; font-weight: 700; flex-shrink: 1; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; }
 
-/* Header — mirrors fv-header but smaller */
-.mvc-header {
+/* position / status line */
+.tc-pos {
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: clamp(8px, 1.5vw, 20px);
-  padding: clamp(5px, 1vh, 12px) clamp(12px, 2vw, 28px);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  display: flex; align-items: center; gap: 8px;
+  font-size: clamp(10px,1.5vh,15px); color: #6d92ad; min-height: 1.2em;
 }
-.mvc-op-badge {
-  flex-shrink: 0;
-  width: clamp(36px, 5.5vw, 74px);
-  height: clamp(36px, 5.5vw, 74px);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: clamp(12px, 2.4vw, 32px);
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: -1px;
-}
-.mvc-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.mvc-headcode {
-  font-size: clamp(22px, 5vw, 68px);
-  font-weight: bold;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-  line-height: 1;
-}
-.mvc-op-name {
-  font-size: clamp(11px, 1.9vw, 26px);
-  opacity: 0.85;
-}
-.mvc-right {
-  flex-shrink: 0;
-  text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: clamp(2px, 0.4vh, 6px);
-}
-.mvc-track-badge {
-  font-size: clamp(10px, 1.4vw, 18px);
-  font-weight: bold;
-  letter-spacing: 1px;
-  padding: 3px 10px;
-  border-radius: 16px;
-  border: 1.5px solid rgba(255,255,255,0.3);
-  white-space: nowrap;
-}
-.mvc-call-badge {
-  font-size: clamp(9px, 1.1vw, 15px);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  opacity: 0.7;
-  white-space: nowrap;
-}
-.mvc-countdown {
-  font-size: clamp(9px, 1.1vw, 14px);
-  color: #a0c8e8;
-  font-style: italic;
-  white-space: nowrap;
-}
+.tc-pos .live  { color: #2fae5e; }
+.tc-pos .late  { color: #f0a060; }
+.tc-pos .ontime{ color: #4f9f74; }
+.tc-pos .cancel{ color: #e05050; }
+.tc-pos .held  { color: #c07030; }
 
-/* Route — horizontal */
-.mvc-route {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  padding: clamp(3px, 0.8vh, 10px) clamp(12px, 2vw, 28px);
-  gap: clamp(6px, 1vw, 14px);
-  border-bottom: 1px solid #1e3a5a;
+/* follow-on trains */
+.tc-next { flex: 1; min-height: 0; display: flex; flex-direction: column;
+           justify-content: flex-start; gap: 2px; overflow: hidden;
+           margin-top: clamp(2px,0.8vh,6px);
+           border-top: 1px solid rgba(255,255,255,0.06); padding-top: clamp(2px,0.8vh,6px); }
+.tc-next-row {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: clamp(10px,1.7vh,16px); color: #8aa6bd; white-space: nowrap;
   overflow: hidden;
 }
-.mvc-route-ep {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.mvc-route-ep-right { align-items: flex-end; text-align: right; }
-.mvc-ep-name {
-  font-size: clamp(11px, 2vw, 26px);
-  font-weight: bold;
-  color: #e8eaf0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mvc-ep-time {
-  font-size: clamp(9px, 1.2vw, 16px);
-  color: #7fb3d3;
-  white-space: nowrap;
-}
-.mvc-route-arrow {
-  flex-shrink: 0;
-  font-size: clamp(14px, 2.5vw, 32px);
-  color: #3a6a8a;
-}
-.mvc-route-twy {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-.mvc-twy-name {
-  font-size: clamp(13px, 2.4vw, 32px);
-  font-weight: bold;
-  color: #ffd080;
-}
-.mvc-twy-time {
-  font-size: clamp(10px, 1.4vw, 19px);
-  color: #7fb3d3;
-  text-align: center;
-  white-space: nowrap;
-}
+.tc-next-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; align-self: center; }
+.tc-next-dest { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #b4c6d6; }
+.tc-next-eta  { flex-shrink: 0; color: #6d92ad; font-variant-numeric: tabular-nums; }
 
-/* Stats — mirrors fv-stats but smaller */
-.mvc-stats {
-  flex-shrink: 0;
-  display: flex;
-}
-.mvc-stat-card {
+.tc-empty {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border-right: 1px solid #1e3a5a;
-  padding: clamp(4px, 0.8vh, 10px) clamp(4px, 0.8vw, 10px);
-  gap: clamp(1px, 0.3vh, 4px);
+  display: flex; align-items: center; justify-content: center;
+  color: #1e3a5a;
+  font-size: clamp(11px, 2.5vh, 18px);
+  font-style: italic;
 }
-.mvc-stat-card:last-child { border-right: none; }
-.mvc-stat-label {
-  font-size: clamp(8px, 1vw, 13px);
-  color: #4a7a9a;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-}
-.mvc-stat-value {
-  font-size: clamp(14px, 2.5vw, 34px);
-  font-weight: bold;
-  color: #ffffff;
-  line-height: 1;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-}
+/* confidence badge (used in detail view) */
+.tc-conf { font-size: 0.9em; }
+.tc-conf-live  { color: #2fae5e; }
+.tc-conf-trust { color: #5a9a70; }
+.tc-conf-rtt   { color: #4a7aaa; }
+.tc-conf-est   { color: #8a7020; }
+.tc-conf-held  { color: #c07030; }
 
-/* ── List view ────────────────────────────────────────────── */
+/* ── List view ───────────────────────────────────────────── */
 #list-view {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  position: absolute; inset: 0;
+  display: none;
+  overflow-y: auto; overflow-x: hidden;
 }
-#train-table {
-  width: 100%;
-  border-collapse: collapse;
-}
+#train-table { width: 100%; border-collapse: collapse; }
 #train-table thead th {
-  position: sticky;
-  top: 0;
+  position: sticky; top: 0;
   background: #111e2e;
   border-bottom: 2px solid #1e3a5a;
-  font-size: clamp(9px, 1.2vw, 16px);
+  font-size: clamp(9px, 1.1vw, 14px);
   color: #4a7a9a;
   text-transform: uppercase;
   letter-spacing: 1.5px;
@@ -431,122 +207,160 @@ html, body {
   text-align: left;
   font-weight: normal;
 }
-.tr-row {
-  border-bottom: 1px solid #131f2f;
-  cursor: pointer;
-}
-.tr-row:hover   { background: rgba(30,58,90,0.35); }
-.tr-row:active  { background: rgba(30,58,90,0.65); }
-.tr-row.past    { opacity: 0.45; }
+.tr-row { border-bottom: 1px solid #131f2f; cursor: pointer; }
+.tr-row:hover  { background: rgba(30,58,90,0.35); }
+.tr-row:active { background: rgba(30,58,90,0.65); }
+.tr-row.past   { opacity: 0.4; }
 .tr-row td {
-  padding: clamp(7px, 1.2vh, 14px) 10px;
-  font-size: clamp(12px, 1.6vw, 22px);
+  padding: clamp(6px, 1.2vh, 13px) 10px;
+  font-size: clamp(11px, 1.5vw, 20px);
   vertical-align: middle;
 }
-.tr-time { font-family: 'DejaVu Sans Mono', 'Courier New', monospace; white-space: nowrap; }
-.tr-late { color: #f0a060; }
-.tr-ontime { color: #7fd3a8; }
-.tr-est { color: #a0c0e0; font-style: italic; }
-.tr-hc { font-family: 'DejaVu Sans Mono', 'Courier New', monospace; font-size: clamp(10px, 1.4vw, 18px); color: #7fb3d3; }
-.tr-op {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 10px;
-  font-size: clamp(10px, 1.3vw, 17px);
-  font-weight: bold;
-  white-space: nowrap;
-}
-.tr-route { color: #c0ccd8; font-size: clamp(11px, 1.5vw, 20px); }
-.tr-track { font-size: clamp(10px, 1.3vw, 16px); color: #5a8fad; white-space: nowrap; }
-.tr-status { font-size: clamp(10px, 1.2vw, 15px); white-space: nowrap; }
-.tr-cancel { color: #e05050; }
+.tr-time  { font-family: 'DejaVu Sans Mono', 'Courier New', monospace; white-space: nowrap; }
+.tr-late  { color: #f0a060; }
+.tr-ontime{ color: #7fd3a8; }
+.tr-est   { color: #a0c0e0; font-style: italic; }
+.tr-hc    { font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+            font-size: clamp(9px, 1.2vw, 16px); color: #7fb3d3; }
+.tr-op    { display: inline-block; padding: 2px 8px; border-radius: 8px;
+            font-size: clamp(9px, 1.1vw, 14px); font-weight: bold; white-space: nowrap; }
+.tr-route { color: #c0ccd8; font-size: clamp(10px, 1.4vw, 18px); }
+.tr-track { font-size: clamp(9px, 1.2vw, 14px); color: #5a8fad; white-space: nowrap; }
+.tr-status{ font-size: clamp(9px, 1.1vw, 13px); white-space: nowrap; }
+.tr-cancel{ color: #e05050; }
 
-.fv-countdown {
-  font-size: clamp(11px, 1.5vw, 20px);
-  color: #a0c8e8;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  font-style: italic;
-}
-
-/* ── Approach bar ────────────────────────────────────────── */
-#approach-bar {
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  height: 32px;
-  background: #081620;
-  border-top: 1px solid #1a3a5a;
-  display: flex;
-  align-items: center;
-  padding: 0 40px 0 36px;
-  z-index: 10;
-}
-#appr-track {
-  flex: 1;
-  position: relative;
-  height: 18px;
-  background: #0d2030;
-  border-radius: 3px;
-  border: 1px solid #1a3a5a;
-}
-.appr-mark {
-  position: absolute;
-  top: 0; bottom: 0; width: 1px;
-  background: #2a5a8a66;
-}
-.appr-lbl {
-  position: absolute;
-  font-size: 8px;
-  color: #3a6a8a;
-  top: 50%;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-.appr-dot {
-  position: absolute;
-  height: 14px;
-  min-width: 22px;
-  padding: 0 3px;
-  border-radius: 3px;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 7px;
-  font-weight: bold;
-  color: #fff;
-  white-space: nowrap;
+/* ── Detail view ─────────────────────────────────────────── */
+#detail-view {
+  position: absolute; inset: 0;
+  display: none;
+  flex-direction: column;
   overflow: hidden;
-  pointer-events: none;
 }
+.fv-header {
+  flex-shrink: 0;
+  display: flex; align-items: center;
+  gap: clamp(10px, 2vw, 26px);
+  padding: clamp(10px, 2vh, 18px) clamp(14px, 2.5vw, 28px);
+  border-bottom: 2px solid rgba(255,255,255,0.1);
+}
+.fv-op-badge {
+  flex-shrink: 0;
+  width: clamp(50px, 8vw, 100px); height: clamp(50px, 8vw, 100px);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(16px, 3vw, 44px); font-weight: 900; line-height: 1;
+}
+.fv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fv-headcode {
+  font-size: clamp(20px, 4vw, 50px);
+  font-weight: bold;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+  line-height: 1.1;
+}
+.fv-op-name { font-size: clamp(14px, 2.5vw, 36px); opacity: 0.85; }
+.fv-right {
+  flex-shrink: 0; text-align: right;
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: clamp(3px, 0.6vh, 8px);
+}
+.fv-track-badge {
+  font-size: clamp(11px, 1.8vw, 24px); font-weight: bold;
+  padding: 4px 12px; border-radius: 18px;
+  border: 1.5px solid rgba(255,255,255,0.3); white-space: nowrap;
+}
+.fv-call-badge {
+  font-size: clamp(10px, 1.4vw, 18px); letter-spacing: 1.5px;
+  text-transform: uppercase; opacity: 0.7; white-space: nowrap;
+}
+.badge-stop { color: #7fd3a8; }
+.badge-pass { color: #f0b85a; }
+.badge-est  { color: #a0c0e0; }
 
-/* Responsive: Joggler 800×480 */
+.fv-route {
+  flex: 1; min-height: 0;
+  padding: clamp(8px, 2vh, 20px) clamp(14px, 3vw, 36px);
+  display: flex; flex-direction: column; justify-content: center;
+  border-bottom: 2px solid #1e3a5a;
+}
+.fv-route-station {
+  font-size: clamp(13px, 3.2vw, 46px);
+  font-weight: bold; color: #e8eaf0; line-height: 1.2;
+}
+.fv-route-station.twyford {
+  color: #ffd080;
+  font-size: clamp(15px, 4.2vw, 60px);
+}
+.fv-route-time  { font-size: clamp(11px, 1.8vw, 26px); color: #7fb3d3; margin-top: 2px; }
+.fv-route-arrow { font-size: clamp(10px, 1.4vw, 18px); color: #3a6a8a; padding: 3px 0; }
+.fv-route-late  { color: #f0a060; }
+.fv-route-ontime{ color: #7fd3a8; }
+.fv-route-est   { color: #a0c0e0; font-style: italic; }
+
+.fv-stats { flex-shrink: 0; display: flex; }
+.fv-stat-card {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  border-right: 1px solid #1e3a5a;
+  padding: clamp(6px, 1.2vh, 16px) clamp(4px, 0.8vw, 12px);
+  gap: clamp(2px, 0.5vh, 6px);
+}
+.fv-stat-card:last-child { border-right: none; }
+.fv-stat-label {
+  font-size: clamp(9px, 1.1vw, 15px); color: #4a7a9a;
+  text-transform: uppercase; letter-spacing: 2px;
+}
+.fv-stat-value {
+  font-size: clamp(18px, 3.2vw, 48px); font-weight: bold;
+  color: #ffffff; line-height: 1;
+  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+}
+.stat-late   { color: #f0a060; }
+.stat-ontime { color: #7fd3a8; }
+.stat-est    { color: #a0c0e0; }
+.stat-cancel { color: #e05050; }
+
 @media (max-height: 500px) {
-  #topbar         { height: 44px; }
-  .fv-op-badge    { width: 48px; height: 48px; }
-  .fv-headcode    { font-size: clamp(20px, 4.5vw, 48px); }
-  .fv-stat-card   { padding: 6px 4px; gap: 2px; }
+  #topbar { height: 44px; }
+  .tc-hdr { height: 24px; font-size: 10px; }
+  .tc-op-badge { width: 32px; height: 32px; font-size: 9px; }
 }
 </style>
 </head>
 <body>
 
 <div id="topbar">
-  <div id="back-btn" onmousedown="window.location.href='/'">&#8592; Dashboard</div>
-  <div id="mode-btns">
-    <div class="mode-btn" id="btn-recent" onmousedown="setMode('recent')">Recent</div>
-    <div class="mode-btn active" id="btn-next" onmousedown="setMode('next')">Next</div>
-    <div class="mode-btn" id="btn-list" onmousedown="setMode('list')">List</div>
+  <div id="back-btn" onmousedown="backAction()">&#8592; Dashboard</div>
+  <div id="topbar-title">Trains · Twyford</div>
+  <div id="topbar-right">
+    <div id="list-btn" onmousedown="toggleList()">List</div>
+    <div id="updated">Loading…</div>
   </div>
-  <div id="updated">Loading…</div>
 </div>
 
 <div id="page">
-  <div id="no-data" style="display:none">No train data</div>
-  <div id="focus-view" style="display:none"></div>
-  <div id="multi-view" style="display:none"></div>
-  <div id="list-view" style="display:none">
+
+  <!-- 4-Track Grid (default) -->
+  <div id="grid-view">
+    <div class="track-card" data-key="um" onmousedown="cardTap('um')">
+      <div class="tc-hdr tc-hdr-main"><span>↑</span><span>Up Main</span></div>
+      <div class="tc-body" id="body-um"></div>
+    </div>
+    <div class="track-card" data-key="dm" onmousedown="cardTap('dm')">
+      <div class="tc-hdr tc-hdr-main"><span>↓</span><span>Down Main</span></div>
+      <div class="tc-body" id="body-dm"></div>
+    </div>
+    <div class="track-card" data-key="ur" onmousedown="cardTap('ur')">
+      <div class="tc-hdr tc-hdr-relief"><span>↑</span><span>Up Relief</span></div>
+      <div class="tc-body" id="body-ur"></div>
+    </div>
+    <div class="track-card" data-key="dr" onmousedown="cardTap('dr')">
+      <div class="tc-hdr tc-hdr-relief"><span>↓</span><span>Down Relief</span></div>
+      <div class="tc-body" id="body-dr"></div>
+    </div>
+  </div>
+
+  <!-- List view -->
+  <div id="list-view">
     <table id="train-table">
       <thead>
         <tr>
@@ -554,7 +368,7 @@ html, body {
           <th>Actual</th>
           <th>HC</th>
           <th>Operator</th>
-          <th>From → To</th>
+          <th>Route</th>
           <th>Track</th>
           <th>Status</th>
         </tr>
@@ -562,12 +376,16 @@ html, body {
       <tbody id="train-tbody"></tbody>
     </table>
   </div>
+
+  <!-- Detail view -->
+  <div id="detail-view"></div>
+
 </div>
 
 <script>
 'use strict';
 
-/* ── Operator branding ────────────────────────────────────── */
+/* ── Operator branding ──────────────────────────────────── */
 var OPS = {
   'GW': {bg:'#007a4d', fg:'#ffffff', abbr:'GWR'},
   'XR': {bg:'#7156a5', fg:'#ffffff', abbr:'XR'},
@@ -579,7 +397,6 @@ var OPS = {
   'LN': {bg:'#1c3f6e', fg:'#ffffff', abbr:'LNR'},
   'VT': {bg:'#9d1f30', fg:'#ffffff', abbr:'AVT'},
   'GX': {bg:'#f05a24', fg:'#ffffff', abbr:'GTX'},
-  // Freight
   'GB': {bg:'#1e3050', fg:'#ffdd00', abbr:'GBRf'},
   'DW': {bg:'#db0a17', fg:'#ffffff', abbr:'DB'},
   'FL': {bg:'#1a6b2a', fg:'#ffffff', abbr:'FLT'},
@@ -587,125 +404,42 @@ var OPS = {
   'ZN': {bg:'#d4ac0d', fg:'#000000', abbr:'NRL'},
   'HB': {bg:'#4a4a4a', fg:'#ffffff', abbr:'HNR'},
 };
-
 function opStyle(code, isPassenger) {
   if (OPS[code]) return OPS[code];
-  if (isPassenger === false) return {bg:'#2d3d1a', fg:'#a0c060', abbr:'FRET'};
-  return {bg:'#2a3a4a', fg:'#c0ccd8', abbr: code || '??'};
+  if (isPassenger === false) return {bg:'#2d3d1a', fg:'#a0c060', abbr:'FRT'};
+  return {bg:'#2a3a4a', fg:'#c0ccd8', abbr: code ? String(code).slice(0,4) : '??'};
 }
-
 function freightClass(hc) {
   if (!hc) return 'Freight';
   var c = hc[0];
-  if (c === '4') return 'Heavy Freight';
+  if (c === '4') return 'Heavy Frt';
   if (c === '6') return 'Intermodal';
   if (c === '7') return 'Freight';
   if (c === '8') return 'Light Loco';
-  if (c === '9') return 'Special';
   return 'Freight';
 }
-
-function confBadge(t) {
-  if (t.at_station) return '<span style="color:#d08000;font-size:clamp(9px,1.1vw,15px)">⏸ at stn</span>';
-  if (t.held)       return '<span style="color:#c05000;font-size:clamp(9px,1.1vw,15px)">⏸ held</span>';
-  var td = tdPositions[t.headcode];
-  if (t.td_berth && td && td.age_s < 120) return '<span style="color:#2a9a50;font-size:clamp(9px,1.1vw,15px)">● live</span>';
-  if (td && td.age_s < 120) return '<span style="color:#2a9a50;font-size:clamp(9px,1.1vw,15px)">● live</span>';
-  if (t.confirmed && t.twy_actual) return '<span style="color:#5a9a70;font-size:clamp(9px,1.1vw,15px)">✓ TRUST</span>';
-  if (t.confirmed) return '<span style="color:#4a7aaa;font-size:clamp(9px,1.1vw,15px)">· RTT</span>';
-  return '<span style="color:#8a7020;font-size:clamp(9px,1.1vw,15px)">~ est.</span>';
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function labelLine(t) {
-  // Primary label: destination for passengers, freight class for freight
-  var primary = t.passenger === false
-    ? freightClass(t.headcode)
-    : (t.dest || t.op_name || t.op_code || '—');
-  return primary;
+/* ── Track classification ───────────────────────────────── */
+function isMainTrack(t) {
+  // Backend `track` is now authoritative (TD berth → line code → operator →
+  // destination → headcode class).  Don't second-guess it from line_code:
+  // e.g. a Penzance Down-Main express carries the Reading code 'WL'.
+  return t.track === 'Main';
+}
+function trackKey(t) {
+  if (!t.direction) return null;
+  return (t.direction === 'up' ? 'u' : 'd') + (isMainTrack(t) ? 'm' : 'r');
+}
+function trackLabel(t) {
+  return (t.direction === 'up' ? '↑ Up ' : '↓ Down ') + (isMainTrack(t) ? 'Main' : 'Relief');
 }
 
-/* ── State ────────────────────────────────────────────────── */
-var currentMode    = 'next';
-var trainsData     = null;
-var tdPositions    = {};   // headcode → {berth, age_s}
-var nrccDismissed  = false;
-var pollTimer      = null;
-var countdownTimer = null;
-var tickTimer      = null;
-var nextFetchAt    = 0;   // Date.now() ms when next fetch is due
-
-/* ── Mode switching ──────────────────────────────────────── */
-function setMode(mode) {
-  currentMode = mode;
-  ['recent','next','list'].forEach(function(m) {
-    document.getElementById('btn-' + m).classList.toggle('active', m === mode);
-  });
-  render();
-}
-
-/* ── Polling ─────────────────────────────────────────────── */
-var POLL_INTERVAL = 15000;  // ms between proxy polls (proxy caches RTT at 30s TTL)
-
-function startPoll() {
-  fetchTrains();
-  fetchTdLive();
-  fetchNrcc();
-  pollTimer      = setInterval(fetchTrains, POLL_INTERVAL);
-  countdownTimer = setInterval(render, POLL_INTERVAL);
-  tickTimer      = setInterval(tickTopbar, 1000);
-  setInterval(fetchTdLive, 5000);
-  setInterval(fetchNrcc, 300000);   // NRCC every 5 min
-}
-
-function fetchTdLive() {
-  fetch('/api/td-live')
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      tdPositions = {};
-      (d.positions || []).forEach(function(p){
-        if (p.age_s < 300) tdPositions[p.headcode] = {berth:p.berth, age_s:p.age_s};
-      });
-    })
-    .catch(function(){});
-}
-
-function fetchNrcc() {
-  fetch('/api/nrcc')
-    .then(function(r){ return r.json(); })
-    .then(function(d){ renderNrcc(d.messages || []); })
-    .catch(function(){});
-}
-
-function renderNrcc(msgs) { /* NRCC shown on /lineside, not here */ }
-
-function tickTopbar() {
-  var secs = Math.max(0, Math.round((nextFetchAt - Date.now()) / 1000));
-  var updEl = document.getElementById('updated');
-  // Replace just the countdown suffix, keep the HH:MM:SS prefix
-  var base = updEl.dataset.base || updEl.textContent;
-  updEl.dataset.base = base;
-  updEl.textContent = base + '  ·  ' + secs + 's';
-}
-
-function fetchTrains() {
-  nextFetchAt = Date.now() + POLL_INTERVAL;
-  fetch('/api/trains')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      trainsData = d;
-      render();
-    })
-    .catch(function(e) {
-      console.error(e);
-      var el = document.getElementById('updated');
-      el.dataset.base = 'Error';
-      el.textContent  = 'Error';
-    });
-}
-
-/* ── Time helpers ────────────────────────────────────────── */
+/* ── Time helpers ───────────────────────────────────────── */
 function trainMs(t) {
-  // Prefer backend-computed house pass time (accounts for 15s stop offset + direction)
   if (t.house_pass_ts) return t.house_pass_ts * 1000;
   var iso = t.twy_actual || t.twy_sched;
   if (!iso) return 0;
@@ -713,69 +447,138 @@ function trainMs(t) {
   if (!t.twy_actual && t.late_min) ms += t.late_min * 60000;
   return ms;
 }
-
-function fmtTime(isoStr) {
-  if (!isoStr) return '—';
-  var d = new Date(isoStr);
-  if (isNaN(d)) return '—';
-  return d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+function fmtTime(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  return isNaN(d) ? '—' : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
 }
-
 function fmtTimeMs(ms) {
   if (!ms) return '—';
-  var d = new Date(ms);
-  return d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  return new Date(ms).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
 }
-
 function fmtExpected(t) {
   if (t.at_station) {
     var dep = t.twy_dep_actual || t.twy_dep_sched;
     return dep ? 'dep ' + fmtTime(dep) : 'at Twyford';
   }
-  // TD-derived ETA from live D6 berth — more accurate than RTT schedule + lateness
-  if (t.td_eta_s !== undefined && !t.twy_actual && t.house_pass_ts) {
+  if (t.td_eta_s !== undefined && !t.twy_actual && t.house_pass_ts)
     return '~' + fmtTimeMs(t.house_pass_ts * 1000);
-  }
-  // Held at signal: berth frozen, use RTT forecast with a held indicator
   if (t.held) {
-    if (!t.twy_sched) return 'held';
-    var heldMs = new Date(t.twy_sched).getTime() + (t.late_min > 0 ? t.late_min * 60000 : 0);
-    return 'held (~' + fmtTimeMs(heldMs) + ')';
+    var hms = t.twy_sched ? new Date(t.twy_sched).getTime() + (t.late_min||0)*60000 : 0;
+    return hms ? 'held (~' + fmtTimeMs(hms) + ')' : 'held';
   }
-  // RTT lateness estimate
   if (!t.twy_sched || !(t.late_min > 0)) return fmtTime(t.twy_sched);
-  var ms = new Date(t.twy_sched).getTime() + t.late_min * 60000;
-  return '~' + fmtTimeMs(ms);
+  return '~' + fmtTimeMs(new Date(t.twy_sched).getTime() + t.late_min*60000);
 }
-
-function trackLabel(t) {
-  var arrow = t.direction === 'up' ? '↑' : '↓';
-  var dir   = t.direction === 'up' ? 'Up' : 'Down';
-  return arrow + ' ' + dir + ' ' + t.track;
-}
-
 function lateStr(t) {
   if (t.cancelled) return 'Cancelled';
-  if (t.late_min === null || t.late_min === undefined) return '';
+  if (t.late_min == null) return '';
   if (t.late_min === 0) return 'On time';
-  if (t.late_min > 0)   return '+' + t.late_min + ' min';
-  if (t.late_min < 0)   return t.late_min + ' min';
-  return '';
+  if (t.late_min > 0)  return '+' + t.late_min + ' min';
+  return t.late_min + ' min';
 }
 
-// Returns a half-minute-resolution countdown string, e.g. "in about 2½ mins".
-// Only used for estimated (unconfirmed) trains.
-function fmtCountdown(ms, now) {
-  var diff = ms - now;
-  if (diff < 15000) return 'passing now';
-  var slots = Math.round(diff / 30000);  // 1 slot = 30 seconds
-  if (slots < 1) return 'passing now';
-  var totalSecs = slots * 30;
-  var mins = Math.floor(totalSecs / 60);
-  var half = (totalSecs % 60) === 30;
-  if (mins === 0) return 'in about 30 secs';
-  if (half)  return 'in about ' + mins + '½ mins';
-  return 'in about ' + mins + ' min' + (mins !== 1 ? 's' : '');
+/* ── Confidence badge ───────────────────────────────────── */
+function confBadge(t) {
+  if (t.at_station) return '<span class="tc-conf tc-conf-held">⏸ at stn</span>';
+  if (t.held)       return '<span class="tc-conf tc-conf-held">⏸ held</span>';
+  var td = tdPositions[t.headcode];
+  if (td && td.age_s < 120) return '<span class="tc-conf tc-conf-live">● live</span>';
+  if (t.confirmed && t.twy_actual) return '<span class="tc-conf tc-conf-trust">✓ TRUST</span>';
+  if (t.confirmed) return '<span class="tc-conf tc-conf-rtt">· RTT</span>';
+  return '<span class="tc-conf tc-conf-est">~ est.</span>';
+}
+
+/* ── State ──────────────────────────────────────────────── */
+var currentView = 'grid';
+var prevView    = 'grid';
+var selectedUid = null;
+var trainsData  = null;
+var tdPositions = {};
+var nextFetchAt = 0;
+var POLL_INTERVAL = 15000;
+
+/* ── Navigation ─────────────────────────────────────────── */
+function showView(v) {
+  document.getElementById('grid-view').style.display   = (v === 'grid')   ? 'grid'  : 'none';
+  document.getElementById('list-view').style.display   = (v === 'list')   ? 'block' : 'none';
+  document.getElementById('detail-view').style.display = (v === 'detail') ? 'flex'  : 'none';
+  document.getElementById('list-btn').classList.toggle('active', v === 'list');
+  document.getElementById('back-btn').textContent =
+    v === 'detail' ? '← Back' : '← Dashboard';
+  currentView = v;
+}
+function backAction() {
+  if (currentView === 'detail') showView(prevView);
+  else window.location.href = '/';
+}
+function toggleList() {
+  if (currentView === 'list') {
+    showView('grid');
+  } else {
+    prevView = 'grid';
+    showView('list');
+    if (trainsData) renderList(trainsData.trains || [], Date.now());
+  }
+}
+function cardTap(key) {
+  if (!trainsData) return;
+  var now = Date.now();
+  var candidates = (trainsData.trains || []).filter(function(t) {
+    if (t.cancelled) return false;
+    if (trackKey(t) !== key) return false;
+    var ms = trainMs(t);
+    if (ms > now + 60*60000) return false;
+    var grace = 120000;
+    if (t.confirmed && t.twy_actual) grace = (t.direction === 'up') ? 30000 : 0;
+    return ms >= now - grace;
+  });
+  candidates.sort(function(a,b){ return trainMs(a) - trainMs(b); });
+  if (!candidates.length) return;
+  var hi = candidates.findIndex(function(x){ return trainMs(x) >= now - 20000; });
+  if (hi < 0) hi = candidates.length - 1;
+  var t = candidates[hi];
+  selectedUid = t.uid;
+  prevView = currentView;
+  showView('detail');
+  renderDetail(t, now);
+}
+function rowTap(uid) {
+  if (!trainsData) return;
+  var t = (trainsData.trains || []).find(function(x){ return x.uid === uid; });
+  if (!t) return;
+  selectedUid = uid;
+  prevView = 'list';
+  showView('detail');
+  renderDetail(t, Date.now());
+}
+
+/* ── Polling ─────────────────────────────────────────────── */
+function startPoll() {
+  fetchTrains();
+  fetchTdLive();
+  setInterval(fetchTrains, POLL_INTERVAL);
+  setInterval(fetchTdLive, 5000);
+  setInterval(render, 1000);
+}
+function fetchTrains() {
+  nextFetchAt = Date.now() + POLL_INTERVAL;
+  fetch('/api/trains')
+    .then(function(r){ return r.json(); })
+    .then(function(d){ trainsData = d; render(); })
+    .catch(function(e){ console.error(e); });
+}
+function fetchTdLive() {
+  fetch('/api/td-live')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      tdPositions = {};
+      (d.positions || []).forEach(function(p){
+        if (p.age_s < 300) tdPositions[p.headcode] =
+          {berth:p.berth, age_s:p.age_s, dist_mi:p.dist_mi, place:p.place, line:p.line};
+      });
+    })
+    .catch(function(){});
 }
 
 /* ── Main render ─────────────────────────────────────────── */
@@ -783,288 +586,195 @@ function render() {
   if (!trainsData) return;
   var now = Date.now();
 
-  var ts = trainsData.ts ? new Date(trainsData.ts * 1000) : new Date();
-  var baseText = ts.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-  var el = document.getElementById('updated');
-  el.dataset.base = baseText;
-  el.textContent  = baseText;   // tickTopbar() will append the countdown
+  // Topbar
+  var ts   = new Date((trainsData.ts || 0) * 1000);
+  var base = ts.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  var secs = Math.max(0, Math.round((nextFetchAt - now) / 1000));
+  document.getElementById('updated').textContent = base + ' · ' + secs + 's';
 
-  var trains = trainsData.trains || [];
-  document.getElementById('no-data').style.display = 'none';
-  document.getElementById('focus-view').style.display = 'none';
-  document.getElementById('multi-view').style.display = 'none';
-  document.getElementById('list-view').style.display = 'none';
-
-  if (currentMode === 'list' || currentMode === 'list-detail') {
-    if (currentMode === 'list') {
-      document.getElementById('list-view').style.display = 'block';
-      renderList(trains, now);
-    }
-  } else {
-    var targets = findTarget(trains, currentMode, now);
-    if (!targets.length) {
-      document.getElementById('no-data').style.display = 'flex';
-      document.getElementById('no-data').textContent =
-        currentMode === 'recent' ? 'No recent trains in last 10 min' : 'No upcoming trains';
-    } else if (targets.length === 1) {
-      document.getElementById('focus-view').style.display = 'flex';
-      renderFocus(targets[0], now);
-    } else {
-      document.getElementById('multi-view').style.display = 'flex';
-      renderMulti(targets, now);
-    }
-  }
-  renderApproachBar(trains, now);
-}
-
-// Returns an array. For 'next' mode: first upcoming train plus any within 90s of it.
-// For 'recent' mode: single most-recent train (as array). Empty array = nothing to show.
-function findTarget(trains, mode, now) {
-  if (mode === 'recent') {
-    var cutoff = now - 10 * 60000;
-    var past = trains.filter(function(t) {
-      if (t.cancelled) return false;
-      var ms = trainMs(t);
-      if (ms < cutoff) return false;
-      // Use the same grace thresholds as NEXT, but inverted:
-      // a train is "past" only once it has cleared its grace window.
-      var grace = 120000;
-      if (t.confirmed && t.twy_actual) {
-        grace = (t.direction === 'up') ? 30000 : 0;
-      }
-      return ms < now - grace;
-    });
-    past.sort(function(a, b) { return trainMs(b) - trainMs(a); });
-    return past.length ? [past[0]] : [];
-  } else {
-    var upcoming = trains.filter(function(t) {
-      if (t.cancelled) return false;
-      var ms = trainMs(t);
-      // Down trains: house is east of Twyford — train passed the house *before*
-      //   arriving at Twyford, so once twy_actual is set the train is gone (grace=0).
-      // Up trains: train departs Twyford heading east, passes the house ~30s later.
-      // Estimated/unconfirmed: keep 2-min grace (schedule is approximate).
-      var grace = 120000;
-      if (t.confirmed && t.twy_actual) {
-        grace = (t.direction === 'up') ? 30000 : 0;
-      }
-      return ms >= now - grace;
-    });
-    upcoming.sort(function(a, b) { return trainMs(a) - trainMs(b); });
-    if (!upcoming.length) return [];
-    var firstMs = trainMs(upcoming[0]);
-    // Include trains within 90s of the first, but cap at 3 — multi-view can't render more
-    var window = upcoming.filter(function(t) { return trainMs(t) <= firstMs + 90000; });
-    return window.slice(0, 3);
+  if (currentView === 'grid') renderGrid(trainsData.trains || [], now);
+  if (currentView === 'detail' && selectedUid) {
+    var t = (trainsData.trains || []).find(function(x){ return x.uid === selectedUid; });
+    if (t) renderDetail(t, now);
   }
 }
 
-/* ── Focus view ──────────────────────────────────────────── */
-function renderFocus(t, now) {
-  var op   = opStyle(t.op_code, t.passenger);
-  var ms   = trainMs(t);
-  var late = lateStr(t);
-  var isBadLate = (t.late_min && t.late_min >= 5);
-  var isEst = !t.confirmed;
-  var isStop = t.call_type === 'STOP';
+/* ── Grid ───────────────────────────────────────────────── */
+var TRACK_KEYS = ['um', 'dm', 'ur', 'dr'];
 
-  var callClass = isStop ? 'badge-stop' : (isEst ? 'badge-est' : 'badge-pass');
-  var callText  = isStop ? 'Stops at Twyford'
-                : (isEst ? 'Passing through (est.)' : 'Passes Twyford');
+function renderGrid(trains, now) {
+  var slots = {um:[], dm:[], ur:[], dr:[]};
 
-  var schedDisp = fmtTime(t.twy_sched);
-  var estDisp   = ms ? fmtTimeMs(ms) : schedDisp;
-  if (isEst) schedDisp = '~' + schedDisp;
-
-  /* Twyford time display */
-  var hasPassed = t.confirmed && t.twy_actual && ms < now;
-  var twyTimeHtml;
-  if (t.cancelled) {
-    twyTimeHtml = '<span class="fv-route-time tr-cancel">Cancelled</span>';
-  } else if (isEst) {
-    twyTimeHtml = '<span class="fv-route-time fv-route-est">~' + fmtTimeMs(ms) + '</span>';
-  } else if (t.twy_actual) {
-    var lateClass = isBadLate ? 'fv-route-late' : 'fv-route-ontime';
-    var lateNote  = isBadLate ? ' (' + late + ')' : '';
-    twyTimeHtml = '<span class="fv-route-time">Sched ' + fmtTime(t.twy_sched) + '</span> ' +
-                  '<span class="fv-route-time ' + lateClass + '"> ✓ ' + fmtTime(t.twy_actual) + lateNote + '</span>';
-  } else {
-    var lateClass2 = isBadLate ? 'fv-route-late' : '';
-    twyTimeHtml = '<span class="fv-route-time ' + lateClass2 + '">' + fmtExpected(t) +
-                  (late && late !== 'On time' ? ' (' + late + ')' : '') + '</span>';
-  }
-
-  var platformHtml = (isStop && t.platform)
-    ? ' <span style="color:#7fb3d3;font-size:clamp(12px,1.8vw,26px)">Plat ' + esc(t.platform) + '</span>'
-    : '';
-
-  /* Stat cards */
-  var statLabel  = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
-  var statTime   = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtExpected(t));
-  var statDelay  = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
-                 : isEst ? '<span class="stat-est">N/A</span>'
-                 : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
-                 : '<span class="stat-late">' + (t.late_min > 0 ? '+' : '') + (t.late_min || '?') + ' min</span>');
-  var statTrack  = trackLabel(t);
-  var statVeh    = t.num_veh ? t.num_veh + (t.num_veh === 1 ? ' coach' : ' coaches') : '—';
-
-  document.getElementById('focus-view').innerHTML =
-    '<div class="fv-header" style="background:linear-gradient(135deg,' + op.bg + '55 0%,' + op.bg + '11 100%); border-bottom: 2px solid ' + op.bg + '88">' +
-      '<div class="fv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
-      '<div class="fv-main">' +
-        '<div class="fv-headcode">' + esc(labelLine(t)) + '</div>' +
-        '<div class="fv-op-name">' + esc(t.headcode) + ' · ' + esc(t.op_name || op.abbr) + '  ' + confBadge(t) + '</div>' +
-      '</div>' +
-      '<div class="fv-right">' +
-        '<span class="fv-track-badge">' + esc(trackLabel(t)) + '</span>' +
-        '<span class="fv-call-badge ' + callClass + '">' + callText + '</span>' +
-        (isEst ? '<span class="fv-countdown">' + esc(fmtCountdown(ms, now)) + '</span>' : '') +
-      '</div>' +
-    '</div>' +
-
-    '<div class="fv-route">' +
-      '<div class="fv-route-station">' + esc(t.passenger === false
-        ? (t.direction === 'up' ? '← From west' : '← From London')
-        : (t.origin || '—')) + '</div>' +
-      (t.orig_dep ? '<div class="fv-route-time">dep ' + fmtTime(t.orig_dep) + '</div>' : '') +
-      '<div class="fv-route-arrow">↓</div>' +
-      '<div class="fv-route-station twyford">Twyford</div>' +
-      '<div>' + twyTimeHtml + platformHtml + '</div>' +
-      '<div class="fv-route-arrow">↓</div>' +
-      '<div class="fv-route-station">' + esc(t.passenger === false
-        ? (t.direction === 'up' ? '→ To London' : '→ To west')
-        : (t.dest || '—')) + '</div>' +
-      (t.dest_arr ? '<div class="fv-route-time">arr ' + fmtTime(t.dest_arr) + '</div>' : '') +
-    '</div>' +
-
-    '<div class="fv-stats">' +
-      fvCard(statLabel, statTime, '') +
-      fvCard('Delay', statDelay, '', true) +
-      fvCard('Track', statTrack, '') +
-      fvCard('Vehicles', statVeh, '') +
-    '</div>';
-}
-
-function fvCard(label, value, unit, rawHtml) {
-  return '<div class="fv-stat-card">' +
-    '<div class="fv-stat-label">' + esc(label) + '</div>' +
-    '<div class="fv-stat-value">' + (rawHtml ? value : esc(value)) + '</div>' +
-    (unit ? '<div class="fv-stat-unit">' + esc(unit) + '</div>' : '') +
-    '</div>';
-}
-
-/* ── Multi-train view ────────────────────────────────────── */
-function renderMulti(targets, now) {
-  var html = '';
-  targets.forEach(function(t) {
-    var op        = opStyle(t.op_code, t.passenger);
-    var ms        = trainMs(t);
-    var late      = lateStr(t);
-    var isEst     = !t.confirmed;
-    var isBadLate = (t.late_min && t.late_min >= 5);
-    var hasPassed = t.confirmed && t.twy_actual && ms < now;
-    var isStop    = t.call_type === 'STOP';
-
-    var callClass = isStop ? 'badge-stop' : (isEst ? 'badge-est' : 'badge-pass');
-    var callText  = isStop ? 'Stops at Twyford'
-                  : (isEst ? 'Passing through (est.)' : 'Passes Twyford');
-
-    // Twyford time — same logic as renderFocus
-    var twyTimeHtml;
-    if (t.cancelled) {
-      twyTimeHtml = '<span class="stat-cancel">Cancelled</span>';
-    } else if (isEst) {
-      twyTimeHtml = '<span class="stat-est">~' + esc(fmtTimeMs(ms)) + '</span>';
-    } else if (t.twy_actual) {
-      var lateClassA = isBadLate ? 'fv-route-late' : 'fv-route-ontime';
-      var lateNoteA  = isBadLate ? ' (+' + t.late_min + ' min)' : '';
-      twyTimeHtml = 'Sched ' + esc(fmtTime(t.twy_sched)) +
-                    ' <span class="' + lateClassA + '"> ✓ ' + esc(fmtTime(t.twy_actual)) + esc(lateNoteA) + '</span>';
-    } else {
-      var lateClassB = isBadLate ? 'fv-route-late' : '';
-      twyTimeHtml = '<span class="' + lateClassB + '">' + esc(fmtExpected(t)) +
-                    (late && late !== 'On time' ? ' (' + esc(late) + ')' : '') + '</span>';
-    }
-
-    var platformHtml = (isStop && t.platform)
-      ? ' <span style="color:#7fb3d3"> Plat ' + esc(t.platform) + '</span>'
-      : '';
-
-    // Stat cards — same as renderFocus
-    var statLabel = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
-    var statTime  = isEst ? '~' + fmtTimeMs(ms) : (t.twy_actual ? fmtTime(t.twy_actual) : fmtExpected(t));
-    var statDelay = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
-                  : isEst ? '<span class="stat-est">N/A</span>'
-                  : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
-                  : '<span class="stat-late">' + (t.late_min > 0 ? '+' : '') + (t.late_min || '?') + ' min</span>');
-    var statTrack = trackLabel(t);
-    var statVeh   = t.num_veh ? t.num_veh + (t.num_veh === 1 ? ' coach' : ' coaches') : '—';
-
-    var originStr = t.passenger === false
-      ? (t.direction === 'up' ? '← From west' : '← From London')
-      : (t.origin || '—');
-    var destStr = t.passenger === false
-      ? (t.direction === 'up' ? '→ To London' : '→ To west')
-      : (t.dest || '—');
-
-    html +=
-      '<div class="mvc-card" style="background:linear-gradient(135deg,' + op.bg + '55 0%,' + op.bg + '11 100%)">' +
-
-      '<div class="mvc-header" style="background:linear-gradient(135deg,' + op.bg + '44 0%,transparent 100%);border-bottom:1px solid ' + op.bg + '66">' +
-        '<div class="mvc-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
-        '<div class="mvc-main">' +
-          '<div class="mvc-headcode">' + esc(labelLine(t)) + '</div>' +
-          '<div class="mvc-op-name">' + esc(t.headcode) + ' · ' + esc(t.op_name || op.abbr) + '  ' + confBadge(t) + '</div>' +
-        '</div>' +
-        '<div class="mvc-right">' +
-          '<span class="mvc-track-badge">' + esc(trackLabel(t)) + '</span>' +
-          '<span class="mvc-call-badge ' + callClass + '">' + esc(callText) + '</span>' +
-          (isEst ? '<span class="mvc-countdown">' + esc(fmtCountdown(ms, now)) + '</span>' : '') +
-        '</div>' +
-      '</div>' +
-
-      '<div class="mvc-route">' +
-        '<div class="mvc-route-ep">' +
-          '<div class="mvc-ep-name">' + esc(originStr) + '</div>' +
-          (t.orig_dep ? '<div class="mvc-ep-time">dep ' + esc(fmtTime(t.orig_dep)) + '</div>' : '') +
-        '</div>' +
-        '<div class="mvc-route-arrow">→</div>' +
-        '<div class="mvc-route-twy">' +
-          '<div class="mvc-twy-name">Twyford</div>' +
-          '<div class="mvc-twy-time">' + twyTimeHtml + platformHtml + '</div>' +
-        '</div>' +
-        '<div class="mvc-route-arrow">→</div>' +
-        '<div class="mvc-route-ep mvc-route-ep-right">' +
-          '<div class="mvc-ep-name">' + esc(destStr) + '</div>' +
-          (t.dest_arr ? '<div class="mvc-ep-time">arr ' + esc(fmtTime(t.dest_arr)) + '</div>' : '') +
-        '</div>' +
-      '</div>' +
-
-      '<div class="mvc-stats">' +
-        mvcCard(statLabel, statTime, '') +
-        mvcCard('Delay', statDelay, '', true) +
-        mvcCard('Track', statTrack, '') +
-        mvcCard('Vehicles', statVeh, '') +
-      '</div>' +
-
-      '</div>';
+  trains.forEach(function(t) {
+    if (t.cancelled) return;
+    var ms = trainMs(t);
+    var grace = 120000;
+    if (t.confirmed && t.twy_actual) grace = (t.direction === 'up') ? 30000 : 0;
+    if (ms < now - grace || ms > now + 60*60000) return;
+    var k = trackKey(t);
+    if (k && slots[k]) slots[k].push(t);
   });
-  document.getElementById('multi-view').innerHTML = html;
+
+  TRACK_KEYS.forEach(function(k) {
+    var list = slots[k];
+    list.sort(function(a,b){ return trainMs(a) - trainMs(b); });
+    var body = document.getElementById('body-' + k);
+    if (!body) return;
+
+    if (!list.length) {
+      body.innerHTML = '<div class="tc-empty">No trains within an hour</div>';
+      body.parentElement.style.background = '#0d1b2a';
+      return;
+    }
+    // Headline = soonest current-or-upcoming train (≥ 20 s ago, to keep "now"
+    // trains).  If everything has passed, fall back to the most recent.
+    var hi = list.findIndex(function(x){ return trainMs(x) >= now - 20000; });
+    if (hi < 0) hi = list.length - 1;
+    var t   = list[hi];
+    var op  = opStyle(t.op_code, t.passenger);
+    body.parentElement.style.background =
+      'linear-gradient(160deg,' + op.bg + '44 0%,' + op.bg + '0a 100%),#0d1b2a';
+    body.innerHTML = cardBodyHtml(t, now) + nextRowsHtml(list.slice(hi + 1, hi + 4), now);
+  });
 }
 
-function mvcCard(label, value, unit, rawHtml) {
-  return '<div class="mvc-stat-card">' +
-    '<div class="mvc-stat-label">' + esc(label) + '</div>' +
-    '<div class="mvc-stat-value">' + (rawHtml ? value : esc(value)) + '</div>' +
-    (unit ? '<div style="font-size:clamp(8px,0.9vw,12px);color:#5a8fad">' + esc(unit) + '</div>' : '') +
+/* Destination / origin labels that degrade gracefully for TD-only stub trains
+   (live berth fix but no matched RTT schedule → no origin/dest). */
+function destLabel(t) {
+  if (t.passenger === false) return freightClass(t.headcode);
+  if (t.dest) return shortPlace(t.dest);
+  var c = (t.headcode || '')[0];
+  if (c === '4' || c === '6' || c === '7' || c === '8') return freightClass(t.headcode);
+  if (c === '5') return 'Empty stock';
+  if (c === '9') return 'Elizabeth Line';
+  return 'Unidentified';
+}
+function origLabel(t) {
+  if (t.passenger === false || !t.origin)
+    return t.direction === 'up' ? 'from the west' : 'from London';
+  return shortPlace(t.origin);
+}
+
+/* Short place name for compact rows */
+function shortPlace(name) {
+  if (!name) return '—';
+  return String(name)
+    .replace('London Paddington', 'Paddington')
+    .replace(' Temple Meads', '')
+    .replace(' Parkway', ' Pkwy')
+    .replace(' Foregate Street', '')
+    .replace(' Shrub Hill', '')
+    .replace(' St Davids', '')
+    .replace(' Central', '')
+    .replace('Heathrow Airport ', 'Heathrow ')
+    .replace('-on-Thames', '');
+}
+
+/* Tidy a SMART place name for display. */
+function placeName(s) {
+  if (!s) return '';
+  var map = {'MAIDENHED':'Maidenhead','MDNHDMIDS':'Maidenhead','MDNHD CS':'Maidenhead',
+    'TWYFORD':'Twyford','READNG':'Reading','READGWEST':'Reading West','READWTORJ':'Reading',
+    'RDGSPURJN':'Reading','TILEHURST':'Tilehurst','PANGBORNE':'Pangbourne',
+    'GORING&ST':'Goring','CHOLSEY':'Cholsey','SLOUGH':'Slough','BURNHAM':'Burnham',
+    'TAPLOW':'Taplow','LANGLEY':'Langley','IVER':'Iver','W DRAYTON':'West Drayton',
+    'HAYES&HAR':'Hayes','SOUTHALL':'Southall','HANWELL':'Hanwell','AIRPORTJN':'Airport Jn',
+    'STOCKLYJN':'Stockley Jn','HENLEYONT':'Henley'};
+  if (map[s]) return map[s];
+  if (s.indexOf('LHR')===0) return 'Heathrow';
+  return s.charAt(0) + s.slice(1).toLowerCase();
+}
+
+/* Live physical position from the SMART-enriched TD feed (real berth → distance),
+   or null when there's no recent live fix. */
+function livePos(t) {
+  var td = tdPositions[t.headcode];
+  if (!td || td.age_s > 150 || td.dist_mi == null) return null;
+  return {mi: Math.abs(td.dist_mi), place: placeName(td.place)};
+}
+
+function etaParts(t, now) {
+  var diff = trainMs(t) - now;
+  if (t.at_station) return {val:'stn',  unit:'', cls:'eta-stn'};
+  if (t.held)       return {val:'held', unit:'', cls:'eta-held'};
+  if (t.twy_actual && diff < -5000) {
+    var agoS = Math.round(-diff / 1000);
+    return {val: agoS<60?agoS:Math.round(agoS/60), unit: agoS<60?'s ago':'m ago', cls:'eta-past'};
+  }
+  if (diff <= 15000) return {val:'now', unit:'', cls:'eta-now'};
+  var s = Math.round(diff / 1000);
+  return {val: s<60?s:Math.floor(s/60), unit: s<60?'s':'min', cls:''};
+}
+
+function cardBodyHtml(t, now) {
+  var op = opStyle(t.op_code, t.passenger);
+  var e  = etaParts(t, now);
+
+  var fromTxt = origLabel(t);
+  var toTxt   = destLabel(t);
+
+  // position / status line
+  var posHtml;
+  var lp = livePos(t);
+  if (t.cancelled) {
+    posHtml = '<span class="cancel">Cancelled</span>';
+  } else if (t.at_station) {
+    posHtml = '<span class="held">⏸ at Twyford station</span>';
+  } else if (t.held) {
+    posHtml = '<span class="held">⏸ held at signal</span>';
+  } else if (lp) {
+    posHtml = '<span class="live">● live</span>' +
+              '<span>' + (lp.mi < 0.4 ? 'passing' : lp.mi.toFixed(1) + ' mi')
+              + (lp.place ? ' · ' + esc(lp.place) : '') + '</span>';
+  } else if (t.late_min > 0) {
+    posHtml = '<span class="late">+' + t.late_min + ' min late</span>';
+  } else if (t.confirmed) {
+    posHtml = '<span class="ontime">on time</span>';
+  } else {
+    posHtml = '<span>scheduled</span>';
+  }
+
+  return '<div class="tc-top">' +
+      '<div class="tc-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
+      '<div class="tc-hc">' + esc(t.headcode) + '</div>' +
+      '<div class="tc-eta-wrap">' +
+        '<span class="tc-eta-val ' + e.cls + '">' + esc(String(e.val)) + '</span>' +
+        (e.unit ? '<span class="tc-eta-unit">' + esc(e.unit) + '</span>' : '') +
+      '</div>' +
+    '</div>' +
+    '<div class="tc-route">' +
+      '<span class="tc-from">' + esc(fromTxt) + '</span>' +
+      '<span class="tc-arrow">→</span>' +
+      '<span class="tc-to">' + esc(toTxt) + '</span>' +
+    '</div>' +
+    '<div class="tc-pos">' + posHtml + '</div>';
+}
+
+function nextRowsHtml(list, now) {
+  if (!list.length) return '<div class="tc-next"></div>';
+  var rows = list.map(function(t) {
+    var op = opStyle(t.op_code, t.passenger);
+    var e  = etaParts(t, now);
+    var dest = destLabel(t);
+    var etaStr = (e.cls === 'eta-now') ? 'now'
+               : (e.cls === 'eta-stn') ? 'stn'
+               : (e.cls === 'eta-held') ? 'held'
+               : (e.unit === 's' ? e.val + 's' : e.val + (e.unit==='min'?'m':''));
+    return '<div class="tc-next-row">' +
+      '<span class="tc-next-dot" style="background:' + op.bg + '"></span>' +
+      '<span style="color:#7d99b0;font-family:monospace">' + esc(t.headcode) + '</span>' +
+      '<span class="tc-next-dest">' + esc(dest) + '</span>' +
+      '<span class="tc-next-eta">' + esc(etaStr) + '</span>' +
     '</div>';
+  }).join('');
+  return '<div class="tc-next">' + rows + '</div>';
 }
 
-/* ── List view ───────────────────────────────────────────── */
+/* ── List ───────────────────────────────────────────────── */
 function renderList(trains, now) {
   var tb = document.getElementById('train-tbody');
   if (!trains.length) {
-    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#4a7a9a;padding:30px">No trains</td></tr>';
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#4a7a9a;padding:24px">No trains</td></tr>';
     return;
   }
   var html = '';
@@ -1074,116 +784,118 @@ function renderList(trains, now) {
     var isEst  = !t.confirmed;
     var late   = lateStr(t);
     var op     = opStyle(t.op_code, t.passenger);
-
-    // Scheduled time — always show the WTT/estimated sched; prefix ~ if estimated
-    var schedDisp = isEst ? '~' + fmtTime(t.twy_sched) : fmtTime(t.twy_sched);
-
-    // Actual time — TRUST confirmed, TD-derived ETA, or RTT lateness estimate
+    var schedDisp  = isEst ? '~' + fmtTime(t.twy_sched) : fmtTime(t.twy_sched);
     var actualDisp = t.twy_actual ? fmtTime(t.twy_actual)
-        : (t.td_eta_s !== undefined || t.late_min > 0) ? fmtExpected(t) : '—';
-
-    var lateClass = t.cancelled ? 'tr-cancel'
-                  : isEst ? 'tr-est'
-                  : (t.late_min && t.late_min > 0) ? 'tr-late' : 'tr-ontime';
-    var lateDisp  = t.cancelled ? 'Cancelled' : isEst ? 'est.' : (late || '');
-    var routeStr  = t.passenger === false
+                   : (t.td_eta_s !== undefined || t.late_min > 0) ? fmtExpected(t) : '—';
+    var lc = t.cancelled ? 'tr-cancel' : isEst ? 'tr-est' : (t.late_min > 0) ? 'tr-late' : 'tr-ontime';
+    var routeStr = t.passenger === false
       ? freightClass(t.headcode)
       : (t.origin || '—') + ' → ' + (t.dest || '—');
 
-    html += '<tr class="tr-row' + (isPast ? ' past' : '') + '" onmousedown="rowTap(this)" data-uid="' + esc(t.uid) + '">' +
-      '<td class="tr-time ' + lateClass + '">' + esc(schedDisp) + '</td>' +
-      '<td class="tr-time ' + (t.twy_actual ? (lateClass || 'tr-ontime') : '') + '">' + esc(actualDisp) + '</td>' +
+    html += '<tr class="tr-row' + (isPast?' past':'') +
+      '" onmousedown="rowTap(\'' + esc(t.uid) + '\')">' +
+      '<td class="tr-time ' + lc + '">' + esc(schedDisp) + '</td>' +
+      '<td class="tr-time">' + esc(actualDisp) + '</td>' +
       '<td class="tr-hc">' + esc(t.headcode) + '</td>' +
       '<td><span class="tr-op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</span></td>' +
       '<td class="tr-route">' + esc(routeStr) + '</td>' +
       '<td class="tr-track">' + esc(trackLabel(t)) + '</td>' +
-      '<td class="tr-status ' + lateClass + '">' + esc(lateDisp) + '</td>' +
+      '<td class="tr-status ' + lc + '">' + esc(late || (isEst ? 'est.' : '')) + '</td>' +
       '</tr>';
   });
   tb.innerHTML = html;
 }
 
-function rowTap(row) {
-  if (!trainsData) return;
-  var uid = row.dataset.uid;
-  var t = (trainsData.trains || []).find(function(x) { return x.uid === uid; });
-  if (!t) return;
-  document.getElementById('no-data').style.display = 'none';
-  document.getElementById('focus-view').style.display = 'flex';
-  document.getElementById('list-view').style.display = 'none';
-  renderFocus(t, Date.now());
-  ['recent','next','list'].forEach(function(m) {
-    document.getElementById('btn-' + m).classList.remove('active');
-  });
-  // Pressing List again returns to list
-  document.getElementById('btn-list').classList.add('active');
-  currentMode = 'list-detail';
+/* ── Detail (focus view) ────────────────────────────────── */
+function renderDetail(t, now) {
+  var op   = opStyle(t.op_code, t.passenger);
+  var ms   = trainMs(t);
+  var isEst    = !t.confirmed;
+  var isStop   = t.call_type === 'STOP';
+  var isBadLate = t.late_min && t.late_min >= 5;
+  var hasPassed = t.confirmed && t.twy_actual && ms < now;
+  var late = lateStr(t);
+
+  var callClass = isStop ? 'badge-stop' : (isEst ? 'badge-est' : 'badge-pass');
+  var callText  = isStop ? 'Stops at Twyford'
+                : (isEst ? 'Passing through (est.)' : 'Passes Twyford');
+
+  var twyTimeHtml;
+  if (t.cancelled) {
+    twyTimeHtml = '<span class="fv-route-time tr-cancel">Cancelled</span>';
+  } else if (isEst) {
+    twyTimeHtml = '<span class="fv-route-time fv-route-est">~' + fmtTimeMs(ms) + '</span>';
+  } else if (t.twy_actual) {
+    var lc  = isBadLate ? 'fv-route-late' : 'fv-route-ontime';
+    var ln  = isBadLate ? ' (' + late + ')' : '';
+    twyTimeHtml = '<span class="fv-route-time">Sched ' + fmtTime(t.twy_sched) + '</span> ' +
+                  '<span class="fv-route-time ' + lc + '"> ✓ ' + fmtTime(t.twy_actual) + ln + '</span>';
+  } else {
+    var lc2 = isBadLate ? 'fv-route-late' : '';
+    twyTimeHtml = '<span class="fv-route-time ' + lc2 + '">' + fmtExpected(t) +
+                  (late && late !== 'On time' ? ' (' + late + ')' : '') + '</span>';
+  }
+
+  var platHtml = (isStop && t.platform)
+    ? ' <span style="color:#7fb3d3;font-size:clamp(11px,1.6vw,22px)">Plat ' + esc(t.platform) + '</span>' : '';
+
+  var statLabel = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
+  var statTime  = isEst ? '~' + fmtTimeMs(ms)
+                : (t.twy_actual ? fmtTime(t.twy_actual) : fmtExpected(t));
+  var statDelay = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
+                : isEst ? '<span class="stat-est">N/A</span>'
+                : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
+                : '<span class="stat-late">' + (t.late_min>0?'+':'') + (t.late_min||'?') + ' min</span>');
+  var statVeh = t.num_veh ? t.num_veh + (t.num_veh===1?' coach':' coaches') : '—';
+
+  var frOrig = t.passenger === false
+    ? (t.direction === 'up' ? '← From west' : '← From London') : (t.origin || '—');
+  var frDest = t.passenger === false
+    ? (t.direction === 'up' ? '→ To London' : '→ To west') : (t.dest || '—');
+
+  document.getElementById('detail-view').innerHTML =
+    '<div class="fv-header" style="background:linear-gradient(135deg,' + op.bg + '55 0%,' + op.bg + '11 100%);border-bottom:2px solid ' + op.bg + '88">' +
+      '<div class="fv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
+      '<div class="fv-main">' +
+        '<div class="fv-headcode">' + esc(t.passenger===false ? freightClass(t.headcode) : (t.dest||t.headcode)) + '</div>' +
+        '<div class="fv-op-name">' + esc(t.headcode) + ' · ' + esc(t.op_name||op.abbr) + '  ' + confBadge(t) + '</div>' +
+      '</div>' +
+      '<div class="fv-right">' +
+        '<span class="fv-track-badge">' + esc(trackLabel(t)) + '</span>' +
+        '<span class="fv-call-badge ' + callClass + '">' + callText + '</span>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="fv-route">' +
+      '<div class="fv-route-station">' + esc(frOrig) + '</div>' +
+      (t.orig_dep ? '<div class="fv-route-time">dep ' + fmtTime(t.orig_dep) + '</div>' : '') +
+      '<div class="fv-route-arrow">↓</div>' +
+      '<div class="fv-route-station twyford">Twyford</div>' +
+      '<div>' + twyTimeHtml + platHtml + '</div>' +
+      '<div class="fv-route-arrow">↓</div>' +
+      '<div class="fv-route-station">' + esc(frDest) + '</div>' +
+      (t.dest_arr ? '<div class="fv-route-time">arr ' + fmtTime(t.dest_arr) + '</div>' : '') +
+    '</div>' +
+
+    '<div class="fv-stats">' +
+      fvCard(statLabel, statTime, '') +
+      fvCard('Delay', statDelay, '', true) +
+      fvCard('Track', trackLabel(t), '') +
+      fvCard('Vehicles', statVeh, '') +
+    '</div>';
 }
 
-/* ── Helpers ─────────────────────────────────────────────── */
-function esc(s) {
-  if (s === null || s === undefined) return '';
-  return String(s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function fvCard(label, val, unit, raw) {
+  return '<div class="fv-stat-card">' +
+    '<div class="fv-stat-label">' + esc(label) + '</div>' +
+    '<div class="fv-stat-value">' + (raw ? val : esc(val)) + '</div>' +
+    (unit ? '<div style="font-size:clamp(9px,1.1vw,14px);color:#5a8fad">' + esc(unit) + '</div>' : '') +
+    '</div>';
 }
 
 /* ── Boot ────────────────────────────────────────────────── */
-setMode('next');
+showView('grid');
 startPoll();
-/* ── Approach bar ────────────────────────────────────────── */
-var APPR_HOUSE_PCT = 62.9;  // Twyford house: 8.3mi from Reading / 13.2mi total
-
-function renderApproachBar(trains, now) {
-  var inner = document.getElementById('appr-dots');
-  if (!inner) return;
-  var dots = '';
-  (trains || []).forEach(function(t) {
-    var houseMs = (t.house_pass_ts || 0) * 1000;
-    if (!houseMs) return;
-    var dtSec = (houseMs - now) / 1000;
-    if (dtSec < -300 || dtSec > 2100) return;  // 5 min past → 35 min future
-
-    var pct;
-    if (t.at_station) {
-      pct = APPR_HOUSE_PCT;   // pin at house marker while stopped at Twyford
-    } else {
-      var isMain = (t.track === 'Main');
-      var speedMph = isMain ? 49 : 33;
-      var milesAway = Math.abs(dtSec) / 3600 * speedMph;
-      var pctAway = milesAway / 13.2 * 100;
-      if (t.direction === 'down') {
-        // DOWN: arrives from Maidenhead side (right=high pct), moves left
-        pct = APPR_HOUSE_PCT + (dtSec > 0 ? pctAway : -pctAway);
-      } else {
-        // UP: arrives from Reading side (left=low pct), moves right
-        pct = APPR_HOUSE_PCT - (dtSec > 0 ? pctAway : -pctAway);
-      }
-    }
-    pct = Math.max(1, Math.min(99, pct));
-
-    var op = opStyle(t.op_code, t.passenger);
-    var td = tdPositions[t.headcode];
-    var hasTd = t.td_berth && td && td.age_s < 120;
-    var border = t.at_station  ? '2px solid #d08000'
-               : hasTd         ? '2px solid #2a9a50'
-               :                 '1px solid ' + op.fg + '55';
-    var label = (t.passenger === false ? freightClass(t.headcode) : (t.dest || ''))
-                  .slice(0, 3).toUpperCase();
-    dots += '<div class="appr-dot" style="left:' + pct.toFixed(1) + '%;background:' + op.bg + ';border:' + border + '">' + esc(label) + '</div>';
-  });
-  inner.innerHTML = dots;
-}
 </script>
-
-<div id="approach-bar">
-  <div id="appr-track">
-    <div class="appr-mark" style="left:62.9%"></div>
-    <div class="appr-lbl" style="left:2px">RDG</div>
-    <div class="appr-lbl" style="left:calc(62.9% + 3px)">TWY</div>
-    <div class="appr-lbl" style="right:2px">MAD</div>
-    <div id="appr-dots"></div>
-  </div>
-</div>
 </body>
 </html>

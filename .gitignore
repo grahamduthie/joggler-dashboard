@@ -7,8 +7,14 @@ nr-credentials.env
 # Runtime caches — generated automatically, not source files
 bus-stops.json
 bus-route-stops.json
+berth_chain.json
 logos/
 aircraft-info/
+
+# macOS / local scratch
+.DS_Store
+.firecrawl/
+Screenshot*.png
 
 # Python bytecode
 __pycache__/

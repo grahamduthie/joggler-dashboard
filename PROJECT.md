@@ -553,31 +553,62 @@ information for all trains passing the house (~200 m east of Twyford station). T
 adjacent to four tracks: two Main Line tracks (fast GWR inter-city and freight) and two Relief
 Line tracks (GWR local and Elizabeth Line stopping services).
 
-**Data source:** Real Time Trains (RTT) API v2 (`data.rtt.io`). RTT is queried with three calls
+**Data source:** Real Time Trains (RTT) API v2 (`data.rtt.io`). RTT is queried with **two calls**
 per 30-second polling cycle (run in parallel threads):
 
-1. **Twyford query** (`/gb-nr/location?code=TWYFORD`): all trains that call or pass Twyford —
-   primarily Elizabeth Line and GWR local on the Relief Line. These are `confirmed=true`.
-   Both `displayAs=CALL` (stopping) and `displayAs=PASS` (passing) trains are included —
-   **no `displayAs` filter** (removing it was essential to capture fast expresses).
+1. **Twyford query** (`/gb-nr/location?code=TWYFORD`): trains that call or pass Twyford with a
+   WTT timing point — Elizabeth Line and GWR local on the Relief Line (~13 services). These are
+   `confirmed=true`. Both `displayAs=CALL` and `PASS` included. Fast Main-line trains have **no
+   Twyford timing point** and never appear here.
 
-2. **Reading query** (`/gb-nr/location?code=RDG`): UP trains not already in the Twyford set.
-   Offset: +3 min for `UML`/`UDL` lines, 3 min default. Filter: `direction=up` only (heading
-   toward London). These are `confirmed=false` (estimated pass). DOWN trains not taken from
-   Reading — they have already passed Twyford. No `displayAs` filter.
+2. **Reading query** (`/gb-nr/location?code=RDG`): **bi-directional predictor** — the only feed
+   that surfaces fast Down-Main expresses (Bristol/Cardiff/Plymouth/Penzance). Reading is ~4 min
+   from Twyford: UP trains reach Twyford *after* departing Reading (offset +); DOWN trains pass
+   Twyford *before* arriving Reading (offset −). `_rtt_normalise` applies the signed offset
+   (3 min Main / 5 min Relief) from the train's own direction. `confirmed=false`.
 
-3. **Paddington query** (`/gb-nr/location?code=PAD`): DOWN trains originating at Paddington.
-   Offset: +33 min. Filter: `direction=down`; excludes `op_code=HX` (Heathrow Express, own
-   track) and destinations in `_PAD_EXCL_DESTS` (Heathrow airport terminals, Windsor & Eton
-   Central, Greenford, Hayes & Harlington — these go east from Paddington, not through Twyford).
-   These are `confirmed=false`. Replaced the old Maidenhead (MAD) query: fast DOWN expresses
-   (1C88, 1W33, etc.) don't stop at Maidenhead and never appeared in the MAD location feed.
+**Paddington (PAD) query REMOVED** (was the cause of "Down Main always empty"): at Paddington,
+`locationMetadata.line.planned` is NOT `DML`/`UML` — it's the platform-group code (`1`/`2`/`3`/`4`
+or empty), so the old filter `if line and not line.startswith('D')` discarded every down express.
 
-**Why three sources:** Fast-line GWR IETs (Bristol, Cardiff, Swansea, etc.) do not have Twyford
-as a WTT timing point — Twyford is only a pass-through with no scheduled entry in their
-working timetable. Signal berth points `TWYF112`, `TWYF632`, `TWYFDW` exist in RTT but return
-zero services (TRUST berth points are not WTT timing points). The multi-source approach adds
-~26 extra trains per 2-hour window (44 total vs 18 from Twyford alone).
+**Corridor filter (`_passes_twyford`):** Reading is a major junction; a train runs through
+Twyford only if Twyford lies *between* its endpoints — exactly one of {origin, destination} is
+east of Twyford (`_is_east(origin) != _is_east(dest)`). This rejects both Reading-junction traffic
+that bypasses Twyford (Newbury, Basingstoke, Gatwick/Redhill, CrossCountry to the north) AND
+trains terminating east of Twyford and turning back (Paddington→Maidenhead Elizabeth Line — both
+ends east). `_TWY_EAST_TOKENS` lists strictly-east places (Paddington…Maidenhead).
+
+**Direction & track classification** (`_classify_direction`, `_classify_track`): track (Main/Relief)
+is layered — operator (XR/HX→Relief, XC→Main) → line code ending `ML`→Main → genuine relief codes
+(`_RELIEF_CODES`: RL/URL/UDL/DDL/…)→Relief → destination character (`_MAIN_DESTS`/`_RELIEF_DESTS`)
+→ headcode class (1xxx express=Main, else Relief). Reading throat codes like `WL`/`FVL` are NOT
+trusted (a Penzance Down-Main express carries `lc=WL`). Frontend `isMainTrack(t)` just returns
+`t.track==='Main'` (backend is authoritative).
+
+**SMART berth → line + position model** (`_load_smart`, `_berth_info`): the NR **SMART** open-data
+file (`SupportingFileAuthenticate?type=SMART`, S3 redirect like CIF; downloaded at startup + daily)
+maps each TD berth step to a line (FROMLINE U/D + platform: 1=Down Main, 2=Up Main, 3=Down Relief,
+4/5=Up Relief) and a STANOX/location. Combined with hard-coded GWML chainage (`_STANME_MI`,
+validated vs BPLAN `kmvalue`), each berth gets `dist_mi` = signed miles from the house (− = east).
+This corrected the old (wrong) single-formula calibration: **D6 berths 0475–0594 are Iver→Maidenhead,
+EAST of Twyford** (berth 0577 = Maidenhead, ~6.7 mi east — not "the house" as previously assumed).
+`/api/td-live` positions are tagged with `line`, `place`, `dist_mi`.
+
+**CA berth-chain learner** (`_ca_observe`, `_rebuild_chain_positions`, persisted to `berth_chain.json`):
+SMART only positions berths that are TRUST reporting points, so intermediate signal berths near the
+house (1606/1614/1650…) have no SMART row. The TD **CA** message stream steps every train through
+every berth, so the proxy accumulates the `from→to` berth adjacency + per-berth transit times and
+**interpolates the missing berths' positions** along the chain between SMART anchors (Maidenhead /
+Twyford / Reading), weighted by transit time. Conservative: a berth gets a position only when
+bracketed by anchors within a few hops; otherwise it falls back to the RTT schedule. Refreshed
+every 120 s; the model persists across restarts and sharpens over time.
+
+**Live-berth ETA refinement** (`_berth_eta_to_house_s`, `_td_enrich_trains`): for a matched train
+with a live berth, `house_pass_ts` is refined from the real distance (speed by line/passenger),
+capped at 8 mi out (constant-speed estimate unreliable further, with intermediate stops). A train
+**dwelling at a station or held at a signal** (age in berth ≥ expected transit) is floored at the
+travel-from-here time and flagged `held` — it never shows "now" while miles away (this fixed a
+bug where a train sitting at Reading platform showed as passing now).
 
 **Freight trains via Network Rail STOMP + CIF schedule:** Freight is absent from RTT queries.
 The proxy uses two mechanisms:
@@ -610,18 +641,19 @@ See the "Network Rail Open Data Feeds" section for STOMP details.
 run on the Henley-on-Thames branch, diverging from the **west** end of Twyford station, and
 are not audible from the house (~200 m east of the station).
 
-**Three display modes** (toggle buttons in top bar):
+**Display — 2×2 quadrant grid** (default view; rebuilt 2026-06-27, user-chosen layout):
+one quadrant per line — **Up Main, Down Main, Up Relief, Down Relief**. Each quadrant shows a
+headline card (operator-coloured badge · headcode · big ETA; then `FROM → TO`; then a
+position/status line) plus up to 3 follow-on trains beneath. The position line shows
+`● live · X.X mi · <place>` when a live SMART/CA berth fix exists (real distance and place name
+from `/api/td-live`); otherwise delay/on-time/scheduled. Headline = the soonest current-or-upcoming
+train (≥ 20 s ago); empty quadrant → "No trains within an hour". `destLabel`/`origLabel` degrade
+gracefully for any train without a route. Two other views remain: **List** (toggle button →
+departure board) and **Detail** (tap a quadrant → full focus with route + stat cards).
 
-- **RECENT** — focus view for the most recent train that passed (within last 10 min)
-- **NEXT** — focus view for the next train due. If 2 or more trains are expected within
-  90 seconds of each other, a stacked multi-card view shows all of them simultaneously.
-  Each card is a compressed version of the single focus view: operator header, route band
-  (Origin → TWYFORD → Destination, horizontal), and 4 stat cards (At Twyford, Delay, Track,
-  Vehicles). All the same information as the single-train view, at ~60% the font size.
-- **LIST** — scrollable departure board with 7 columns: Sched, Actual, HC, Operator,
-  From → To, Track, Status. Tapping a row opens a focus view for that train.
+**Approach bar** (the live distance strip) lives on **/lineside**, not /trains.
 
-**Focus view elements:**
+**Focus / Detail view elements:**
 - Header bar: operator name + gradient background in operator brand colour
 - Large headcode (e.g. `1L35`) + track badge (`Main`/`Relief`) + call type badge (`STOP`/`PASS`/`PASS (est)`)
 - Route strip: origin → **TWYFORD** (amber) → destination; when TRUST has confirmed the actual
@@ -775,7 +807,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/airline-logo?iata=XX` | pics.avs.io (file-cached) | File permanent | |
 | `GET /api/aircraft-info?hex=XXXXXX` | OpenSky metadata (file-cached) | 30 days (mtime check) | |
 | `GET /api/airport-name?iata=XXX` | `airport-names.json` (OurAirports CSV, downloaded once) | In-memory for life of process | Returns `{"name": "…"}` or `{"name": null}` |
-| `GET /api/trains` | RTT API (Twyford + Reading) + NR STOMP buffer | 30 s | Three-source: confirmed stops + estimated Main Line passes + NR freight from STOMP |
+| `GET /api/trains` | RTT API (Twyford + Reading, 2 calls) + NR STOMP/CIF + SMART/CA berth model | 30 s | Confirmed stops + bi-directional Reading prediction + corridor filter + NR freight; live-berth ETA refinement |
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
 | `GET /api/radio/nowplaying?url=…` | ICY stream metadata | 25 s | StreamTitle from ICY |
 | `GET /api/radio/nowplaying-rp?chan=N` | Radio Paradise API | 20 s | |
@@ -784,7 +816,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /aircraft` | Static — aircraft.html | — | Standalone full-screen aircraft SPA |
 | `GET /trains` | Static — trains.html | — | Standalone full-screen trains SPA |
 | `GET /lineside` | Static — lineside.html | — | Standalone visual track display SPA |
-| `GET /api/td-live` | In-memory TD/SF state | — | Live berth positions + signal aspects from NR TD feed. No TTL — returns current state. Positions expire after 10 min of inactivity. |
+| `GET /api/td-live` | In-memory TD/SF state | — | Live berth positions (tagged with SMART/CA `line`, `place`, `dist_mi`) + signal aspects from NR TD feed. No TTL. Positions expire after 10 min of inactivity. |
 | `GET /api/nrcc` | Darwin SOAP nrccMessages | 300 s | NRCC disruption messages for Twyford area. Extracted from existing Darwin SOAP response (`{*}nrccMessages/{*}message`). Returns `{messages:["…"], ts}`. |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
