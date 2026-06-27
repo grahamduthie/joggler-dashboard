@@ -869,6 +869,10 @@ other device.
 
 ## External APIs and Rate Limiting
 
+> **Railway data sources** (RTT, Network Rail STOMP + SMART/CIF, Darwin, Vail BPLAN) — their
+> credentials, what each provides, how to call them, and the gotchas — are documented in
+> **`RAILWAY-APIS.md`**. Read that first when working on train data.
+
 ### Complete API inventory
 
 | API | Called from | When | Interval | Daily calls | Hard limit |
