@@ -1054,9 +1054,12 @@ _MAIN_DESTS = frozenset({
     'Newquay', 'Weston-super-Mare', 'Westbury', 'Frome', 'Castle Cary',
 })
 # Local / stopping terminals served on the SLOW (Relief) lines through Twyford.
+# NB: "Reading" is intentionally NOT here — both Relief stoppers (Elizabeth Line,
+# GWR locals) and fast GWR expresses (e.g. 1R41 on the Down Main) terminate there,
+# so the headcode class (1xxx=Main) decides; a live SMART berth line overrides anyway.
 _RELIEF_DESTS = frozenset({
     'Didcot Parkway', 'Newbury', 'Bedwyn', 'Basingstoke',
-    'Reading', 'Slough', 'Maidenhead', 'Henley-on-Thames',
+    'Slough', 'Maidenhead', 'Henley-on-Thames',
     'Bourne End', 'Marlow', 'Greenford', 'West Ealing',
     'Ealing Broadway', 'Hayes & Harlington', 'Gatwick Airport', 'Redhill',
 })
@@ -1457,24 +1460,29 @@ def _rtt_build_trains():
     return result
 
 
+# Max seconds of "progress within the current berth" to credit when smoothing the
+# ETA countdown.  A moving train steps to the next berth within ~this long; sitting
+# longer means dwelling/held, not progressing.
+_BERTH_STEP_S = 50
+
+
 def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age_s):
     """
     Estimate seconds until a train at this berth reaches the house, using the
     SMART berth model (real chainage distance).  Returns None if the berth is
-    unknown or the train has already passed the house.  May be slightly negative.
+    unknown or the train has already passed the house.  Returns (eta_s, held).
     The line (Main/Relief) is taken from SMART, not the caller's `is_main`.
     """
     info = _berth_info(area, berth_str)
     if not info or info['dist_mi'] is None:
         return None
     dist_mi = info['dist_mi']            # signed: + = west of house, − = east of house
-    if direction == 'down':              # approaches from the east (negative side)
-        if dist_mi > 0.3:
-            return None                  # already west of the house — passed
+    # to_go = miles still to travel to the house: + = approaching, − = already passed.
+    # DOWN trains approach from the east (negative dist) heading west; UP trains
+    # approach from the west (positive dist) heading east.
+    if direction == 'down':
         to_go = -dist_mi
-    elif direction == 'up':              # approaches from the west (positive side)
-        if dist_mi < -0.3:
-            return None
+    elif direction == 'up':
         to_go = dist_mi
     else:
         return None
@@ -1488,14 +1496,21 @@ def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age
     else:
         speed_mph = 90.0 if main else 60.0
     travel_s = to_go / speed_mph * 3600.0
-    eta = travel_s - age_s               # subtract time already moving in this berth
-    # A train physically cannot pass sooner than the time to travel from its
-    # current berth.  If age_s has consumed the whole transit, the train is
-    # dwelling at a station or held at a signal (not moving) — floor the ETA at
-    # the remaining travel time so it never shows "now"/passed while miles away,
-    # and flag it as held/dwelling.
-    if eta < 0 and to_go > 0.5:
+    if to_go < -0.3:
+        # Already past the house (berth says so).  Report it as passed — a negative
+        # ETA — so a stale schedule + lateness can't show it as still upcoming
+        # (e.g. a delayed DOWN train now sitting west at Reading).
+        return (travel_s, False)
+    # age_s smooths the countdown between berth steps, but a CA berth is a POINT,
+    # not a section the train slides along.  A train DWELLING at a station or HELD
+    # at a signal sits in one berth far longer than it takes a moving train to step
+    # out of it, so crediting the full age would wrongly advance it (e.g. a train
+    # sitting at Reading platform showing "1 min" while 5 mi away).  Credit at most
+    # one berth-step of real progress; beyond that, treat it as not moving toward
+    # the house and use the full travel time from here, flagged held/dwelling.
+    if age_s > _BERTH_STEP_S * 2 and to_go > 0.6:
         return (travel_s, True)
+    eta = travel_s - min(age_s, _BERTH_STEP_S)
     return (eta, False)
 
 
@@ -1787,6 +1802,13 @@ def _td_enrich_trains(trains, now):
             t['td_berth']     = pos['to']
             t['td_berth_age'] = int(now - pos['ts'])
             berth_age = int(now - pos['ts'])
+            # Live berth line (from SMART) is ground truth — the train is
+            # physically on that line — so it overrides the heuristic `track`
+            # (e.g. a fast Paddington→Reading express on the Down Main whose
+            # destination "Reading" otherwise reads as a Relief stopper).
+            binfo = _berth_info(pos['area'], pos['to'])
+            if binfo and binfo.get('line'):
+                t['track'] = binfo['line']
             if (pos['area'] == 'D6'
                     and pos['to'] in ('1612', '1608', '1604')
                     and t.get('direction') == 'up'
@@ -1811,9 +1833,10 @@ def _td_enrich_trains(trains, now):
                         # Dwelling at a station / held at a signal: floor the ETA
                         # (can't pass before the travel time) and flag it.
                         t['held'] = True
-                    if eta_s > -60:
-                        t['house_pass_ts'] = int(now + max(0, eta_s))
-                        t['td_eta_s'] = int(eta_s)
+                    # Live berth position is authoritative (beats the schedule),
+                    # whether the train is approaching (+) or has passed (−).
+                    t['house_pass_ts'] = int(now + eta_s)
+                    t['td_eta_s'] = int(eta_s)
     # NOTE: we deliberately do NOT synthesise "stub" trains for TD berths that
     # have no RTT/CIF/TRUST identity.  Without an origin/destination they can't
     # be corridor-validated (they'd include e.g. Elizabeth Line trains that
