@@ -567,6 +567,16 @@ per 30-second polling cycle (run in parallel threads):
    Twyford *before* arriving Reading (offset −). `_rtt_normalise` applies the signed offset
    (3 min Main / 5 min Relief) from the train's own direction. `confirmed=false`.
 
+**`timeFrom` is London LOCAL time** (fixed 2026-07-06): RTT interprets the `timeFrom` query
+parameter as Europe/London local. The proxy previously sent UTC, which during BST shifted the
+whole window back an hour — hour-old trains lingered in the list and the forward window shrank
+from ~90 to ~30 min (upcoming trains were missed). `_rtt_build_trains` now formats
+`datetime.now(_TZ_LONDON) − 10 min`.
+
+**Identity index (`ident`)**: before any filtering, every service RTT returned (both queries) is
+indexed by headcode → {origin, dest, op_code, op_name, passenger}. Trains that arrive via
+TRUST/CIF/TD later in the pipeline get their names from this index (or from CIF).
+
 **Paddington (PAD) query REMOVED** (was the cause of "Down Main always empty"): at Paddington,
 `locationMetadata.line.planned` is NOT `DML`/`UML` — it's the platform-group code (`1`/`2`/`3`/`4`
 or empty), so the old filter `if line and not line.startswith('D')` discarded every down express.
@@ -622,6 +632,29 @@ approaching (+) or has already passed (−). Three subtleties it handles:
   down train at Reading reading as +15 s).
 - **8-mile cap / unknown berth:** falls back to the RTT schedule estimate.
 
+**House-crossing detection is distance-based** (`_detect_house_event`, 2026-07-06): a CA berth
+step whose from/to distances straddle 0 (both known, both within 1.6 mi, step < 3 mi) means the
+train physically crossed the house — it fires `at_house` (sets `twy_actual`, invalidates the RTT
+cache) with the track derived from the SMART line + direction. A step landing within 1 mi on the
+approach side fires `approaching`. This replaced the static `_TD_HOUSE_TRANSITIONS` berth-pair
+table, whose D6 berths (0569/0573/0577…) the SMART recalibration showed are at **Maidenhead**,
+~6.7 mi east — it had been marking Down trains "passed" ~7 min early. The distance rule also gets
+stopper semantics right: an Up train dwelling at Twyford (station is west of the house) only
+fires when it departs east; a Down train fires on arrival.
+
+**TD corridor synthesis** (`_td_enrich_trains`, 2026-07-06): a live TD fix strictly *inside* the
+corridor — Down between Maidenhead and the house (−6.3 < d < −0.05) or Up between Reading and
+the house (0.05 < d < 4.95), moving toward the house per SMART's per-berth direction — WILL pass
+(no turnback exists in between), so an entry is synthesised (`source='td'`) even when no schedule
+source matched. Physical presence beats the name-token corridor heuristic; identity (origin/dest/
+operator) is filled from the RTT pre-filter index or today's CIF. Trains sitting AT Maidenhead/
+Reading stations stay excluded (they may reverse, e.g. Elizabeth Line Maidenhead terminators).
+Trains also carry `td_dist_mi`/`td_place`/`td_berth`/`td_berth_age` so the frontends don't need
+to join `/api/td-live` themselves.
+
+**Stale-train filter**: after sorting, trains whose pass moment is long gone are dropped —
+confirmed keep 30 min (feeds the lineside passing log), unconfirmed estimates 12 min.
+
 **Freight trains via Network Rail STOMP + CIF schedule:** Freight is absent from RTT queries.
 The proxy uses two mechanisms:
 
@@ -632,6 +665,10 @@ The proxy uses two mechanisms:
    checks `hc[0] in '45678'` only) to avoid duplicating engineering trains that also appear
    in RTT. STANOX 87014 (Twyford stops) triggers immediate RTT cache invalidation so
    confirmed pass times appear within 1–2 s of TRUST.
+   **TRUST `actual_timestamp` is London LOCAL wall-clock encoded as epoch-ms-as-if-UTC** (the
+   well-known NROD quirk; fixed 2026-07-06 — treating it as UTC had put every freight pass an
+   hour in the future during BST). Buffer entries are deduplicated against trains already in the
+   list by headcode + 10-min schedule window, and enriched with origin/destination from CIF.
 
 2. **CIF_FREIGHT_FULL_DAILY**: The proxy downloads the NR daily freight schedule (~15 MB gzip
    → ~370 MB) at startup and refreshes at 02:30 daily (`_cif_refresh_loop()`). Download URL:
@@ -644,8 +681,15 @@ The proxy uses two mechanisms:
    CIF STP indicator priority: O (overlay) > P (permanent) > N (new); C (cancel) skipped.
    Direction inferred from TIPLOC lists (`_CIF_EAST`, `_CIF_WEST`) relative to Twyford's index.
    CIF trains show with `source='cif'`, `confirmed=False`, `track='Relief'` (approximate —
-   most freight uses Relief lines but not all). Filtered to ±3h window at serve time.
-   Trains already in RTT or TRUST buffer (matched by headcode) are not duplicated.
+   most freight uses Relief lines but not all; a live berth fix overrides). Window: −10 min to
+   +90 min at serve time (freight paths are speculative — many never run). Trains already in
+   RTT or TRUST buffer (matched by headcode) are not duplicated.
+   **Origin/destination** (2026-07-06): the first/last `schedule_location` TIPLOCs + times are
+   captured per schedule and resolved to readable names via **CORPUS** (`_load_corpus`,
+   `SupportingFileAuthenticate?type=CORPUS`, same 302→S3 auth dance; ~12k TIPLOC→NLCDESC names,
+   title-cased with freight-operator suffix noise stripped by `_tiploc_name` — e.g. `MERHFHH` →
+   "Merehead Quarry", `NTHOLTS` → "West London Waste"). `_cif_ident(hc)` exposes this for
+   enriching TRUST/TD entries too.
 
 See the "Network Rail Open Data Feeds" section for STOMP details.
 
@@ -653,64 +697,26 @@ See the "Network Rail Open Data Feeds" section for STOMP details.
 run on the Henley-on-Thames branch, diverging from the **west** end of Twyford station, and
 are not audible from the house (~200 m east of the station).
 
-**Display — 2×2 quadrant grid** (default view; rebuilt 2026-06-27, user-chosen layout):
-one quadrant per line — **Up Main, Down Main, Up Relief, Down Relief**. Each quadrant shows a
-headline card (operator-coloured badge · headcode · big ETA; then `FROM → TO`; then a
-position/status line) plus up to 3 follow-on trains beneath. The position line shows
-`● live · X.X mi · <place>` when a live SMART/CA berth fix exists (real distance and place name
-from `/api/td-live`); otherwise delay/on-time/scheduled. Headline = the soonest current-or-upcoming
-train (≥ 20 s ago); empty quadrant → "No trains within an hour". `destLabel`/`origLabel` degrade
-gracefully for any train without a route. Two other views remain: **List** (toggle button →
-departure board) and **Detail** (tap a quadrant → full focus with route + stat cards).
+**Display — "trackboard" (rebuilt 2026-07-06):** a pure at-a-distance kitchen board. Four
+full-width rows, one per line, in **physical order from the house**: Up Relief (nearest),
+Down Relief, Up Main, Down Main. No list/detail views — /lineside is the detail page.
+Each row: track identity column (arrow + name + "to/from London"), then the next train —
+destination in huge Barlow Condensed caps, an operator-colour pill + "from <origin>" +
+coaches + live position (`● <place> · X.X mi`, green, from the train's own `td_dist_mi`) +
+headcode, then a dim "then HH:MM <dest> | HH:MM <dest>" follow-on line — and on the right a
+giant countdown (`N min` / `NN sec` / amber pulsing `NOW` / `HELD` / `AT STATION` / `PASSED`)
+with `HH:MM · on time/+N min/estimated` beneath. A thin operator-colour spine marks each row's
+left edge; a slow amber sweep animates across a row while a train is passing. Empty row →
+"NO TRAIN DUE". Header: TWYFORD title, `NO DATA` indicator if the API goes quiet >60 s, clock
+with seconds. NRCC messages appear as an amber DISRUPTION strip pinned to the bottom.
+Fonts: Barlow Condensed / Barlow / IBM Plex Mono (Google Fonts, graceful fallback).
+Operator colours are brightened-for-dark variants (`OPS` dict) with per-op pill text colours;
+freight without a known operator gets an olive "Freight" pill and its CIF origin/destination.
 
-**Approach bar** (the live distance strip) lives on **/lineside**, not /trains.
-
-**Focus / Detail view elements:**
-- Header bar: operator name + gradient background in operator brand colour
-- Large headcode (e.g. `1L35`) + track badge (`Main`/`Relief`) + call type badge (`STOP`/`PASS`/`PASS (est)`)
-- Route strip: origin → **TWYFORD** (amber) → destination; when TRUST has confirmed the actual
-  pass time, shows `✓ HH:MM` (or `✓ HH:MM (+N min)` if late ≥5 min)
-- Four stat cards: time at Twyford (label changes to "Passed At" once TRUST confirms actual
-  time), delay (minutes), track direction, vehicle count
-
-**Operator colour dict (`OPS` in trains.html):**
-
-| Code | Operator | Background |
-|------|----------|------------|
-| GW | GWR | `#007a4d` green |
-| XR | Elizabeth Line | `#7156a5` purple |
-| XC | CrossCountry | `#a61530` red |
-| HX | Heathrow Express | `#532885` indigo |
-| GB | GBRf | `#1e3050` navy / `#ffdd00` amber |
-| DW / DB | DB Cargo | `#db0a17` red |
-| FL | Freightliner | `#1a6b2a` green |
-| ZZ | Colas Rail | `#f05a24` orange |
-| ZN | Network Rail | `#d4ac0d` yellow |
-
-**Direction logic:** `direction=up` if destination is in the set of London termini (London
-Paddington, Abbey Wood, Shenfield, Heathrow termini). Otherwise `down`.
-
-**NEXT mode grace period (direction-aware):** Once TRUST fires for Twyford (`twy_actual` set),
-the grace period before removing a train from NEXT depends on direction relative to the house
-(~200 m east of Twyford station):
-- DOWN trains (Reading direction): house is east of Twyford so the train passed the house
-  *before* arriving at Twyford → grace = 0 (remove immediately once `twy_actual` is set)
-- UP trains (London direction): train departs Twyford heading east, passes the house ~30 s
-  later → grace = 30 s after `twy_actual`
-- Unconfirmed/estimated trains: grace = 120 s (schedule is approximate)
-
-**RECENT/NEXT mutual exclusion:** A train cannot appear in both RECENT and NEXT simultaneously.
-RECENT uses the same grace thresholds but inverted — a train only moves from NEXT to RECENT
-once it has cleared its grace window (`ms < now - grace`). This avoids a confirmed UP train
-(30 s grace) appearing in NEXT (not yet expired) and RECENT (just passed) at the same time.
-
-**Countdown features:**
-- Topbar shows countdown in seconds to the next API refresh (ticks every 1 s via `tickTopbar()`)
-- Estimated trains show a half-minute resolution countdown below the departure time:
-  "in about 2½ mins", "in about 30 secs", "passing now" (< 15 s)
-- Polling: trains.html polls proxy every 15 s; proxy only hits RTT every 30 s (TTL absorbs extra).
-  When TRUST fires at STANOX 87014 (stopping train), proxy invalidates RTT cache immediately
-  (`_rtt_trains_ts = 0`) so the confirmed pass time appears within 1–2 s of the TRUST event.
+**Grace / headline selection:** headline = first non-cancelled train still within its grace
+window: confirmed-passed Down 20 s, Up 45 s (house is ~200 m east of the station), unconfirmed
+100 s. Candidates limited to −2.5 min … +65 min. Polling: /api/trains 15 s, /api/nrcc 5 min,
+re-render every 1 s.
 
 **Delay handling:** RTT provides delay information via two mechanisms that must both be
 handled:
@@ -734,11 +740,10 @@ if not actual_time and late_min:
     ts += late_min * 60
 ```
 
-`trains.html` displays the expected time via `fmtExpected(t)`:
-- If `twy_actual` is set (TRUST/RTT confirmed): shows `✓ HH:MM`
-- If `td_eta_s` is set (live berth position available): shows `~HH:MM` from `house_pass_ts` — more accurate than RTT lateness
-- If no `twy_actual` but `late_min > 0`: shows `~HH:MM` (twy_sched + late_min)
-- Otherwise: shows the scheduled time
+Frontends derive the pass moment from `house_pass_ts` (falling back to `twy_sched + late_min`).
+**`twy_actual` carries RTT's realtime FORECAST until the pass actually happens** — lineside only
+shows the `✓ HH:MM` confirmation tick once that time is in the past; before that it renders
+`exp HH:MM (+N)`.
 
 **Note on trains missing from Twyford RTT:** When a train is significantly delayed, its
 scheduled slot at Twyford may have already passed when the query runs — RTT's location API
@@ -746,13 +751,11 @@ uses scheduled times for the query window. Such trains drop out of the Twyford f
 are only visible via the Reading or Paddington queries (as `confirmed=false`). The
 forecast-based `late_min` calculation is especially important in these cases.
 
-**Freight display:** Freight trains (`passenger=false`) show a green `FRET` badge (background
-`#2d3d1a`, text `#a0c060`) instead of the operator colour. The focus view shows the freight
-class (`Heavy Freight` / `Intermodal` / `Freight` / `Light Loco` / `Special` based on the
-first digit of the headcode) in place of the operator name, and shows direction labels
-(`← From west` / `→ To London` or `← From London` / `→ To west`) in place of origin/dest.
-If the freight operator code is known (e.g. `GB` for GBRf, `FL` for Freightliner), the
-operator's own branding is used instead of the generic `FRET` badge.
+**Freight display:** freight now has real CIF/CORPUS origins and destinations ("Merehead
+Quarry → Hanwell Bridge Loop"), shown exactly like passenger routes. When no route is known the
+headcode-class label is used instead (`4`=intermodal, `6`=heavy haul, `7`=freight, `8`=light
+engine, `5`=empty stock). Known freight operators (GB/DW/FL/ZZ/ZN) get their own pill colours;
+unknown ones an olive "Freight" pill.
 
 **Token management:** RTT uses a long-lived refresh token (stored as `RTT_REFRESH_TOKEN` in
 Pi's `.env`) exchanged for a short-lived access token (~20 min) at `/api/get_access_token`.
@@ -760,30 +763,36 @@ The proxy caches the access token and refreshes it 60 s before expiry without bl
 
 **Rate limits:** 30 req/min, 750/hr, 9000/day. Two queries per 30 s = 5,760/day (within limit).
 
-### lineside.html — Standalone Full-Screen Track Diagram SPA
+### lineside.html — Standalone "signalbox panel" detail SPA
 
-Served at `GET /lineside` (800×480). A live "where are the trains right now" view of the
-immediate Twyford vicinity. Rebuilt 2026-06-27 around real distances.
+Served at `GET /lineside`. Rebuilt 2026-07-06 as a close-up enthusiast view on a fixed
+**1280×720 canvas** scaled to fill the window (`scaleToWindow`). Same font/colour system as
+the trackboard (Barlow Condensed / Barlow / IBM Plex Mono; relief = teal, main = steel blue,
+house = amber).
 
-- **Coordinate system:** x-axis = signed miles from the house (`dist_mi` from `/api/td-live`,
-  SMART/CA-derived). `distToX(mi) = 400 − mi·51.1` — house centred at x=400, **WEST (+, toward
-  Reading) = LEFT, EAST (−, toward Maidenhead/London) = RIGHT**; visible range ≈ ±6.75 mi
-  (Reading ≈ x139, Maidenhead ≈ x742). Trains beyond that are off-scale and not drawn (they're
-  in the panel/approach bar). This replaced the old broken `berthToX` (which wrongly put
-  berth 574 = Maidenhead at "the house").
-- **Four track rows** (nearest-to-house first): Up Relief (y38), Down Relief (y78), Up Main
-  (y118), Down Main (y158). UP arrow → (travels left→right), DOWN ← (right→left).
-- **Trains:** positioned from the live berth `dist_mi` (solid, green-edged) or a schedule-ETA
-  estimate (dashed) when no live fix; row from the backend `track`; held/dwelling trains marked
-  ⏸. **Unmatched live TD trains** (those dropped from `/api/trains` because they have no route to
-  corridor-validate) ARE shown here at their true position/line — e.g. a Maidenhead terminator
-  correctly sits at the right edge, not at the house.
-- **Four-column next-train panel** (one per line) with operator badge, live `X.X mi · <place>`,
-  ETA. **Approach bar** at the bottom: Reading (+5.1 mi) → 2%, Maidenhead (−6.7) → 98%, house
-  → 43.5%. **Alert strip** cycles last-train / NRCC disruption text.
-- The 9 speculative signal-aspect dots were **removed** in the rebuild (their positions came from
-  the discredited calibration and the SF aspect decode was empirical). `/api/td-live` still
-  returns `signals`, so they can be reinstated once signal positions are confirmed.
+- **Schematic (top, 296 px):** x-axis = true signed miles from the house (`xOf(mi) = 565 −
+  99·mi`; **WEST/Reading = LEFT, EAST/Maidenhead = RIGHT**), covering Reading (+5.1) to
+  Maidenhead (−6.7) with mile ticks, landmark verticals (Sonning Cutting, Ruscombe, Waltham),
+  a translucent Twyford station box on the relief pair, and the amber dashed house line + ★
+  (which enlarges/glows when a live train is within 0.35 mi). Four track rows in physical
+  order (Up Relief y104 … Down Main y236). Train blips: operator-coloured rounded rects with
+  destination abbreviation + headcode, green-stroked when live (berth fix), dashed/faded when
+  schedule-estimated, ⏸ amber-tinted when held/at-station, direction arrowheads (up → right).
+  **TD-only blips** (live fixes with no /api/trains match) are drawn from `/api/td-live` with
+  direction from the berth step — the raw radar view, including out-of-corridor movements.
+  Per-row declutter prevents label overlap.
+- **Four detail columns (middle, 236 px)**, one per line: destination + big ETA (`NOW` pulse /
+  `HELD` / `AT STN`), operator pill + headcode + origin, then mono meta lines — `sched HH:MM`
+  with `✓ actual` (only once the time has passed) or `exp HH:MM (+N)`, stops/passes + platform
+  + vehicle count + freight class, and the live fix `● <place> · X.X mi · berth NNNN` (or
+  "no live fix"). Two follow-on trains with times + headcodes at the column foot.
+- **Passing log (bottom left):** client-side log of confirmed passes (time-to-the-second, line
+  ↑M/↓R etc., headcode, destination), newest first, two columns, last 30 min.
+- **Info pane (bottom right):** NRCC network messages + stats (trains next hour, freight count,
+  live TD fixes).
+- Polling: /api/trains 15 s, /api/td-live 5 s (feed dot blinks green on each tick),
+  /api/nrcc 5 min; re-render every 1 s.
+- Signal-aspect dots remain out (positions unconfirmed); `/api/td-live` still returns `signals`.
 
 ### Buses View
 
@@ -1367,10 +1376,13 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
   explicitly tagged as `ZoneInfo('Europe/London')` — handles BST/GMT boundary automatically
   via the Python stdlib. Timezone-aware strings (TRUST buffer uses `+00:00` UTC, BODS uses UTC)
   are passed through unchanged.
-- **TRUST `actual_timestamp`** is Unix milliseconds, always UTC. Stored in the buffer as
-  a UTC-aware ISO string with `+00:00` suffix.
-- **CIF times** (e.g. `1638` = 16:38) are local BST. Not used in the proxy currently (freight
-  CIF integration is pending), but must be treated as local time when parsed.
+- **TRUST `actual_timestamp` is NOT UTC** (corrected 2026-07-06): it is London LOCAL wall-clock
+  time encoded as epoch milliseconds *as if* it were UTC (the well-known NROD quirk). During BST,
+  treating it as UTC puts every movement an hour in the future. The proxy decodes the wall-clock
+  and re-tags it `Europe/London` before storing an ISO string in the buffer.
+- **TD `time` (CA/SF messages) IS true UTC milliseconds** — the two feeds differ; don't mix them up.
+- **CIF times** (e.g. `1638` = 16:38) are local London time; `_hhmm_to_ts` tags them
+  `Europe/London` when building freight schedule timestamps.
 - **`ZoneInfo` import**: `from zoneinfo import ZoneInfo` and `_TZ_LONDON = ZoneInfo('Europe/London')`
   at module top; requires Python 3.9+ (Pi has 3.13 — fine).
 

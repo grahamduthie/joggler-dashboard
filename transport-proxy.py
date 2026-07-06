@@ -1307,7 +1307,10 @@ def _rtt_build_trains():
         if _rtt_trains_data is not None and now - _rtt_trains_ts < RTT_TTL:
             return _rtt_trains_data
 
-    from_dt   = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)
+    # RTT interprets timeFrom as Europe/London LOCAL time.  Sending UTC here
+    # shifted the whole window back an hour in BST: stale trains lingered and
+    # the forward window shrank from ~90 to ~30 min (missing upcoming trains).
+    from_dt   = datetime.datetime.now(_TZ_LONDON) - datetime.timedelta(minutes=10)
     time_from = from_dt.strftime('%Y-%m-%dT%H:%M:%S')
 
     # Two RTT location queries (parallel):
@@ -1331,6 +1334,22 @@ def _rtt_build_trains():
 
     trains   = []
     seen     = set()
+
+    # Identity index (headcode → who/where) built from EVERYTHING RTT returned,
+    # BEFORE any filtering — used later to put names on trains that arrive via
+    # TRUST/CIF/TD rather than RTT.
+    ident = {}
+    for svc in (twy_svcs or []) + (rdg_svcs or []):
+        sm = svc.get('scheduleMetadata', {})
+        hc = sm.get('trainReportingIdentity', '')
+        if hc and hc not in ident:
+            ident[hc] = {
+                'origin':    (svc.get('origin') or [{}])[0].get('location', {}).get('description', ''),
+                'dest':      (svc.get('destination') or [{}])[0].get('location', {}).get('description', ''),
+                'op_code':   sm.get('operator', {}).get('code', ''),
+                'op_name':   sm.get('operator', {}).get('name', ''),
+                'passenger': sm.get('inPassengerService', True),
+            }
 
     for svc in (twy_svcs or []):
         uid = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
@@ -1358,22 +1377,39 @@ def _rtt_build_trains():
         seen.add(uid)
         trains.append(t)
 
-    # Merge NR STOMP buffer; prune entries older than 2 hours.
-    # Deduplicate against RTT trains by headcode+time (10-min window) so that
-    # GWR fast trains stopping at Maidenhead don't appear twice.
+    # Merge NR STOMP buffer; prune entries older than 30 min.
+    # Deduplicate against trains already present by headcode+time (10-min
+    # window) and enrich with origin/destination from the CIF schedule.
     cutoff = now - 1800   # 30 min — purge old TRUST entries (they accumulate passenger trains)
+    existing_hc = {}
+    for t in trains:
+        if t.get('headcode'):
+            existing_hc.setdefault(t['headcode'], []).append(
+                _iso_to_ts(t.get('twy_sched', '')))
     with _nr_lock:
         stale = [uid for uid, e in _nr_buffer.items()
                  if _iso_to_ts(e.get('twy_sched', '')) < cutoff]
         for uid in stale:
             del _nr_buffer[uid]
-        for uid, entry in _nr_buffer.items():
-            hc = entry.get('headcode', '')
-            if hc.startswith('2H'):
-                continue   # Henley branch — excluded everywhere
-            if not _nr_freight_hc(hc):
-                continue   # Passenger trains come from RTT, not TRUST buffer
-            trains.append(entry)
+        nr_entries = [dict(e) for e in _nr_buffer.values()]
+    for entry in nr_entries:
+        hc = entry.get('headcode', '')
+        if hc.startswith('2H'):
+            continue   # Henley branch — excluded everywhere
+        if not _nr_freight_hc(hc):
+            continue   # Passenger trains come from RTT, not TRUST buffer
+        ets = _iso_to_ts(entry.get('twy_sched', ''))
+        if any(abs(ets - x) < 600 for x in existing_hc.get(hc, [])):
+            continue   # same working already tracked via RTT
+        if not entry.get('origin'):
+            ci = _cif_ident(hc) or ident.get(hc)
+            if ci:
+                entry['origin']   = ci.get('origin') or ''
+                entry['dest']     = ci.get('dest') or ''
+                entry['orig_dep'] = ci.get('orig_dep') or ''
+                entry['dest_arr'] = ci.get('dest_arr') or ''
+        trains.append(entry)
+        existing_hc.setdefault(hc, []).append(ets)
 
     # Add CIF-scheduled freight trains not yet seen via RTT or TRUST.
     # These are trains approaching Twyford whose schedule is known but whose
@@ -1389,10 +1425,17 @@ def _rtt_build_trains():
             twy_ts = _hhmm_to_ts(best['twy_hhmm'])
             if twy_ts is None:
                 continue
-            if twy_ts < now - 600 or twy_ts > now + 10800:
-                continue      # more than 10 min past or 3 h future
+            if twy_ts < now - 600 or twy_ts > now + 5400:
+                continue      # more than 10 min past or 90 min future
+                              # (freight paths are speculative — many never run)
             twy_iso = datetime.datetime.fromtimestamp(
                 twy_ts, tz=_TZ_LONDON).isoformat()
+
+            def _cif_iso(hhmm):
+                ts = _hhmm_to_ts(hhmm) if hhmm else None
+                return (datetime.datetime.fromtimestamp(ts, tz=_TZ_LONDON)
+                        .isoformat()) if ts is not None else ''
+
             trains.append({
                 'uid':         'cif:' + hc,
                 'headcode':    hc,
@@ -1408,10 +1451,10 @@ def _rtt_build_trains():
                 'house_pass_ts': int(twy_ts),
                 'op_code':     None,
                 'op_name':     None,
-                'dest':        None,
-                'origin':      None,
-                'orig_dep':    None,
-                'dest_arr':    None,
+                'dest':        _tiploc_name(best.get('dest_tip')) or None,
+                'origin':      _tiploc_name(best.get('orig_tip')) or None,
+                'orig_dep':    _cif_iso(best.get('orig_hhmm')) or None,
+                'dest_arr':    _cif_iso(best.get('dest_hhmm')) or None,
                 'late_min':    None,
                 'cancelled':   False,
                 'status':      None,
@@ -1450,7 +1493,19 @@ def _rtt_build_trains():
                 ts += late_sec
         t['house_pass_ts'] = int(ts) if ts else 0
 
-    _td_enrich_trains(trains, now)
+    _td_enrich_trains(trains, now, ident)
+
+    # Drop stale entries: anything that passed (or should have passed) long ago.
+    # Confirmed trains stay 30 min (feeds the "last train" strip); unconfirmed
+    # estimates 12 min — a scheduled train that never showed shouldn't linger.
+    def _fresh(t):
+        ts = t.get('house_pass_ts') or _iso_to_ts(t.get('twy_sched', ''))
+        if not ts:
+            return False
+        keep = 1800 if (t.get('twy_actual') or t.get('confirmed')) else 720
+        return ts > now - keep
+
+    trains = [t for t in trains if _fresh(t)]
     trains.sort(key=lambda t: t.get('house_pass_ts') or _iso_to_ts(t.get('twy_sched', '')))
     result = {'trains': trains, 'ts': int(now)}
 
@@ -1762,8 +1817,10 @@ def _chain_refresh_loop():
             print(f'chain refresh: {e}')
 
 
-def _td_enrich_trains(trains, now):
-    """Enrich train list with TD house-crossing events and live berth positions."""
+def _td_enrich_trains(trains, now, ident=None):
+    """Enrich train list with TD house-crossing events and live berth positions,
+    then synthesise entries for live corridor trains no schedule source knew."""
+    ident = ident or {}
     cutoff_pos   = now - 300
     cutoff_house = now - 3600
     td_pos = {}
@@ -1809,6 +1866,12 @@ def _td_enrich_trains(trains, now):
             binfo = _berth_info(pos['area'], pos['to'])
             if binfo and binfo.get('line'):
                 t['track'] = binfo['line']
+            # Live position summary so frontends don't have to join /api/td-live
+            if binfo:
+                if binfo.get('dist_mi') is not None:
+                    t['td_dist_mi'] = round(binfo['dist_mi'], 2)
+                if binfo.get('stanme'):
+                    t['td_place'] = binfo['stanme']
             if (pos['area'] == 'D6'
                     and pos['to'] in ('1612', '1608', '1604')
                     and t.get('direction') == 'up'
@@ -1837,14 +1900,85 @@ def _td_enrich_trains(trains, now):
                     # whether the train is approaching (+) or has passed (−).
                     t['house_pass_ts'] = int(now + eta_s)
                     t['td_eta_s'] = int(eta_s)
-    # NOTE: we deliberately do NOT synthesise "stub" trains for TD berths that
-    # have no RTT/CIF/TRUST identity.  Without an origin/destination they can't
-    # be corridor-validated (they'd include e.g. Elizabeth Line trains that
-    # terminate at Maidenhead, east of Twyford, and never reach the house), and
-    # their position is derived from a single-formula berth calibration that is
-    # wrong across independently-numbered Main/Relief lines.  The /lineside live
-    # diagram reads raw positions from /api/td-live directly, so it is unaffected;
-    # identified trains above still get live-berth ETA refinement.
+    # Synthesise entries for trains PHYSICALLY inside the Reading↔Maidenhead
+    # corridor that no schedule source matched.  A live berth fix strictly
+    # between Maidenhead and the house (Down) or between Reading and the house
+    # (Up), moving toward the house, WILL pass it — there is no turnback in
+    # between — so physical presence beats any name-token corridor heuristic.
+    # (Trains sitting AT Maidenhead/Reading stations are excluded: they may
+    # terminate/reverse there, e.g. Elizabeth Line Maidenhead terminators.)
+    # Identity comes from the RTT pre-filter index or today's CIF freight.
+    for hc, pos in td_pos.items():
+        if hc in train_hcs:
+            continue
+        if hc.startswith('2H') or hc[:1] == '0':
+            continue          # Henley branch shuttle / light-loco-bus moves
+        age = now - pos['ts']
+        if age > 180:
+            continue          # stale fix — may have stopped or left the area
+        info = _berth_info(pos['area'], pos['to'])
+        if not info or info.get('dist_mi') is None:
+            continue
+        d = info['dist_mi']
+        direction = info.get('dir') or ''
+        if not direction and pos.get('from'):
+            finfo = _berth_info(pos['area'], pos['from'])
+            fd = (finfo['dist_mi']
+                  if finfo and finfo.get('dist_mi') is not None else None)
+            if fd is not None and fd != d:
+                direction = 'down' if d > fd else 'up'
+        if not direction:
+            continue
+        if not ((direction == 'down' and -6.3 < d < -0.05)
+                or (direction == 'up' and 0.05 < d < 4.95)):
+            continue          # outside the no-turnback corridor
+        who = ident.get(hc) or {}
+        ci  = _cif_ident(hc)
+        if not who.get('origin') and ci:
+            who = dict(who, origin=ci['origin'], dest=ci['dest'],
+                       orig_dep=ci['orig_dep'], dest_arr=ci['dest_arr'])
+        passenger = who['passenger'] if 'passenger' in who else (hc[:1] in '129')
+        line = info.get('line') or ''
+        is_main = (line == 'Main') if line else (hc[:1] == '1')
+        res = _berth_eta_to_house_s(pos['area'], pos['to'], direction,
+                                    passenger, is_main, int(age))
+        if res is None:
+            continue
+        eta_s, held = res
+        pass_ts = int(now + eta_s)
+        trains.append({
+            'uid':        'td:' + hc,
+            'headcode':   hc,
+            'op_code':    who.get('op_code') or '',
+            'op_name':    who.get('op_name') or '',
+            'passenger':  passenger,
+            'call_type':  'PASS',
+            'direction':  direction,
+            'track':      line or ('Main' if is_main else 'Relief'),
+            'origin':     who.get('origin') or '',
+            'dest':       who.get('dest') or '',
+            'orig_dep':   who.get('orig_dep') or '',
+            'dest_arr':   who.get('dest_arr') or '',
+            'twy_sched':  datetime.datetime.fromtimestamp(
+                              pass_ts, tz=_TZ_LONDON).isoformat(),
+            'twy_actual': '',
+            'twy_arr_sched': '', 'twy_dep_sched': '',
+            'twy_arr_actual': '', 'twy_dep_actual': '',
+            'house_pass_ts': pass_ts,
+            'td_eta_s':   int(eta_s),
+            'td_berth':   pos['to'],
+            'td_berth_age': int(age),
+            'td_dist_mi': round(d, 2),
+            'td_place':   info.get('stanme') or '',
+            'held':       bool(held),
+            'late_min':   None,
+            'cancelled':  False,
+            'status':     None,
+            'platform':   None,
+            'num_veh':    None,
+            'confirmed':  True,
+            'source':     'td',
+        })
 
 
 # ── Network Rail STOMP (freight trains) ──────────────────────────────────────
@@ -1926,18 +2060,51 @@ _sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds}
 
 # D6 berth transitions that indicate a train passing or approaching the house.
 # House is ~200 m east of Twyford station, at the Up/Down Relief crossover.
-# DOWN trains: berths increase (toward Bristol). UP trains: berths decrease (toward London).
-_TD_HOUSE_TRANSITIONS = {
-    ('0533', '0545'): ('Down Main',   'approaching'),
-    ('0569', '0573'): ('Down Main',   'at_house'),
-    ('0547', '0551'): ('Down Relief', 'approaching'),
-    ('0571', '0577'): ('Down Relief', 'at_house'),
-    ('1606', '1602'): ('Up Main',     'approaching'),
-    ('0566', '0554'): ('Up Main',     'at_house'),
-    ('0594', '0574'): ('Up Relief',   'at_house'),
-}
+# House-crossing detection is DISTANCE-based: a CA berth step whose from/to
+# distances (SMART + chain-interpolated) straddle 0 means the train physically
+# crossed the house on that step.  (The old static berth-pair table used D6
+# berths 0569/0573/0577 etc., which the SMART recalibration showed are at
+# MAIDENHEAD, ~6.7 mi east — it fired "at house" ~7 min early for Down trains.)
 _td_house_lock   = threading.Lock()
 _td_house_events = {}   # headcode → {ts, track, event} — most recent event only
+
+
+def _detect_house_event(area, frm, to):
+    """Classify a CA berth step relative to the house using the SMART/chain
+    distance model (dist_mi: + = west of house, − = east).  Returns
+    ('at_house'|'approaching', 'Down Main'/'Up Relief'/…) or None.
+
+    at_house fires only on a genuine zero-crossing (both berth distances known
+    and straddling 0).  This gives the right semantics for stoppers too: an Up
+    train dwelling at Twyford (station is west of the house) only fires when it
+    departs east; a Down train fires on arrival — both are the moments the
+    train actually passes the house."""
+    info_to = _berth_info(area, to)
+    if not info_to or info_to.get('dist_mi') is None:
+        return None
+    d_to = info_to['dist_mi']
+    info_frm = _berth_info(area, frm) if frm else None
+    d_frm = (info_frm['dist_mi']
+             if info_frm and info_frm.get('dist_mi') is not None else None)
+    line = info_to.get('line') or (info_frm.get('line') if info_frm else '') or ''
+    # Lines through Twyford are directional, so SMART's per-berth dir is the
+    # train's direction; fall back to the step's sign (dist increasing = down).
+    direction = info_to.get('dir') or (info_frm.get('dir') if info_frm else '')
+    if not direction and d_frm is not None and d_frm != d_to:
+        direction = 'down' if d_to > d_frm else 'up'
+    if not direction:
+        return None
+    track = ('Down ' if direction == 'down' else 'Up ') + (line or 'line')
+    if (d_frm is not None and d_frm != d_to
+            and abs(d_to - d_frm) < 3.0 and abs(d_to) < 1.6 and abs(d_frm) < 1.6
+            and min(d_frm, d_to) <= 0.0 <= max(d_frm, d_to)):
+        return ('at_house', track)
+    # approaching: inside a mile, getting closer, and on the approach side
+    if (d_frm is not None and abs(d_to) < 1.0 and abs(d_to) < abs(d_frm)
+            and ((direction == 'down' and d_to < 0)
+                 or (direction == 'up' and d_to > 0))):
+        return ('approaching', track)
+    return None
 
 
 def _nr_freight_hc(hc):
@@ -2005,6 +2172,113 @@ def _hhmm_to_ts(hhmm):
         return naive.replace(tzinfo=_TZ_LONDON).timestamp()
     except Exception:
         return None
+
+
+# ── CORPUS (TIPLOC → location name) ─────────────────────────────────────────
+# NROD reference file; same 302→S3 auth dance as SMART/CIF.  Used to give
+# freight trains readable origins/destinations from their CIF TIPLOCs.
+_CORPUS_URL = ('https://publicdatafeeds.networkrail.co.uk/ntrod/'
+               'SupportingFileAuthenticate?type=CORPUS')
+_corpus_lock = threading.Lock()
+_corpus_map  = {}   # TIPLOC → 'LOCATION NAME' (NLCDESC, all caps)
+
+
+def _load_corpus():
+    global _corpus_map
+    if not NR_USERNAME or not NR_PASSWORD:
+        return
+    try:
+        creds = base64.b64encode(f'{NR_USERNAME}:{NR_PASSWORD}'.encode()).decode()
+        req = urllib.request.Request(_CORPUS_URL, headers={
+            'Authorization': 'Basic ' + creds, 'User-Agent': 'twyford-dashboard/1.0'})
+
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                return None
+
+        opener = urllib.request.build_opener(_NoRedirect())
+        raw = None
+        try:
+            with opener.open(req, timeout=30) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308):
+                with urllib.request.urlopen(e.headers.get('Location'), timeout=90) as r2:
+                    raw = r2.read()
+            else:
+                raise
+        try:
+            raw = gzip.decompress(raw)
+        except Exception:
+            pass
+        data = json.loads(raw)
+        table = {}
+        for r in data.get('TIPLOCDATA', []):
+            tip = (r.get('TIPLOC') or '').strip()
+            name = (r.get('NLCDESC') or '').strip()
+            if tip and name:
+                table[tip] = name
+        with _corpus_lock:
+            _corpus_map = table
+        print(f'CORPUS: loaded {len(table)} TIPLOC names')
+    except Exception as e:
+        print(f'CORPUS load failed: {e}')
+
+
+# Words to keep upper-case / fix when prettifying CORPUS names
+_TIPLOC_FIXES = {
+    'T.c.': 'T.C.', 'Tc': 'T.C.', 'C.s.': 'C.S.', 'T&rsmd': 'T&RSMD',
+    'Lip': 'LIP', 'Fd': 'FD', 'Arc': 'ARC', 'Fhh': 'FHH', 'Gbrf': 'GBRf',
+    'Db': 'DB', 'Ews': 'EWS', 'Emr': 'EMR', 'Drs': 'DRS', 'Lul': 'LUL',
+    'Hs': 'HS', 'Ce': 'CE', 'Sdgs': 'Sidings', 'Sdg': 'Siding',
+    'Rects': 'Receptions', 'Recp': 'Reception', 'Jn': 'Jn', 'Jcn': 'Jn',
+}
+
+
+def _tiploc_name(tip):
+    """Readable location name for a TIPLOC: CORPUS description, title-cased,
+    with freight-operator suffix noise stripped ('(Fhh)', 'F Liner H Hau'…)."""
+    if not tip:
+        return ''
+    with _corpus_lock:
+        name = _corpus_map.get(tip, '')
+    if not name:
+        return tip.title()
+    words = []
+    for w in name.title().split():
+        words.append(_TIPLOC_FIXES.get(w, w))
+    name = ' '.join(words)
+    name = re.sub(r'\s*\((?:fhh|flhh|fl|fh|gbrf|gbf|ews|dbs|dbc|arc|colas)\)$',
+                  '', name, flags=re.I)
+    name = re.sub(r'\s+(?:f liner h haul?|flhh|fhh|gbrf|gbf|fh|ews|dbs|dbc)$',
+                  '', name, flags=re.I)
+    name = name.replace('(Ml)', '').replace('  ', ' ').strip()
+    if name.endswith(' London'):          # CORPUS: 'Paddington London'
+        name = 'London ' + name[:-7]
+    return name
+
+
+def _cif_ident(hc):
+    """Origin/destination identity for a freight headcode from today's CIF
+    schedule: {'origin','dest','orig_dep','dest_arr'} (ISO times) or None."""
+    with _cif_lock:
+        entries = _cif_index.get(hc)
+    best = _cif_best(entries) if entries else None
+    if not best:
+        return None
+
+    def _iso(hhmm):
+        ts = _hhmm_to_ts(hhmm) if hhmm else None
+        if ts is None:
+            return ''
+        return datetime.datetime.fromtimestamp(ts, tz=_TZ_LONDON).isoformat()
+
+    return {
+        'origin':   _tiploc_name(best.get('orig_tip')),
+        'dest':     _tiploc_name(best.get('dest_tip')),
+        'orig_dep': _iso(best.get('orig_hhmm')),
+        'dest_arr': _iso(best.get('dest_hhmm')),
+    }
 
 
 def _load_cif():
@@ -2106,9 +2380,15 @@ def _load_cif():
             continue
 
         direction = _cif_direction(locs, twy_idx)
+        o_loc = locs[0] if locs else {}
+        d_loc = locs[-1] if locs else {}
         new_index.setdefault(hc, []).append({
             'uid': uid, 'hc': hc, 'twy_hhmm': twy_t,
             'direction': direction, 'stp': stp,
+            'orig_tip': (o_loc.get('tiploc_code') or '').strip(),
+            'dest_tip': (d_loc.get('tiploc_code') or '').strip(),
+            'orig_hhmm': ((o_loc.get('departure') or o_loc.get('pass') or '')[:4]),
+            'dest_hhmm': ((d_loc.get('arrival') or d_loc.get('pass') or '')[:4]),
         })
 
     with _cif_lock:
@@ -2120,8 +2400,9 @@ def _load_cif():
 
 
 def _cif_refresh_loop():
-    """Load SMART + CIF at startup, then refresh daily at 02:30."""
+    """Load SMART + CORPUS + CIF at startup, then refresh daily at 02:30."""
     _load_smart()
+    _load_corpus()
     _load_cif()
     while True:
         now = datetime.datetime.now()
@@ -2129,6 +2410,7 @@ def _cif_refresh_loop():
                + datetime.timedelta(days=1))
         time.sleep((nxt - now).total_seconds())
         _load_smart()
+        _load_corpus()
         _load_cif()
 
 
@@ -2145,7 +2427,7 @@ class _NRListener:
 
     def _handle_td(self, msgs):
         """Process Train Describer (TD) messages: CA berth steps and SF signal flags."""
-        global _td_buffer
+        global _td_buffer, _rtt_trains_ts
         new_ca = []
         sf_updates = {}   # (area, addr) → (data, ts) — deduplicated to last value
         for item in msgs:
@@ -2187,12 +2469,10 @@ class _NRListener:
             with _sf_lock:
                 _sf_state.update(sf_updates)
         for evt in new_ca:
-            if evt['area'] != 'D6':
+            res = _detect_house_event(evt['area'], evt['from'], evt['to'])
+            if not res:
                 continue
-            key = (evt['from'], evt['to'])
-            if key not in _TD_HOUSE_TRANSITIONS:
-                continue
-            track, event_type = _TD_HOUSE_TRANSITIONS[key]
+            event_type, track = res
             hc = evt['descr']
             with _td_house_lock:
                 _td_house_events[hc] = {'ts': evt['ts'], 'track': track, 'event': event_type}
@@ -2248,8 +2528,12 @@ class _NRListener:
                 except (TypeError, ValueError):
                     continue
                 twy_ms = ts_ms + offset_min * 60000
-                twy_dt = datetime.datetime.fromtimestamp(
-                    twy_ms / 1000.0, tz=datetime.timezone.utc)
+                # TRUST actual_timestamp is London LOCAL wall-clock time encoded
+                # as epoch-ms-as-if-UTC (the well-known NROD quirk).  During BST
+                # treating it as UTC put every freight pass an hour in the future.
+                twy_naive = datetime.datetime.fromtimestamp(
+                    twy_ms / 1000.0, tz=datetime.timezone.utc).replace(tzinfo=None)
+                twy_dt  = twy_naive.replace(tzinfo=_TZ_LONDON)
                 twy_iso = twy_dt.isoformat()
                 try:
                     variation = int(body.get('timetable_variation') or 0)

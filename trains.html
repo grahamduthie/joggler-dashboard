@@ -4,898 +4,575 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trains — Twyford</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+/* ═══════════════════════════════════════════════════════════════════
+   TWYFORD TRACKBOARD — kitchen monitor, read-across-the-room
+   Four rows = the four running lines, in physical order from the house:
+   Up Relief (nearest) · Down Relief · Up Main · Down Main (farthest).
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+  --bg:        #07090d;
+  --bg-row:    #0a0d13;
+  --bg-row-2:  #090c11;
+  --rule:      #161c26;
+  --text:      #edf1f6;
+  --text-dim:  #8b99ab;
+  --text-faint:#3d4a5c;
+  --amber:     #ffb000;
+  --ontime:    #46c97e;
+  --late:      #ff9f43;
+  --cancel:    #ff5f56;
+  --live:      #35d07f;
+  --relief:    #3fb7c4;
+  --main-ln:   #6f9fd8;
+  --cond: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --body: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   height: 100%; width: 100%;
-  background: #0d1b2a;
-  color: #e8eaf0;
-  font-family: 'DejaVu Sans', 'Segoe UI', Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
   overflow: hidden;
-  touch-action: manipulation;
 }
-@media (hover: hover) and (pointer: fine) { * { cursor: none; } }
+@media (hover: hover) and (pointer: fine) { body.hidecursor * { cursor: none; } }
 
-/* ── Topbar ─────────────────────────────────────────────── */
-#topbar {
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #111e2e;
-  border-bottom: 2px solid #1e3a5a;
-  padding: 0 16px;
-  flex-shrink: 0;
-  gap: 8px;
+body {
+  display: flex; flex-direction: column;
+  /* faint vertical grain so black isn't dead flat */
+  background-image:
+    linear-gradient(180deg, rgba(255,176,0,0.025) 0%, rgba(0,0,0,0) 8%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.006) 0 1px, transparent 1px 7px);
 }
-#back-btn {
-  font-size: clamp(13px, 1.8vw, 22px);
-  font-weight: bold;
-  color: #7fb3d3;
-  cursor: pointer;
-  white-space: nowrap;
-}
-#back-btn:hover, #back-btn:active { color: #ffffff; }
-#topbar-title {
-  flex: 1;
-  text-align: center;
-  font-size: clamp(13px, 1.8vw, 22px);
-  font-weight: 600;
-  color: #a0c8e8;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-}
-#topbar-right { display: flex; align-items: center; gap: 10px; }
-#list-btn {
-  padding: 5px 14px;
-  border-radius: 20px;
-  font-size: clamp(11px, 1.4vw, 18px);
-  font-weight: bold;
-  letter-spacing: 1px;
-  color: #5a8fad;
-  border: 1.5px solid #1e3a5a;
-  cursor: pointer;
-  text-transform: uppercase;
-}
-#list-btn:hover { background: rgba(30,58,90,0.5); color: #a0c8e8; }
-#list-btn.active { background: #1e3a5a; color: #ffffff; border-color: #4a7aaa; }
-#updated { font-size: clamp(10px, 1.2vw, 16px); color: #4a7a9a; white-space: nowrap; }
 
-/* ── Page ────────────────────────────────────────────────── */
-#page { position: relative; height: calc(100vh - 56px); overflow: hidden; }
+/* ── Header ─────────────────────────────────────────────── */
+header {
+  flex: 0 0 auto;
+  display: flex; align-items: baseline; gap: 2.2vw;
+  padding: 1.1vh 2vw 0.9vh;
+  border-bottom: 1px solid var(--rule);
+}
+#back {
+  font-family: var(--cond); font-weight: 600;
+  font-size: clamp(14px, 2.4vh, 26px);
+  color: var(--text-faint); text-decoration: none;
+  letter-spacing: 0.04em; align-self: center;
+}
+#back:active, #back:hover { color: var(--text-dim); }
+#title {
+  font-family: var(--cond); font-weight: 700;
+  font-size: clamp(20px, 4.4vh, 46px);
+  letter-spacing: 0.10em;
+  color: var(--amber);
+  line-height: 1;
+}
+#title small {
+  font-weight: 500; color: var(--text-dim); letter-spacing: 0.14em;
+  font-size: 0.52em; margin-left: 1vw;
+}
+#spacer { flex: 1; }
+#stale {
+  font-family: var(--cond); font-weight: 600; letter-spacing: .1em;
+  font-size: clamp(11px, 2vh, 20px); color: var(--cancel);
+  visibility: hidden;
+}
+#clock {
+  font-family: var(--mono); font-weight: 500;
+  font-size: clamp(20px, 4.2vh, 44px);
+  font-variant-numeric: tabular-nums;
+  color: var(--text); line-height: 1;
+}
+#clock .sec { color: var(--text-faint); font-size: 0.62em; }
 
-/* ── 4-Track Grid ───────────────────────────────────────── */
-#grid-view {
-  position: absolute; inset: 0;
+/* ── Board ──────────────────────────────────────────────── */
+main {
+  flex: 1 1 auto; min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 2px;
-  background: #0a1420;
+  grid-template-rows: repeat(4, 1fr);
 }
-.track-card {
-  background: #0d1b2a;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  cursor: pointer;
-}
-.track-card:hover  { filter: brightness(1.06); }
-.track-card:active { filter: brightness(1.12); }
-
-.tc-hdr {
-  flex-shrink: 0;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-}
-.tc-hdr-main   { background: #0c1e36; color: #3a7aaf; border-bottom: 1px solid #1a3560; }
-.tc-hdr-relief { background: #091b22; color: #2a8090; border-bottom: 1px solid #0e2830; }
-
-.tc-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 10px 14px;
-  min-height: 0;
-}
-
-/* headline row: operator badge · headcode · ETA */
-.tc-top { display: flex; align-items: center; gap: clamp(8px,1.4vw,12px); flex-shrink: 0; }
-.tc-op-badge {
-  flex-shrink: 0;
-  width: clamp(34px,5vw,46px); height: clamp(34px,5vw,46px);
-  border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: clamp(9px,1.2vw,13px); font-weight: 900; line-height: 1;
-}
-.tc-hc {
-  flex: 1; min-width: 0;
-  font-size: clamp(15px,2.6vw,26px); font-weight: 700; letter-spacing: 0.5px;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-  color: #cfe0f2;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.tc-eta-wrap { flex-shrink: 0; display: flex; align-items: baseline; gap: 4px; }
-.tc-eta-val {
-  font-size: clamp(30px,7.5vh,60px);
-  font-weight: 200; color: #ffffff; line-height: 0.9; letter-spacing: -1px;
-}
-.tc-eta-unit { font-size: clamp(12px,2.6vh,22px); color: #7fb3d3; font-weight: 300; }
-.tc-eta-val.eta-now  { color: #7fd3a8; font-weight: 400; }
-.tc-eta-val.eta-past { color: #3a6a8a; font-size: clamp(20px,5vh,40px); }
-.tc-eta-val.eta-held { color: #c07030; }
-.tc-eta-val.eta-stn  { color: #d08000; }
-
-/* from → to route */
-.tc-route {
-  flex-shrink: 0;
-  display: flex; align-items: baseline; gap: 6px;
-  font-size: clamp(13px,2.6vh,24px); line-height: 1.15;
-  overflow: hidden; white-space: nowrap;
-}
-.tc-from  { color: #8fb0cc; flex-shrink: 1; min-width: 0;
-            overflow: hidden; text-overflow: ellipsis; }
-.tc-arrow { color: #46708e; flex-shrink: 0; }
-.tc-to    { color: #ffffff; font-weight: 700; flex-shrink: 1; min-width: 0;
-            overflow: hidden; text-overflow: ellipsis; }
-
-/* position / status line */
-.tc-pos {
-  flex-shrink: 0;
-  display: flex; align-items: center; gap: 8px;
-  font-size: clamp(10px,1.5vh,15px); color: #6d92ad; min-height: 1.2em;
-}
-.tc-pos .live  { color: #2fae5e; }
-.tc-pos .late  { color: #f0a060; }
-.tc-pos .ontime{ color: #4f9f74; }
-.tc-pos .cancel{ color: #e05050; }
-.tc-pos .held  { color: #c07030; }
-
-/* follow-on trains */
-.tc-next { flex: 1; min-height: 0; display: flex; flex-direction: column;
-           justify-content: flex-start; gap: 2px; overflow: hidden;
-           margin-top: clamp(2px,0.8vh,6px);
-           border-top: 1px solid rgba(255,255,255,0.06); padding-top: clamp(2px,0.8vh,6px); }
-.tc-next-row {
-  display: flex; align-items: baseline; gap: 7px;
-  font-size: clamp(10px,1.7vh,16px); color: #8aa6bd; white-space: nowrap;
+.track {
+  position: relative;
+  display: grid;
+  grid-template-columns: clamp(84px, 11vw, 170px) 1fr auto;
+  align-items: stretch;
+  gap: 0 1.6vw;
+  padding: 0 2vw 0 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-row);
   overflow: hidden;
 }
-.tc-next-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; align-self: center; }
-.tc-next-dest { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #b4c6d6; }
-.tc-next-eta  { flex-shrink: 0; color: #6d92ad; font-variant-numeric: tabular-nums; }
+.track:nth-child(even) { background: var(--bg-row-2); }
+.track:last-child { border-bottom: none; }
 
-.tc-empty {
-  flex: 1;
-  display: flex; align-items: center; justify-content: center;
-  color: #1e3a5a;
-  font-size: clamp(11px, 2.5vh, 18px);
-  font-style: italic;
+/* operator colour spine */
+.track::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: clamp(4px, 0.5vw, 8px);
+  background: var(--spine, var(--text-faint));
+  opacity: 0.95;
+  transition: background .6s;
 }
-/* confidence badge (used in detail view) */
-.tc-conf { font-size: 0.9em; }
-.tc-conf-live  { color: #2fae5e; }
-.tc-conf-trust { color: #5a9a70; }
-.tc-conf-rtt   { color: #4a7aaa; }
-.tc-conf-est   { color: #8a7020; }
-.tc-conf-held  { color: #c07030; }
 
-/* ── List view ───────────────────────────────────────────── */
-#list-view {
+/* passing sweep */
+@keyframes sweep {
+  0%   { transform: translateX(-100%); opacity: 0.5; }
+  100% { transform: translateX(120%);  opacity: 0; }
+}
+.track.passing::after {
+  content: '';
   position: absolute; inset: 0;
-  display: none;
-  overflow-y: auto; overflow-x: hidden;
+  background: linear-gradient(100deg, transparent 20%, rgba(255,176,0,0.14) 48%, transparent 76%);
+  animation: sweep 2.4s linear infinite;
+  pointer-events: none;
 }
-#train-table { width: 100%; border-collapse: collapse; }
-#train-table thead th {
-  position: sticky; top: 0;
-  background: #111e2e;
-  border-bottom: 2px solid #1e3a5a;
-  font-size: clamp(9px, 1.1vw, 14px);
-  color: #4a7a9a;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  padding: 8px 10px;
-  text-align: left;
-  font-weight: normal;
-}
-.tr-row { border-bottom: 1px solid #131f2f; cursor: pointer; }
-.tr-row:hover  { background: rgba(30,58,90,0.35); }
-.tr-row:active { background: rgba(30,58,90,0.65); }
-.tr-row.past   { opacity: 0.4; }
-.tr-row td {
-  padding: clamp(6px, 1.2vh, 13px) 10px;
-  font-size: clamp(11px, 1.5vw, 20px);
-  vertical-align: middle;
-}
-.tr-time  { font-family: 'DejaVu Sans Mono', 'Courier New', monospace; white-space: nowrap; }
-.tr-late  { color: #f0a060; }
-.tr-ontime{ color: #7fd3a8; }
-.tr-est   { color: #a0c0e0; font-style: italic; }
-.tr-hc    { font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-            font-size: clamp(9px, 1.2vw, 16px); color: #7fb3d3; }
-.tr-op    { display: inline-block; padding: 2px 8px; border-radius: 8px;
-            font-size: clamp(9px, 1.1vw, 14px); font-weight: bold; white-space: nowrap; }
-.tr-route { color: #c0ccd8; font-size: clamp(10px, 1.4vw, 18px); }
-.tr-track { font-size: clamp(9px, 1.2vw, 14px); color: #5a8fad; white-space: nowrap; }
-.tr-status{ font-size: clamp(9px, 1.1vw, 13px); white-space: nowrap; }
-.tr-cancel{ color: #e05050; }
 
-/* ── Detail view ─────────────────────────────────────────── */
-#detail-view {
-  position: absolute; inset: 0;
-  display: none;
-  flex-direction: column;
-  overflow: hidden;
-}
-.fv-header {
-  flex-shrink: 0;
-  display: flex; align-items: center;
-  gap: clamp(10px, 2vw, 26px);
-  padding: clamp(10px, 2vh, 18px) clamp(14px, 2.5vw, 28px);
-  border-bottom: 2px solid rgba(255,255,255,0.1);
-}
-.fv-op-badge {
-  flex-shrink: 0;
-  width: clamp(50px, 8vw, 100px); height: clamp(50px, 8vw, 100px);
-  border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: clamp(16px, 3vw, 44px); font-weight: 900; line-height: 1;
-}
-.fv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.fv-headcode {
-  font-size: clamp(20px, 4vw, 50px);
-  font-weight: bold;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-  line-height: 1.1;
-}
-.fv-op-name { font-size: clamp(14px, 2.5vw, 36px); opacity: 0.85; }
-.fv-right {
-  flex-shrink: 0; text-align: right;
-  display: flex; flex-direction: column; align-items: flex-end;
-  gap: clamp(3px, 0.6vh, 8px);
-}
-.fv-track-badge {
-  font-size: clamp(11px, 1.8vw, 24px); font-weight: bold;
-  padding: 4px 12px; border-radius: 18px;
-  border: 1.5px solid rgba(255,255,255,0.3); white-space: nowrap;
-}
-.fv-call-badge {
-  font-size: clamp(10px, 1.4vw, 18px); letter-spacing: 1.5px;
-  text-transform: uppercase; opacity: 0.7; white-space: nowrap;
-}
-.badge-stop { color: #7fd3a8; }
-.badge-pass { color: #f0b85a; }
-.badge-est  { color: #a0c0e0; }
-
-.fv-route {
-  flex: 1; min-height: 0;
-  padding: clamp(8px, 2vh, 20px) clamp(14px, 3vw, 36px);
+/* track identity column */
+.t-id {
   display: flex; flex-direction: column; justify-content: center;
-  border-bottom: 2px solid #1e3a5a;
+  padding-left: clamp(12px, 1.6vw, 26px);
+  border-right: 1px solid var(--rule);
+  gap: 0.4vh;
 }
-.fv-route-station {
-  font-size: clamp(13px, 3.2vw, 46px);
-  font-weight: bold; color: #e8eaf0; line-height: 1.2;
+.t-id .arrow {
+  font-family: var(--cond); font-weight: 700; line-height: 0.8;
+  font-size: clamp(18px, 3.6vh, 40px);
+  color: var(--ln-color);
 }
-.fv-route-station.twyford {
-  color: #ffd080;
-  font-size: clamp(15px, 4.2vw, 60px);
+.t-id .name {
+  font-family: var(--cond); font-weight: 600;
+  font-size: clamp(15px, 2.9vh, 32px);
+  line-height: 0.95;
+  letter-spacing: 0.09em;
+  color: var(--ln-color);
 }
-.fv-route-time  { font-size: clamp(11px, 1.8vw, 26px); color: #7fb3d3; margin-top: 2px; }
-.fv-route-arrow { font-size: clamp(10px, 1.4vw, 18px); color: #3a6a8a; padding: 3px 0; }
-.fv-route-late  { color: #f0a060; }
-.fv-route-ontime{ color: #7fd3a8; }
-.fv-route-est   { color: #a0c0e0; font-style: italic; }
+.t-id .dirword {
+  font-family: var(--body); font-weight: 400;
+  font-size: clamp(9px, 1.5vh, 16px);
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+.track[data-ln="relief"] { --ln-color: var(--relief); }
+.track[data-ln="main"]   { --ln-color: var(--main-ln); }
 
-.fv-stats { flex-shrink: 0; display: flex; }
-.fv-stat-card {
-  flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  border-right: 1px solid #1e3a5a;
-  padding: clamp(6px, 1.2vh, 16px) clamp(4px, 0.8vw, 12px);
-  gap: clamp(2px, 0.5vh, 6px);
+/* main info column */
+.t-main {
+  min-width: 0;
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 0.5vh;
+  padding: 0.8vh 0;
 }
-.fv-stat-card:last-child { border-right: none; }
-.fv-stat-label {
-  font-size: clamp(9px, 1.1vw, 15px); color: #4a7a9a;
-  text-transform: uppercase; letter-spacing: 2px;
+.t-dest {
+  font-family: var(--cond); font-weight: 700;
+  font-size: clamp(26px, 8.4vh, 96px);
+  line-height: 0.92;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.fv-stat-value {
-  font-size: clamp(18px, 3.2vw, 48px); font-weight: bold;
-  color: #ffffff; line-height: 1;
-  font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+.t-dest .cancelled { text-decoration: line-through; color: var(--cancel); }
+.t-sub {
+  display: flex; align-items: baseline; gap: 1.1vw;
+  font-size: clamp(12px, 2.6vh, 28px);
+  color: var(--text-dim);
+  white-space: nowrap; overflow: hidden;
 }
-.stat-late   { color: #f0a060; }
-.stat-ontime { color: #7fd3a8; }
-.stat-est    { color: #a0c0e0; }
-.stat-cancel { color: #e05050; }
+.t-sub .op {
+  font-family: var(--cond); font-weight: 600; letter-spacing: 0.05em;
+  padding: 0.1em 0.5em;
+  border-radius: 0.25em;
+  font-size: 0.82em;
+  transform: translateY(-0.08em);
+}
+.t-sub .hc { font-family: var(--mono); font-size: 0.78em; color: var(--text-faint); }
+.t-sub .livepos { color: var(--live); }
+.t-sub .livepos::before { content: '● '; font-size: 0.7em; }
+.t-next {
+  font-size: clamp(10px, 2vh, 21px);
+  color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.t-next b { color: var(--text-dim); font-weight: 500; }
+.t-next .sep { margin: 0 0.5em; color: var(--rule); }
 
-@media (max-height: 500px) {
-  #topbar { height: 44px; }
-  .tc-hdr { height: 24px; font-size: 10px; }
-  .tc-op-badge { width: 32px; height: 32px; font-size: 9px; }
+/* countdown column */
+.t-eta {
+  display: flex; flex-direction: column;
+  align-items: flex-end; justify-content: center;
+  gap: 0.2vh;
+  min-width: clamp(120px, 15vw, 300px);
 }
+.t-count {
+  font-family: var(--cond); font-weight: 700;
+  font-size: clamp(38px, 12.5vh, 150px);
+  line-height: 0.85;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--text);
+  display: flex; align-items: baseline; gap: 0.12em;
+}
+.t-count .unit {
+  font-size: 0.32em; font-weight: 600; color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+.t-count.now    { color: var(--amber); }
+.t-count.stn,
+.t-count.held   { color: var(--late); font-size: clamp(28px, 7.5vh, 92px); }
+.t-count.gone   { color: var(--text-faint); font-size: clamp(24px, 6vh, 72px); }
+@keyframes pulse { 50% { opacity: 0.55; } }
+.t-count.now { animation: pulse 1.2s ease-in-out infinite; }
+.t-status {
+  font-size: clamp(11px, 2.2vh, 24px);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.t-status .ontime { color: var(--ontime); }
+.t-status .late   { color: var(--late); }
+.t-status .cancel { color: var(--cancel); }
+.t-status .est    { color: var(--text-faint); }
+
+/* empty state */
+.t-empty {
+  grid-column: 2 / 4;
+  display: flex; align-items: center;
+  font-family: var(--cond); font-weight: 500;
+  font-size: clamp(16px, 3.4vh, 38px);
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+}
+
+/* ── Alert strip ────────────────────────────────────────── */
+#alert {
+  flex: 0 0 auto;
+  display: none;
+  align-items: center; gap: 1vw;
+  padding: 0.8vh 2vw;
+  background: #241503;
+  border-top: 1px solid #4a3005;
+  color: var(--amber);
+  font-size: clamp(11px, 2.2vh, 22px);
+  white-space: nowrap; overflow: hidden;
+}
+#alert.show { display: flex; }
+#alert .tag {
+  font-family: var(--cond); font-weight: 700; letter-spacing: 0.1em;
+  flex-shrink: 0;
+}
+#alert .msg { overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
 
-<div id="topbar">
-  <div id="back-btn" onmousedown="backAction()">&#8592; Dashboard</div>
-  <div id="topbar-title">Trains · Twyford</div>
-  <div id="topbar-right">
-    <div id="list-btn" onmousedown="toggleList()">List</div>
-    <div id="updated">Loading…</div>
-  </div>
-</div>
+<header>
+  <a id="back" href="/" onmousedown="window.location.href='/'">←</a>
+  <div id="title">TWYFORD <small>GREAT WESTERN MAIN LINE</small></div>
+  <div id="spacer"></div>
+  <div id="stale">NO DATA</div>
+  <div id="clock">--:--<span class="sec">--</span></div>
+</header>
 
-<div id="page">
+<main id="board">
+  <section class="track" data-key="ur" data-ln="relief" id="row-ur">
+    <div class="t-id"><div class="arrow">→</div><div class="name">UP RELIEF</div><div class="dirword">to London</div></div>
+    <div class="t-main" id="main-ur"></div>
+    <div class="t-eta" id="eta-ur"></div>
+  </section>
+  <section class="track" data-key="dr" data-ln="relief" id="row-dr">
+    <div class="t-id"><div class="arrow">←</div><div class="name">DOWN RELIEF</div><div class="dirword">from London</div></div>
+    <div class="t-main" id="main-dr"></div>
+    <div class="t-eta" id="eta-dr"></div>
+  </section>
+  <section class="track" data-key="um" data-ln="main" id="row-um">
+    <div class="t-id"><div class="arrow">→</div><div class="name">UP MAIN</div><div class="dirword">to London · fast</div></div>
+    <div class="t-main" id="main-um"></div>
+    <div class="t-eta" id="eta-um"></div>
+  </section>
+  <section class="track" data-key="dm" data-ln="main" id="row-dm">
+    <div class="t-id"><div class="arrow">←</div><div class="name">DOWN MAIN</div><div class="dirword">from London · fast</div></div>
+    <div class="t-main" id="main-dm"></div>
+    <div class="t-eta" id="eta-dm"></div>
+  </section>
+</main>
 
-  <!-- 4-Track Grid (default) -->
-  <div id="grid-view">
-    <div class="track-card" data-key="um" onmousedown="cardTap('um')">
-      <div class="tc-hdr tc-hdr-main"><span>↑</span><span>Up Main</span></div>
-      <div class="tc-body" id="body-um"></div>
-    </div>
-    <div class="track-card" data-key="dm" onmousedown="cardTap('dm')">
-      <div class="tc-hdr tc-hdr-main"><span>↓</span><span>Down Main</span></div>
-      <div class="tc-body" id="body-dm"></div>
-    </div>
-    <div class="track-card" data-key="ur" onmousedown="cardTap('ur')">
-      <div class="tc-hdr tc-hdr-relief"><span>↑</span><span>Up Relief</span></div>
-      <div class="tc-body" id="body-ur"></div>
-    </div>
-    <div class="track-card" data-key="dr" onmousedown="cardTap('dr')">
-      <div class="tc-hdr tc-hdr-relief"><span>↓</span><span>Down Relief</span></div>
-      <div class="tc-body" id="body-dr"></div>
-    </div>
-  </div>
-
-  <!-- List view -->
-  <div id="list-view">
-    <table id="train-table">
-      <thead>
-        <tr>
-          <th>Sched</th>
-          <th>Actual</th>
-          <th>HC</th>
-          <th>Operator</th>
-          <th>Route</th>
-          <th>Track</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="train-tbody"></tbody>
-    </table>
-  </div>
-
-  <!-- Detail view -->
-  <div id="detail-view"></div>
-
-</div>
+<div id="alert"><span class="tag">⚠ DISRUPTION</span><span class="msg" id="alert-msg"></span></div>
 
 <script>
 'use strict';
 
-/* ── Operator branding ──────────────────────────────────── */
-var OPS = {
-  'GW': {bg:'#007a4d', fg:'#ffffff', abbr:'GWR'},
-  'XR': {bg:'#7156a5', fg:'#ffffff', abbr:'XR'},
-  'XC': {bg:'#a61530', fg:'#ffffff', abbr:'XC'},
-  'HX': {bg:'#532885', fg:'#ffffff', abbr:'HX'},
-  'AW': {bg:'#8c3b8c', fg:'#ffffff', abbr:'TfW'},
-  'EM': {bg:'#334f8d', fg:'#ffffff', abbr:'EMR'},
-  'CH': {bg:'#0a4d8c', fg:'#ffffff', abbr:'CHR'},
-  'LN': {bg:'#1c3f6e', fg:'#ffffff', abbr:'LNR'},
-  'VT': {bg:'#9d1f30', fg:'#ffffff', abbr:'AVT'},
-  'GX': {bg:'#f05a24', fg:'#ffffff', abbr:'GTX'},
-  'GB': {bg:'#1e3050', fg:'#ffdd00', abbr:'GBRf'},
-  'DW': {bg:'#db0a17', fg:'#ffffff', abbr:'DB'},
-  'FL': {bg:'#1a6b2a', fg:'#ffffff', abbr:'FLT'},
-  'ZZ': {bg:'#f05a24', fg:'#000000', abbr:'CLR'},
-  'ZN': {bg:'#d4ac0d', fg:'#000000', abbr:'NRL'},
-  'HB': {bg:'#4a4a4a', fg:'#ffffff', abbr:'HNR'},
+/* ── Operator branding (brightened for dark bg) ─────────── */
+const OPS = {
+  GW: {bg:'#0b9d6c', fg:'#04160f', name:'GWR'},
+  XR: {bg:'#9d7fd8', fg:'#120a20', name:'Elizabeth line'},
+  XC: {bg:'#e05570', fg:'#1d060b', name:'CrossCountry'},
+  HX: {bg:'#8a5fd6', fg:'#12081f', name:'Heathrow Exp'},
+  AW: {bg:'#c05fc0', fg:'#1a061a', name:'TfW'},
+  GB: {bg:'#f0a835', fg:'#1d1403', name:'GBRf'},
+  DW: {bg:'#f04a4a', fg:'#1c0505', name:'DB Cargo'},
+  FL: {bg:'#4fae62', fg:'#07130a', name:'Freightliner'},
+  ZZ: {bg:'#f07b3c', fg:'#1a0a02', name:'Colas'},
+  ZN: {bg:'#e8c34a', fg:'#171102', name:'Network Rail'},
 };
-function opStyle(code, isPassenger) {
-  if (OPS[code]) return OPS[code];
-  if (isPassenger === false) return {bg:'#2d3d1a', fg:'#a0c060', abbr:'FRT'};
-  return {bg:'#2a3a4a', fg:'#c0ccd8', abbr: code ? String(code).slice(0,4) : '??'};
+function opInfo(t) {
+  const o = OPS[t.op_code];
+  if (o) return o;
+  if (t.passenger === false || isFreightHc(t.headcode))
+    return {bg:'#7d8f4a', fg:'#111504', name:'Freight'};
+  return {bg:'#3c4c60', fg:'#dfe7f0', name: t.op_name || t.op_code || ''};
 }
+function isFreightHc(hc) { return hc && '45678'.indexOf(hc[0]) >= 0; }
 function freightClass(hc) {
-  if (!hc) return 'Freight';
-  var c = hc[0];
-  if (c === '4') return 'Heavy Frt';
-  if (c === '6') return 'Intermodal';
-  if (c === '7') return 'Freight';
-  if (c === '8') return 'Light Loco';
-  return 'Freight';
+  const c = hc ? hc[0] : '';
+  return c === '4' ? 'Freight · intermodal'
+       : c === '6' ? 'Freight · heavy haul'
+       : c === '7' ? 'Freight'
+       : c === '8' ? 'Light engine'
+       : c === '5' ? 'Empty stock' : 'Freight';
 }
 function esc(s) {
-  if (s == null) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-/* ── Track classification ───────────────────────────────── */
-function isMainTrack(t) {
-  // Backend `track` is now authoritative (TD berth → line code → operator →
-  // destination → headcode class).  Don't second-guess it from line_code:
-  // e.g. a Penzance Down-Main express carries the Reading code 'WL'.
-  return t.track === 'Main';
+/* ── Place shortening ───────────────────────────────────── */
+function shortPlace(name) {
+  if (!name) return '';
+  return String(name)
+    .replace('London Paddington', 'Paddington')
+    .replace(' Temple Meads', '')
+    .replace(' Foregate Street', '').replace(' Shrub Hill', '')
+    .replace(' St Davids', '')
+    .replace('Heathrow Terminals 1-3', 'Heathrow T2/3')
+    .replace('Heathrow Terminal ', 'Heathrow T')
+    .replace('-super-Mare', '')
+    .replace(' International', ' Intl');
 }
-function trackKey(t) {
-  if (!t.direction) return null;
-  return (t.direction === 'up' ? 'u' : 'd') + (isMainTrack(t) ? 'm' : 'r');
-}
-function trackLabel(t) {
-  return (t.direction === 'up' ? '↑ Up ' : '↓ Down ') + (isMainTrack(t) ? 'Main' : 'Relief');
+const STANME = {
+  MAIDENHED:'Maidenhead', MDNHDMIDS:'Maidenhead', 'MDNHD CS':'Maidenhead',
+  TWYFORD:'Twyford', READNG:'Reading', READGWEST:'Reading West',
+  READWTORJ:'Reading', RDGSPURJN:'Reading', TILEHURST:'Tilehurst',
+  PANGBORNE:'Pangbourne', 'GORING&ST':'Goring', CHOLSEY:'Cholsey',
+  SLOUGH:'Slough', BURNHAM:'Burnham', TAPLOW:'Taplow', LANGLEY:'Langley',
+  IVER:'Iver', 'W DRAYTON':'West Drayton', 'HAYES&HAR':'Hayes',
+  SOUTHALL:'Southall', HANWELL:'Hanwell', AIRPORTJN:'Airport Jn',
+  STOCKLYJN:'Stockley Jn', HENLEYONT:'Henley', 'KEN BG LP':'Kennet Bridge',
+  'KEN BG JN':'Kennet Bridge',
+};
+function placeName(s) {
+  if (!s) return '';
+  if (STANME[s]) return STANME[s];
+  if (s.indexOf('LHR') === 0) return 'Heathrow';
+  return s.charAt(0) + s.slice(1).toLowerCase();
 }
 
 /* ── Time helpers ───────────────────────────────────────── */
 function trainMs(t) {
   if (t.house_pass_ts) return t.house_pass_ts * 1000;
-  var iso = t.twy_actual || t.twy_sched;
-  if (!iso) return 0;
-  var ms = new Date(iso).getTime();
-  if (!t.twy_actual && t.late_min) ms += t.late_min * 60000;
+  if (!t.twy_sched) return 0;
+  let ms = new Date(t.twy_sched).getTime();
+  if (!t.twy_actual && t.late_min > 0) ms += t.late_min * 60000;
   return ms;
 }
-function fmtTime(iso) {
-  if (!iso) return '—';
-  var d = new Date(iso);
-  return isNaN(d) ? '—' : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
-}
-function fmtTimeMs(ms) {
-  if (!ms) return '—';
-  return new Date(ms).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
-}
-function fmtExpected(t) {
-  if (t.at_station) {
-    var dep = t.twy_dep_actual || t.twy_dep_sched;
-    return dep ? 'dep ' + fmtTime(dep) : 'at Twyford';
-  }
-  if (t.td_eta_s !== undefined && !t.twy_actual && t.house_pass_ts)
-    return '~' + fmtTimeMs(t.house_pass_ts * 1000);
-  if (t.held) {
-    var hms = t.twy_sched ? new Date(t.twy_sched).getTime() + (t.late_min||0)*60000 : 0;
-    return hms ? 'held (~' + fmtTimeMs(hms) + ')' : 'held';
-  }
-  if (!t.twy_sched || !(t.late_min > 0)) return fmtTime(t.twy_sched);
-  return '~' + fmtTimeMs(new Date(t.twy_sched).getTime() + t.late_min*60000);
-}
-function lateStr(t) {
-  if (t.cancelled) return 'Cancelled';
-  if (t.late_min == null) return '';
-  if (t.late_min === 0) return 'On time';
-  if (t.late_min > 0)  return '+' + t.late_min + ' min';
-  return t.late_min + ' min';
-}
-
-/* ── Confidence badge ───────────────────────────────────── */
-function confBadge(t) {
-  if (t.at_station) return '<span class="tc-conf tc-conf-held">⏸ at stn</span>';
-  if (t.held)       return '<span class="tc-conf tc-conf-held">⏸ held</span>';
-  var td = tdPositions[t.headcode];
-  if (td && td.age_s < 120) return '<span class="tc-conf tc-conf-live">● live</span>';
-  if (t.confirmed && t.twy_actual) return '<span class="tc-conf tc-conf-trust">✓ TRUST</span>';
-  if (t.confirmed) return '<span class="tc-conf tc-conf-rtt">· RTT</span>';
-  return '<span class="tc-conf tc-conf-est">~ est.</span>';
+function fmtHM(msOrIso) {
+  const d = new Date(msOrIso);
+  return isNaN(d) ? '—'
+    : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
 }
 
 /* ── State ──────────────────────────────────────────────── */
-var currentView = 'grid';
-var prevView    = 'grid';
-var selectedUid = null;
-var trainsData  = null;
-var tdPositions = {};
-var nextFetchAt = 0;
-var POLL_INTERVAL = 15000;
+let trains = [];
+let lastFetch = 0;
+let nrccMsgs = [];
 
-/* ── Navigation ─────────────────────────────────────────── */
-function showView(v) {
-  document.getElementById('grid-view').style.display   = (v === 'grid')   ? 'grid'  : 'none';
-  document.getElementById('list-view').style.display   = (v === 'list')   ? 'block' : 'none';
-  document.getElementById('detail-view').style.display = (v === 'detail') ? 'flex'  : 'none';
-  document.getElementById('list-btn').classList.toggle('active', v === 'list');
-  document.getElementById('back-btn').textContent =
-    v === 'detail' ? '← Back' : '← Dashboard';
-  currentView = v;
-}
-function backAction() {
-  if (currentView === 'detail') showView(prevView);
-  else window.location.href = '/';
-}
-function toggleList() {
-  if (currentView === 'list') {
-    showView('grid');
-  } else {
-    prevView = 'grid';
-    showView('list');
-    if (trainsData) renderList(trainsData.trains || [], Date.now());
-  }
-}
-function cardTap(key) {
-  if (!trainsData) return;
-  var now = Date.now();
-  var candidates = (trainsData.trains || []).filter(function(t) {
-    if (t.cancelled) return false;
-    if (trackKey(t) !== key) return false;
-    var ms = trainMs(t);
-    if (ms > now + 60*60000) return false;
-    var grace = 120000;
-    if (t.confirmed && t.twy_actual) grace = (t.direction === 'up') ? 30000 : 0;
-    return ms >= now - grace;
-  });
-  candidates.sort(function(a,b){ return trainMs(a) - trainMs(b); });
-  if (!candidates.length) return;
-  var hi = candidates.findIndex(function(x){ return trainMs(x) >= now - 20000; });
-  if (hi < 0) hi = candidates.length - 1;
-  var t = candidates[hi];
-  selectedUid = t.uid;
-  prevView = currentView;
-  showView('detail');
-  renderDetail(t, now);
-}
-function rowTap(uid) {
-  if (!trainsData) return;
-  var t = (trainsData.trains || []).find(function(x){ return x.uid === uid; });
-  if (!t) return;
-  selectedUid = uid;
-  prevView = 'list';
-  showView('detail');
-  renderDetail(t, Date.now());
-}
-
-/* ── Polling ─────────────────────────────────────────────── */
-function startPoll() {
-  fetchTrains();
-  fetchTdLive();
-  setInterval(fetchTrains, POLL_INTERVAL);
-  setInterval(fetchTdLive, 5000);
-  setInterval(render, 1000);
-}
 function fetchTrains() {
-  nextFetchAt = Date.now() + POLL_INTERVAL;
-  fetch('/api/trains')
-    .then(function(r){ return r.json(); })
-    .then(function(d){ trainsData = d; render(); })
-    .catch(function(e){ console.error(e); });
+  fetch('/api/trains').then(r => r.json()).then(d => {
+    trains = d.trains || [];
+    lastFetch = Date.now();
+    render();
+  }).catch(() => {});
 }
-function fetchTdLive() {
-  fetch('/api/td-live')
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      tdPositions = {};
-      (d.positions || []).forEach(function(p){
-        if (p.age_s < 300) tdPositions[p.headcode] =
-          {berth:p.berth, age_s:p.age_s, dist_mi:p.dist_mi, place:p.place, line:p.line};
-      });
-    })
-    .catch(function(){});
+function fetchNrcc() {
+  fetch('/api/nrcc').then(r => r.json()).then(d => {
+    nrccMsgs = d.messages || [];
+    renderAlert();
+  }).catch(() => {});
 }
 
-/* ── Main render ─────────────────────────────────────────── */
+/* ── Per-track selection ────────────────────────────────── */
+function trackKey(t) {
+  if (!t.direction || !t.track) return null;
+  return (t.direction === 'up' ? 'u' : 'd') + (t.track === 'Main' ? 'm' : 'r');
+}
+/* grace: how long a train stays "current" after its pass moment */
+function graceMs(t) {
+  if (t.twy_actual) return t.direction === 'up' ? 45000 : 20000;
+  return 100000;
+}
+
+/* ── Rendering ──────────────────────────────────────────── */
+const KEYS = ['ur', 'dr', 'um', 'dm'];
+
 function render() {
-  if (!trainsData) return;
-  var now = Date.now();
-
-  // Topbar
-  var ts   = new Date((trainsData.ts || 0) * 1000);
-  var base = ts.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-  var secs = Math.max(0, Math.round((nextFetchAt - now) / 1000));
-  document.getElementById('updated').textContent = base + ' · ' + secs + 's';
-
-  if (currentView === 'grid') renderGrid(trainsData.trains || [], now);
-  if (currentView === 'detail' && selectedUid) {
-    var t = (trainsData.trains || []).find(function(x){ return x.uid === selectedUid; });
-    if (t) renderDetail(t, now);
+  const now = Date.now();
+  const byKey = {ur:[], dr:[], um:[], dm:[]};
+  for (const t of trains) {
+    const k = trackKey(t);
+    if (!k || !byKey[k]) continue;
+    const ms = trainMs(t);
+    if (!ms || ms > now + 65 * 60000) continue;
+    if (ms < now - 150000) continue;
+    byKey[k].push(t);
   }
-}
-
-/* ── Grid ───────────────────────────────────────────────── */
-var TRACK_KEYS = ['um', 'dm', 'ur', 'dr'];
-
-function renderGrid(trains, now) {
-  var slots = {um:[], dm:[], ur:[], dr:[]};
-
-  trains.forEach(function(t) {
-    if (t.cancelled) return;
-    var ms = trainMs(t);
-    var grace = 120000;
-    if (t.confirmed && t.twy_actual) grace = (t.direction === 'up') ? 30000 : 0;
-    if (ms < now - grace || ms > now + 60*60000) return;
-    var k = trackKey(t);
-    if (k && slots[k]) slots[k].push(t);
-  });
-
-  TRACK_KEYS.forEach(function(k) {
-    var list = slots[k];
-    list.sort(function(a,b){ return trainMs(a) - trainMs(b); });
-    var body = document.getElementById('body-' + k);
-    if (!body) return;
-
-    if (!list.length) {
-      body.innerHTML = '<div class="tc-empty">No trains within an hour</div>';
-      body.parentElement.style.background = '#0d1b2a';
-      return;
-    }
-    // Headline = soonest current-or-upcoming train (≥ 20 s ago, to keep "now"
-    // trains).  If everything has passed, fall back to the most recent.
-    var hi = list.findIndex(function(x){ return trainMs(x) >= now - 20000; });
-    if (hi < 0) hi = list.length - 1;
-    var t   = list[hi];
-    var op  = opStyle(t.op_code, t.passenger);
-    body.parentElement.style.background =
-      'linear-gradient(160deg,' + op.bg + '44 0%,' + op.bg + '0a 100%),#0d1b2a';
-    body.innerHTML = cardBodyHtml(t, now) + nextRowsHtml(list.slice(hi + 1, hi + 4), now);
-  });
-}
-
-/* Destination / origin labels that degrade gracefully for TD-only stub trains
-   (live berth fix but no matched RTT schedule → no origin/dest). */
-function destLabel(t) {
-  if (t.passenger === false) return freightClass(t.headcode);
-  if (t.dest) return shortPlace(t.dest);
-  var c = (t.headcode || '')[0];
-  if (c === '4' || c === '6' || c === '7' || c === '8') return freightClass(t.headcode);
-  if (c === '5') return 'Empty stock';
-  if (c === '9') return 'Elizabeth Line';
-  return 'Unidentified';
-}
-function origLabel(t) {
-  if (t.passenger === false || !t.origin)
-    return t.direction === 'up' ? 'from the west' : 'from London';
-  return shortPlace(t.origin);
-}
-
-/* Short place name for compact rows */
-function shortPlace(name) {
-  if (!name) return '—';
-  return String(name)
-    .replace('London Paddington', 'Paddington')
-    .replace(' Temple Meads', '')
-    .replace(' Parkway', ' Pkwy')
-    .replace(' Foregate Street', '')
-    .replace(' Shrub Hill', '')
-    .replace(' St Davids', '')
-    .replace(' Central', '')
-    .replace('Heathrow Airport ', 'Heathrow ')
-    .replace('-on-Thames', '');
-}
-
-/* Tidy a SMART place name for display. */
-function placeName(s) {
-  if (!s) return '';
-  var map = {'MAIDENHED':'Maidenhead','MDNHDMIDS':'Maidenhead','MDNHD CS':'Maidenhead',
-    'TWYFORD':'Twyford','READNG':'Reading','READGWEST':'Reading West','READWTORJ':'Reading',
-    'RDGSPURJN':'Reading','TILEHURST':'Tilehurst','PANGBORNE':'Pangbourne',
-    'GORING&ST':'Goring','CHOLSEY':'Cholsey','SLOUGH':'Slough','BURNHAM':'Burnham',
-    'TAPLOW':'Taplow','LANGLEY':'Langley','IVER':'Iver','W DRAYTON':'West Drayton',
-    'HAYES&HAR':'Hayes','SOUTHALL':'Southall','HANWELL':'Hanwell','AIRPORTJN':'Airport Jn',
-    'STOCKLYJN':'Stockley Jn','HENLEYONT':'Henley'};
-  if (map[s]) return map[s];
-  if (s.indexOf('LHR')===0) return 'Heathrow';
-  return s.charAt(0) + s.slice(1).toLowerCase();
-}
-
-/* Live physical position from the SMART-enriched TD feed (real berth → distance),
-   or null when there's no recent live fix. */
-function livePos(t) {
-  var td = tdPositions[t.headcode];
-  if (!td || td.age_s > 150 || td.dist_mi == null) return null;
-  return {mi: Math.abs(td.dist_mi), place: placeName(td.place)};
-}
-
-function etaParts(t, now) {
-  var diff = trainMs(t) - now;
-  if (t.at_station) return {val:'stn',  unit:'', cls:'eta-stn'};
-  if (t.held)       return {val:'held', unit:'', cls:'eta-held'};
-  if (t.twy_actual && diff < -5000) {
-    var agoS = Math.round(-diff / 1000);
-    return {val: agoS<60?agoS:Math.round(agoS/60), unit: agoS<60?'s ago':'m ago', cls:'eta-past'};
+  for (const k of KEYS) {
+    byKey[k].sort((a, b) => trainMs(a) - trainMs(b));
+    renderTrack(k, byKey[k], now);
   }
-  if (diff <= 15000) return {val:'now', unit:'', cls:'eta-now'};
-  var s = Math.round(diff / 1000);
-  return {val: s<60?s:Math.floor(s/60), unit: s<60?'s':'min', cls:''};
+  document.getElementById('stale').style.visibility =
+    (now - lastFetch > 60000) ? 'visible' : 'hidden';
 }
 
-function cardBodyHtml(t, now) {
-  var op = opStyle(t.op_code, t.passenger);
-  var e  = etaParts(t, now);
+function renderTrack(key, list, now) {
+  const row  = document.getElementById('row-' + key);
+  const main = document.getElementById('main-' + key);
+  const eta  = document.getElementById('eta-' + key);
 
-  var fromTxt = origLabel(t);
-  var toTxt   = destLabel(t);
-
-  // position / status line
-  var posHtml;
-  var lp = livePos(t);
-  if (t.cancelled) {
-    posHtml = '<span class="cancel">Cancelled</span>';
-  } else if (t.at_station) {
-    posHtml = '<span class="held">⏸ at Twyford station</span>';
-  } else if (t.held) {
-    posHtml = '<span class="held">⏸ held at signal</span>';
-  } else if (lp) {
-    posHtml = '<span class="live">● live</span>' +
-              '<span>' + (lp.mi < 0.4 ? 'passing' : lp.mi.toFixed(1) + ' mi')
-              + (lp.place ? ' · ' + esc(lp.place) : '') + '</span>';
-  } else if (t.late_min > 0) {
-    posHtml = '<span class="late">+' + t.late_min + ' min late</span>';
-  } else if (t.confirmed) {
-    posHtml = '<span class="ontime">on time</span>';
-  } else {
-    posHtml = '<span>scheduled</span>';
+  /* headline: first non-cancelled still within its grace window */
+  const live = list.filter(t => !t.cancelled);
+  let t = null;
+  for (const c of live) {
+    if (trainMs(c) >= now - graceMs(c)) { t = c; break; }
   }
-
-  return '<div class="tc-top">' +
-      '<div class="tc-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
-      '<div class="tc-hc">' + esc(t.headcode) + '</div>' +
-      '<div class="tc-eta-wrap">' +
-        '<span class="tc-eta-val ' + e.cls + '">' + esc(String(e.val)) + '</span>' +
-        (e.unit ? '<span class="tc-eta-unit">' + esc(e.unit) + '</span>' : '') +
-      '</div>' +
-    '</div>' +
-    '<div class="tc-route">' +
-      '<span class="tc-from">' + esc(fromTxt) + '</span>' +
-      '<span class="tc-arrow">→</span>' +
-      '<span class="tc-to">' + esc(toTxt) + '</span>' +
-    '</div>' +
-    '<div class="tc-pos">' + posHtml + '</div>';
-}
-
-function nextRowsHtml(list, now) {
-  if (!list.length) return '<div class="tc-next"></div>';
-  var rows = list.map(function(t) {
-    var op = opStyle(t.op_code, t.passenger);
-    var e  = etaParts(t, now);
-    var dest = destLabel(t);
-    var etaStr = (e.cls === 'eta-now') ? 'now'
-               : (e.cls === 'eta-stn') ? 'stn'
-               : (e.cls === 'eta-held') ? 'held'
-               : (e.unit === 's' ? e.val + 's' : e.val + (e.unit==='min'?'m':''));
-    return '<div class="tc-next-row">' +
-      '<span class="tc-next-dot" style="background:' + op.bg + '"></span>' +
-      '<span style="color:#7d99b0;font-family:monospace">' + esc(t.headcode) + '</span>' +
-      '<span class="tc-next-dest">' + esc(dest) + '</span>' +
-      '<span class="tc-next-eta">' + esc(etaStr) + '</span>' +
-    '</div>';
-  }).join('');
-  return '<div class="tc-next">' + rows + '</div>';
-}
-
-/* ── List ───────────────────────────────────────────────── */
-function renderList(trains, now) {
-  var tb = document.getElementById('train-tbody');
-  if (!trains.length) {
-    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#4a7a9a;padding:24px">No trains</td></tr>';
+  if (!t) {
+    row.style.setProperty('--spine', 'var(--text-faint)');
+    row.classList.remove('passing');
+    main.innerHTML = '<div class="t-empty">NO TRAIN DUE</div>';
+    eta.innerHTML = '';
     return;
   }
-  var html = '';
-  trains.forEach(function(t) {
-    var ms     = trainMs(t);
-    var isPast = ms < now - 90000;
-    var isEst  = !t.confirmed;
-    var late   = lateStr(t);
-    var op     = opStyle(t.op_code, t.passenger);
-    var schedDisp  = isEst ? '~' + fmtTime(t.twy_sched) : fmtTime(t.twy_sched);
-    var actualDisp = t.twy_actual ? fmtTime(t.twy_actual)
-                   : (t.td_eta_s !== undefined || t.late_min > 0) ? fmtExpected(t) : '—';
-    var lc = t.cancelled ? 'tr-cancel' : isEst ? 'tr-est' : (t.late_min > 0) ? 'tr-late' : 'tr-ontime';
-    var routeStr = t.passenger === false
-      ? freightClass(t.headcode)
-      : (t.origin || '—') + ' → ' + (t.dest || '—');
 
-    html += '<tr class="tr-row' + (isPast?' past':'') +
-      '" onmousedown="rowTap(\'' + esc(t.uid) + '\')">' +
-      '<td class="tr-time ' + lc + '">' + esc(schedDisp) + '</td>' +
-      '<td class="tr-time">' + esc(actualDisp) + '</td>' +
-      '<td class="tr-hc">' + esc(t.headcode) + '</td>' +
-      '<td><span class="tr-op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</span></td>' +
-      '<td class="tr-route">' + esc(routeStr) + '</td>' +
-      '<td class="tr-track">' + esc(trackLabel(t)) + '</td>' +
-      '<td class="tr-status ' + lc + '">' + esc(late || (isEst ? 'est.' : '')) + '</td>' +
-      '</tr>';
-  });
-  tb.innerHTML = html;
-}
+  const op   = opInfo(t);
+  const ms   = trainMs(t);
+  const diff = ms - now;
+  const frt  = t.passenger === false || isFreightHc(t.headcode);
 
-/* ── Detail (focus view) ────────────────────────────────── */
-function renderDetail(t, now) {
-  var op   = opStyle(t.op_code, t.passenger);
-  var ms   = trainMs(t);
-  var isEst    = !t.confirmed;
-  var isStop   = t.call_type === 'STOP';
-  var isBadLate = t.late_min && t.late_min >= 5;
-  var hasPassed = t.confirmed && t.twy_actual && ms < now;
-  var late = lateStr(t);
+  row.style.setProperty('--spine', op.bg);
 
-  var callClass = isStop ? 'badge-stop' : (isEst ? 'badge-est' : 'badge-pass');
-  var callText  = isStop ? 'Stops at Twyford'
-                : (isEst ? 'Passing through (est.)' : 'Passes Twyford');
-
-  var twyTimeHtml;
-  if (t.cancelled) {
-    twyTimeHtml = '<span class="fv-route-time tr-cancel">Cancelled</span>';
-  } else if (isEst) {
-    twyTimeHtml = '<span class="fv-route-time fv-route-est">~' + fmtTimeMs(ms) + '</span>';
-  } else if (t.twy_actual) {
-    var lc  = isBadLate ? 'fv-route-late' : 'fv-route-ontime';
-    var ln  = isBadLate ? ' (' + late + ')' : '';
-    twyTimeHtml = '<span class="fv-route-time">Sched ' + fmtTime(t.twy_sched) + '</span> ' +
-                  '<span class="fv-route-time ' + lc + '"> ✓ ' + fmtTime(t.twy_actual) + ln + '</span>';
+  /* destination + origin */
+  let destTxt, fromTxt;
+  if (frt) {
+    destTxt = t.dest ? shortPlace(t.dest) : freightClass(t.headcode);
+    fromTxt = t.origin ? 'from ' + shortPlace(t.origin) : freightClass(t.headcode);
   } else {
-    var lc2 = isBadLate ? 'fv-route-late' : '';
-    twyTimeHtml = '<span class="fv-route-time ' + lc2 + '">' + fmtExpected(t) +
-                  (late && late !== 'On time' ? ' (' + late + ')' : '') + '</span>';
+    destTxt = t.dest ? shortPlace(t.dest) : (t.headcode || '—');
+    fromTxt = t.origin ? 'from ' + shortPlace(t.origin) : '';
+  }
+  if (t.cancelled) destTxt = '<span class="cancelled">' + esc(destTxt) + '</span>';
+  else destTxt = esc(destTxt);
+
+  /* live position */
+  let liveHtml = '';
+  if (t.td_dist_mi != null && t.td_berth_age < 150 && !t.twy_actual) {
+    const mi = Math.abs(t.td_dist_mi);
+    const pl = placeName(t.td_place);
+    liveHtml = '<span class="livepos">' +
+      (mi < 0.4 ? 'passing now' : (pl ? esc(pl) + ' · ' : '') + mi.toFixed(1) + ' mi') +
+      '</span>';
   }
 
-  var platHtml = (isStop && t.platform)
-    ? ' <span style="color:#7fb3d3;font-size:clamp(11px,1.6vw,22px)">Plat ' + esc(t.platform) + '</span>' : '';
+  const veh = (t.num_veh && !frt) ? t.num_veh + ' coaches' : '';
+  const stopTxt = t.call_type === 'STOP' ? 'calls at Twyford' : '';
 
-  var statLabel = isEst ? 'Est. Time' : (hasPassed ? 'Passed At' : 'At Twyford');
-  var statTime  = isEst ? '~' + fmtTimeMs(ms)
-                : (t.twy_actual ? fmtTime(t.twy_actual) : fmtExpected(t));
-  var statDelay = t.cancelled ? '<span class="stat-cancel">Cancelled</span>'
-                : isEst ? '<span class="stat-est">N/A</span>'
-                : (t.late_min === 0 ? '<span class="stat-ontime">On time</span>'
-                : '<span class="stat-late">' + (t.late_min>0?'+':'') + (t.late_min||'?') + ' min</span>');
-  var statVeh = t.num_veh ? t.num_veh + (t.num_veh===1?' coach':' coaches') : '—';
+  /* follow-on trains */
+  const nexts = live.slice(live.indexOf(t) + 1, live.indexOf(t) + 3);
+  let nextHtml = '';
+  if (nexts.length) {
+    nextHtml = 'then ' + nexts.map(n => {
+      const nd = n.passenger === false || isFreightHc(n.headcode)
+        ? (n.dest ? shortPlace(n.dest) : freightClass(n.headcode))
+        : shortPlace(n.dest || n.headcode);
+      return '<b>' + fmtHM(trainMs(n)) + '</b>&nbsp;' + esc(nd);
+    }).join('<span class="sep">|</span>');
+  }
 
-  var frOrig = t.passenger === false
-    ? (t.direction === 'up' ? '← From west' : '← From London') : (t.origin || '—');
-  var frDest = t.passenger === false
-    ? (t.direction === 'up' ? '→ To London' : '→ To west') : (t.dest || '—');
-
-  document.getElementById('detail-view').innerHTML =
-    '<div class="fv-header" style="background:linear-gradient(135deg,' + op.bg + '55 0%,' + op.bg + '11 100%);border-bottom:2px solid ' + op.bg + '88">' +
-      '<div class="fv-op-badge" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.abbr) + '</div>' +
-      '<div class="fv-main">' +
-        '<div class="fv-headcode">' + esc(t.passenger===false ? freightClass(t.headcode) : (t.dest||t.headcode)) + '</div>' +
-        '<div class="fv-op-name">' + esc(t.headcode) + ' · ' + esc(t.op_name||op.abbr) + '  ' + confBadge(t) + '</div>' +
-      '</div>' +
-      '<div class="fv-right">' +
-        '<span class="fv-track-badge">' + esc(trackLabel(t)) + '</span>' +
-        '<span class="fv-call-badge ' + callClass + '">' + callText + '</span>' +
-      '</div>' +
+  main.innerHTML =
+    '<div class="t-dest">' + destTxt + '</div>' +
+    '<div class="t-sub">' +
+      '<span class="op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.name) + '</span>' +
+      (fromTxt ? '<span>' + esc(fromTxt) + '</span>' : '') +
+      (stopTxt ? '<span>' + stopTxt + '</span>' : '') +
+      (veh ? '<span>' + veh + '</span>' : '') +
+      liveHtml +
+      '<span class="hc">' + esc(t.headcode || '') + '</span>' +
     '</div>' +
+    (nextHtml ? '<div class="t-next">' + nextHtml + '</div>' : '');
 
-    '<div class="fv-route">' +
-      '<div class="fv-route-station">' + esc(frOrig) + '</div>' +
-      (t.orig_dep ? '<div class="fv-route-time">dep ' + fmtTime(t.orig_dep) + '</div>' : '') +
-      '<div class="fv-route-arrow">↓</div>' +
-      '<div class="fv-route-station twyford">Twyford</div>' +
-      '<div>' + twyTimeHtml + platHtml + '</div>' +
-      '<div class="fv-route-arrow">↓</div>' +
-      '<div class="fv-route-station">' + esc(frDest) + '</div>' +
-      (t.dest_arr ? '<div class="fv-route-time">arr ' + fmtTime(t.dest_arr) + '</div>' : '') +
-    '</div>' +
+  /* countdown + status */
+  let countHtml, countCls = '', passing = false;
+  if (t.cancelled) {
+    countHtml = 'CANC'; countCls = 'gone';
+  } else if (t.at_station) {
+    countHtml = 'AT STATION'; countCls = 'stn';
+  } else if (t.held) {
+    countHtml = 'HELD'; countCls = 'held';
+  } else if (diff <= 25000 && diff > -45000) {
+    countHtml = 'NOW'; countCls = 'now'; passing = true;
+  } else if (diff <= 0) {
+    countHtml = 'PASSED'; countCls = 'gone';
+  } else if (diff < 90000) {
+    countHtml = Math.max(1, Math.round(diff / 1000)) + '<span class="unit">sec</span>';
+  } else {
+    countHtml = Math.round(diff / 60000) + '<span class="unit">min</span>';
+  }
+  row.classList.toggle('passing', passing);
 
-    '<div class="fv-stats">' +
-      fvCard(statLabel, statTime, '') +
-      fvCard('Delay', statDelay, '', true) +
-      fvCard('Track', trackLabel(t), '') +
-      fvCard('Vehicles', statVeh, '') +
-    '</div>';
+  let statusHtml;
+  if (t.cancelled) {
+    statusHtml = '<span class="cancel">cancelled</span>';
+  } else {
+    const bits = [];
+    bits.push(fmtHM(ms));
+    if (t.twy_actual) { /* confirmed */ }
+    else if (t.late_min == null) bits.push('<span class="est">estimated</span>');
+    else if (t.late_min >= 1) bits.push('<span class="late">+' + t.late_min + ' min</span>');
+    else bits.push('<span class="ontime">on time</span>');
+    statusHtml = bits.join(' · ');
+  }
+  eta.innerHTML =
+    '<div class="t-count ' + countCls + '">' + countHtml + '</div>' +
+    '<div class="t-status">' + statusHtml + '</div>';
 }
 
-function fvCard(label, val, unit, raw) {
-  return '<div class="fv-stat-card">' +
-    '<div class="fv-stat-label">' + esc(label) + '</div>' +
-    '<div class="fv-stat-value">' + (raw ? val : esc(val)) + '</div>' +
-    (unit ? '<div style="font-size:clamp(9px,1.1vw,14px);color:#5a8fad">' + esc(unit) + '</div>' : '') +
-    '</div>';
+/* ── Alert strip ────────────────────────────────────────── */
+function renderAlert() {
+  const el = document.getElementById('alert');
+  if (!nrccMsgs.length) { el.classList.remove('show'); return; }
+  const msg = String(nrccMsgs[0]).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  document.getElementById('alert-msg').textContent = msg;
+  el.classList.add('show');
 }
 
-/* ── Boot ────────────────────────────────────────────────── */
-showView('grid');
-startPoll();
+/* ── Clock ──────────────────────────────────────────────── */
+function tick() {
+  const d = new Date();
+  document.getElementById('clock').innerHTML =
+    d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) +
+    '<span class="sec">' + String(d.getSeconds()).padStart(2, '0') + '</span>';
+  render();
+}
+
+/* ── Boot ───────────────────────────────────────────────── */
+document.body.classList.add('hidecursor');
+fetchTrains();
+fetchNrcc();
+setInterval(fetchTrains, 15000);
+setInterval(fetchNrcc, 300000);
+setInterval(tick, 1000);
+tick();
 </script>
 </body>
 </html>
