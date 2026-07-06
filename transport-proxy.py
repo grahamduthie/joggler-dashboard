@@ -1495,6 +1495,22 @@ def _rtt_build_trains():
 
     _td_enrich_trains(trains, now, ident)
 
+    # Drop phantom CIF freight paths.  A freight predicted to pass within the
+    # next ~10 min would already be inside the tracked Reading↔Maidenhead
+    # corridor and reporting TD berths.  If such an imminent CIF-scheduled train
+    # has no TD sighting at all (never confirmed, no live berth, no actual pass),
+    # it physically can't be that close — the path simply didn't run — so drop it
+    # rather than show a bogus "N min" countdown.  Paths further out are kept as
+    # genuine timetable predictions; they reappear here once TD actually sees them.
+    def _phantom_cif(t):
+        if t.get('source') != 'cif':
+            return False
+        if t.get('confirmed') or t.get('td_berth') or t.get('twy_actual'):
+            return False
+        ts = t.get('house_pass_ts') or 0
+        return 0 < ts < now + 600
+    trains = [t for t in trains if not _phantom_cif(t)]
+
     # Drop stale entries: anything that passed (or should have passed) long ago.
     # Confirmed trains stay 30 min (feeds the "last train" strip); unconfirmed
     # estimates 12 min — a scheduled train that never showed shouldn't linger.
@@ -1694,10 +1710,55 @@ def _load_smart():
         print(f'SMART load failed: {e}')
 
 
+# Coarse fallback: (line, signed dist_mi) for every corridor berth Reading↔
+# Maidenhead that SMART's STANOX anchoring and the CA chain-learner leave without
+# a position.  dist_mi: + = west (Reading side), − = east (London side); values
+# interpolated from the verified west→east berth order between the station
+# chainages in _STANME_MI (Reading +5.1, Kennet Br +3.34, Twyford +0.1,
+# Maidenhead −6.7).  Deliberately approximate but MONOTONIC per line — its job is
+# only to keep a train inside the corridor and give it a rough ETA through the
+# unanchored near-house throat berths (e.g. 1623/1626), where SMART has no
+# reporting point, so a train seen leaving Maidenhead is tracked all the way in
+# instead of vanishing from the list the moment it enters a positionless berth.
+_BERTH_MI = {
+    # Up Main (west→east; house crossing observed live at 1640→1626)
+    '1672': ('Main', 5.1), '1666': ('Main', 4.4), '1662': ('Main', 3.6),
+    '1658': ('Main', 3.0), '1650': ('Main', 2.1), '1646': ('Main', 1.2),
+    '1640': ('Main', 0.25), '1626': ('Main', -0.15), '1618': ('Main', -0.6),
+    '1614': ('Main', -1.1), '1610': ('Main', -1.8), '1606': ('Main', -2.6),
+    '1602': ('Main', -3.5), '0596': ('Main', -4.6), '0592': ('Main', -5.6),
+    '0570': ('Main', -6.7), '0566': ('Main', -7.5),
+    # Up Relief (west→east)
+    '1676': ('Relief', 5.1), '1668': ('Relief', 3.34), '1664': ('Relief', 3.0),
+    '1660': ('Relief', 2.6), '1652': ('Relief', 2.0), '1648': ('Relief', 1.5),
+    '1644': ('Relief', 1.0), '1642': ('Relief', 0.5), '1630': ('Relief', 0.1),
+    '1628': ('Relief', -0.3), '1624': ('Relief', -0.8), '1622': ('Relief', -1.3),
+    '1620': ('Relief', -1.8), '1616': ('Relief', -2.4), '1612': ('Relief', -3.1),
+    '1608': ('Relief', -3.9), '1604': ('Relief', -4.8), '0598': ('Relief', -5.7),
+    '0594': ('Relief', -6.3), '0574': ('Relief', -6.7), '0576': ('Relief', -6.7),
+    '0568': ('Relief', -7.5),
+    # Down Relief (west→east)
+    '1687': ('Relief', 5.1), '1677': ('Relief', 4.0), '1669': ('Relief', 3.34),
+    '1665': ('Relief', 2.5), '1661': ('Relief', 1.5), '1657': ('Relief', 0.6),
+    '1637': ('Relief', 0.1), '1635': ('Relief', -0.3), '1631': ('Relief', -0.8),
+    '1627': ('Relief', -1.4), '1623': ('Relief', -2.1), '1611': ('Relief', -3.0),
+    '1607': ('Relief', -4.0), '1603': ('Relief', -5.2), '0595': ('Relief', -6.2),
+    '0577': ('Relief', -6.7), '0571': ('Relief', -7.5),
+    # Down Main (west→east)
+    '1675': ('Main', 5.1), '1667': ('Main', 3.5), '1663': ('Main', 2.0),
+    '1659': ('Main', 0.6), '1655': ('Main', 0.1), '1633': ('Main', -0.4),
+    '1629': ('Main', -1.0), '1625': ('Main', -1.7), '1621': ('Main', -2.5),
+    '1609': ('Main', -3.6), '1605': ('Main', -4.6), '1601': ('Main', -5.6),
+    '0593': ('Main', -6.3), '0573': ('Main', -6.7), '0569': ('Main', -7.5),
+}
+
+
 def _berth_info(area, berth_str):
     """Return {'dir','line','stanme','dist_mi'} for a TD berth, or None.
     SMART is authoritative for line/place; CA-interpolated positions fill in
-    dist_mi for intermediate berths SMART doesn't carry."""
+    dist_mi for intermediate berths SMART doesn't carry; a coarse static
+    _BERTH_MI table is the last-resort fill for the unanchored near-house
+    throat berths so corridor trains aren't dropped there."""
     with _smart_lock:
         info = _smart_berth.get((area, berth_str))
     if info and info.get('dist_mi') is not None:
@@ -1705,6 +1766,16 @@ def _berth_info(area, berth_str):
     with _chain_lock:
         cd = _chain_pos.get((area, berth_str))
     if cd is None:
+        fb = _BERTH_MI.get(berth_str)
+        if fb:
+            line, mi = fb
+            if info:
+                info = dict(info)
+                if not info.get('line'):
+                    info['line'] = line
+                info['dist_mi'] = mi
+                return info
+            return {'dir': '', 'line': line, 'stanme': '', 'dist_mi': mi}
         return info                      # unknown position → caller falls back to schedule
     if info:
         info = dict(info); info['dist_mi'] = cd
@@ -1937,6 +2008,15 @@ def _td_enrich_trains(trains, now, ident=None):
         if not who.get('origin') and ci:
             who = dict(who, origin=ci['origin'], dest=ci['dest'],
                        orig_dep=ci['orig_dep'], dest_arr=ci['dest_arr'])
+        # If we KNOW this train's endpoints and they say it never reaches
+        # Twyford, trust that over a lone berth fix in the Reading throat.  A
+        # CrossCountry service from the north that terminates/reverses at
+        # Reading (Manchester→Reading) sits in a D1 throat berth at dist ~4.8
+        # mi and — with an ambiguous from-berth — can read as "up, approaching
+        # the house".  It never passes Twyford, so don't synthesise it.
+        if (who.get('origin') and who.get('dest')
+                and not _passes_twyford(direction, who['origin'], who['dest'])):
+            continue
         passenger = who['passenger'] if 'passenger' in who else (hc[:1] in '129')
         line = info.get('line') or ''
         is_main = (line == 'Main') if line else (hc[:1] == '1')

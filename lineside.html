@@ -109,6 +109,8 @@ body {
 .ap-eta .u { font-size: 13px; color: var(--dim); font-weight: 600; }
 .ap-eta.now { color: var(--amber); animation: pulse 1.2s infinite; }
 .ap-eta.warn { color: var(--late); font-size: 17px; }
+/* scheduled time reached but no live berth sighting — softer than NOW */
+.ap-eta.due { color: #a8791f; font-size: 18px; }
 @keyframes pulse { 50% { opacity: .5; } }
 .ap-chip {
   font-family: var(--cond); font-weight: 700; font-size: 14px; letter-spacing: .06em;
@@ -225,9 +227,9 @@ const LINES = [
    east:['1635','1631','1627','1623','1611','1607','1603','0595'],
    maid:['0577'], stub:['0571']},
   {key:'um', y:264, main:true,  dir:'up',   name:'UP MAIN',     plat:'2',
-   west:['1672','1666','1662','1658','1650','1646','1640','1626'],
-   twy:['1618'],
-   east:['1614','1610','1606','1602','0596','0592'],
+   west:['1672','1666','1662','1658','1650','1646','1640'],
+   twy:['1626'],
+   east:['1618','1614','1610','1606','1602','0596','0592'],
    maid:['0570'], stub:['0566']},
   {key:'dm', y:320, main:true,  dir:'down', name:'DOWN MAIN',   plat:'1',
    west:['1675','1667','1663','1659'],
@@ -251,8 +253,9 @@ const READ_BERTHS = ['1684','1685','1686','1688','1694','1697','1698','1702','17
   '1708','1709','1711','1716','1718','1721','1724','1727','1730','1731','1732','1733',
   '1740','SSTE','A701','B701','C701','A703','B703','C703','A705','B705','C705','R701'];
 
-/* Berths that straddle the house (first section east of the platforms) */
-const HOUSE_BERTHS = {'1628':1, '1635':1, '1614':1, '1633':1};
+/* Berths that straddle the house (UM crossing is at 1640/1626, per observation;
+   the others are the first section east of the Twyford platforms) */
+const HOUSE_BERTHS = {'1628':1, '1635':1, '1640':1, '1626':1, '1633':1};
 
 const C_RELIEF = '#3fb7c4', C_MAIN = '#6f9fd8', C_AMBER = '#ffb000';
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -273,18 +276,68 @@ function addCell(cell) {
   CELLS.push(cell);
   for (const b of cell.berths) BERTH_CELL[b] = cell;
 }
-function layoutSeg(berths, xr, y, key) {
-  const n = berths.length, gap = 3;
-  const w = (xr[1] - xr[0] - (n - 1) * gap) / n;
-  berths.forEach((b, i) =>
-    addCell({berths:[b], x: xr[0] + i * (w + gap), y, w, key}));
+
+/* Signed distance from the house (mi; + = west/Reading side, − = east/London
+   side) for every corridor berth — MUST match _BERTH_MI in transport-proxy.py.
+   Cells are placed on ONE shared distance scale per segment so the Main and
+   Relief lines line up by real position: near-house berths cluster at the house,
+   far berths spread out, instead of each line spacing its berths evenly (which
+   made the sparse Main line read as "off"). */
+const BERTH_MI = {
+  // Up Main (house crossing observed live at 1640→1626, so those straddle 0)
+  '1672':5.1,'1666':4.4,'1662':3.6,'1658':3.0,'1650':2.1,'1646':1.2,'1640':0.25,
+  '1626':-0.15,'1618':-0.6,'1614':-1.1,'1610':-1.8,'1606':-2.6,'1602':-3.5,
+  '0596':-4.6,'0592':-5.6,'0570':-6.7,'0566':-7.5,
+  // Up Relief
+  '1676':5.1,'1668':3.34,'1664':3.0,'1660':2.6,'1652':2.0,'1648':1.5,'1644':1.0,
+  '1642':0.5,'1630':0.1,'1628':-0.3,'1624':-0.8,'1622':-1.3,'1620':-1.8,
+  '1616':-2.4,'1612':-3.1,'1608':-3.9,'1604':-4.8,'0598':-5.7,'0594':-6.3,
+  '0574':-6.7,'0576':-6.7,'0568':-7.5,
+  // Down Relief
+  '1687':5.1,'1677':4.0,'1669':3.34,'1665':2.5,'1661':1.5,'1657':0.6,'1637':0.1,
+  '1635':-0.3,'1631':-0.8,'1627':-1.4,'1623':-2.1,'1611':-3.0,'1607':-4.0,
+  '1603':-5.2,'0595':-6.2,'0577':-6.7,'0571':-7.5,
+  // Down Main
+  '1675':5.1,'1667':3.5,'1663':2.0,'1659':0.6,'1655':0.1,'1633':-0.4,'1629':-1.0,
+  '1625':-1.7,'1621':-2.5,'1609':-3.6,'1605':-4.6,'1601':-5.6,'0593':-6.3,
+  '0573':-6.7,'0569':-7.5,
+};
+const WEST_MAX = 5.1, WEST_MIN = 0.05, EAST_MIN = -0.05, EAST_MAX = -6.7;
+function segCenter(dist, xr, seg) {
+  const t = seg === 'west' ? (WEST_MAX - dist) / (WEST_MAX - WEST_MIN)
+                           : (EAST_MIN - dist) / (EAST_MIN - EAST_MAX);
+  return xr[0] + Math.max(0, Math.min(1, t)) * (xr[1] - xr[0]);
+}
+function layoutSeg(berths, xr, y, key, seg) {
+  if (berths.length === 1) {   // single-berth segment (e.g. the far stub) fills its slot
+    addCell({berths:[berths[0]], x: xr[0], y, w: xr[1] - xr[0], key});
+    return;
+  }
+  // centre each berth at its true distance; cell width follows the gap to its
+  // neighbours (dense near the house, wide out toward Reading/Maidenhead).
+  const n = berths.length;
+  const cx = berths.map((b, i) => {
+    const d = BERTH_MI[b];
+    return d != null ? segCenter(d, xr, seg)
+                     : xr[0] + (i + 0.5) / n * (xr[1] - xr[0]);
+  });
+  berths.forEach((b, i) => {
+    // each cell fills the span between the midpoints to its neighbours (Voronoi):
+    // cells tile without overlapping.  Edge cells run to the segment boundary.
+    const lb = i > 0     ? (cx[i-1] + cx[i]) / 2 : xr[0];
+    const rb = i < n - 1 ? (cx[i] + cx[i+1]) / 2 : xr[1];
+    let w = rb - lb - 3, x = lb + 1.5;
+    if (w < 24) { w = 24; x = (lb + rb) / 2 - 12; }   // keep headcodes legible
+    w = Math.min(w, 58);
+    addCell({berths:[b], x, y, w, key});
+  });
 }
 for (const ln of LINES) {
-  layoutSeg(ln.west, X_WEST, ln.y, ln.key);
+  layoutSeg(ln.west, X_WEST, ln.y, ln.key, 'west');
   addCell({berths: ln.twy,  x: X_TWY[0],  y: ln.y, w: X_TWY[1]  - X_TWY[0],  key: ln.key, plat: true});
-  layoutSeg(ln.east, X_EAST, ln.y, ln.key);
+  layoutSeg(ln.east, X_EAST, ln.y, ln.key, 'east');
   addCell({berths: ln.maid, x: X_MAID[0], y: ln.y, w: X_MAID[1] - X_MAID[0], key: ln.key, plat: true});
-  layoutSeg(ln.stub, X_STUB, ln.y, ln.key);
+  layoutSeg(ln.stub, X_STUB, ln.y, ln.key, 'east');
 }
 for (const c of BRANCH_CELLS)
   addCell({berths: c.berths, x: c.x[0], y: c.y, w: c.x[1] - c.x[0], key: 'br'});
@@ -545,7 +598,7 @@ function harvestLog() {
     const ms = trainMs(t);
     if (!ms || ms > now - 5000 || ms < now - 30 * 60000) continue;
     if (!(t.twy_actual || t.confirmed)) continue;
-    if (t.cancelled || logged[t.uid]) continue;
+    if (logged[t.uid]) continue;   // cancelled-but-confirmed trains still passed
     logged[t.uid] = true;
     const frt = t.passenger === false || isFrtHc(t.headcode);
     passLog.unshift({
@@ -628,11 +681,14 @@ function drawOccupant(layer, cell, p, stackIdx) {
   }
   g.appendChild(rect);
   g.appendChild(el('text', {x:cell.x + cell.w/2, y:y+14, 'text-anchor':'middle',
-    fill:op.fg, 'font-size':12, 'font-family':"'Barlow Condensed',sans-serif",
-    'font-weight':700, 'letter-spacing':'.05em'}, p.headcode));
-  /* direction chevron on the leading edge (up rows → east/right) */
+    fill:op.fg, 'font-size': cell.w < 30 ? 10.5 : 12,
+    'font-family':"'Barlow Condensed',sans-serif",
+    'font-weight':700, 'letter-spacing': cell.w < 30 ? '0' : '.05em'}, p.headcode));
+  /* direction chevron on the leading edge (up rows → east/right) — only on cells
+     wide enough that the centred headcode won't collide with it (row direction is
+     also shown by the line label and the arrowhead at the line end) */
   const ln = LINE_OF[cell.key];
-  const dir = ln ? ln.dir : (cell.key === 'st' ? null : null);
+  const dir = (ln && cell.w >= 42) ? ln.dir : null;
   if (dir) {
     const cx = dir === 'up' ? cell.x + cell.w - 6 : cell.x + 6;
     const pts = dir === 'up'
@@ -666,7 +722,12 @@ function renderAppr() {
   const now = Date.now();
   const list = [];
   for (const t of trains) {
-    if (t.cancelled) continue;
+    // A train whose Twyford call is cancelled but which is physically running
+    // (a live TD berth fix) still passes the house — it just doesn't stop — so
+    // it belongs on the panel (and shows on the berth map).  Only drop trains
+    // cancelled with no physical presence (never ran / turned back short).
+    const live = tdPos[t.headcode];
+    if (t.cancelled && !(live && live.age_s < 300)) continue;
     const ms = trainMs(t);
     if (!ms || ms < now - 90000 || ms > now + 45 * 60000) continue;
     list.push(t);
@@ -688,11 +749,20 @@ function renderAppr() {
     const key  = trackKey(t) || '--';
     const chip = (key[0] === 'u' ? '→' : '←') + (key[1] === 'm' ? 'M' : 'R');
 
+    // "NOW" asserts the train is physically at the house — only claim it with
+    // live evidence (a recent TD berth fix or a recorded actual pass).  A purely
+    // scheduled train whose booked time has elapsed but that the berth feed
+    // can't see (so it's absent from the map) is shown as a muted "DUE" instead
+    // of pulsing NOW.
+    const lp = tdPos[t.headcode];
+    const sighted = (lp && lp.age_s < 150) || !!t.twy_actual;
     let eta, etaCls = '';
     if (t.at_station)        { eta = 'AT STN'; etaCls = 'warn'; }
     else if (t.held)         { eta = 'HELD';   etaCls = 'warn'; }
-    else if (diff <= 0)      { eta = 'NOW';    etaCls = 'now'; }
-    else if (diff <= 25000)  { eta = 'NOW';    etaCls = 'now'; }
+    else if (diff <= 25000)  {
+      if (sighted)           { eta = 'NOW';    etaCls = 'now'; }
+      else                   { eta = 'DUE';    etaCls = 'due'; }
+    }
     else if (diff < 90000)   { eta = Math.round(diff/1000) + '<span class="u">s</span>'; }
     else                     { eta = Math.round(diff/60000) + '<span class="u">min</span>'; }
 
@@ -708,6 +778,8 @@ function renderAppr() {
     else if (t.late_min == null) stat = '<span class="est">no rt</span>';
     else if (t.late_min >= 1) stat = '<span class="late">+' + t.late_min + '</span>';
     else                      stat = '<span class="ontime">on time</span>';
+    /* Twyford call cancelled but the train is physically running through */
+    if (t.cancelled) stat = '<span class="cancel">✗ not stopping</span>';
 
     /* live berth fix */
     const p = tdPos[t.headcode];

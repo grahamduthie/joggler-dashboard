@@ -617,6 +617,18 @@ Twyford / Reading), weighted by transit time. Conservative: a berth gets a posit
 bracketed by anchors within a few hops; otherwise it falls back to the RTT schedule. Refreshed
 every 120 s; the model persists across restarts and sharpens over time.
 
+**Static near-house berth fallback** (`_BERTH_MI`, 2026-07-06 eve): SMART only anchors berths to
+whole stations (coarse — every Twyford-area berth reads 0.1 mi, every Slough berth −12.5) and the
+chain-learner leaves the immediate throat berths (1623/1626/1614/1633…) with `dist_mi = None`.
+A corridor train was therefore **dropped from the list the instant it entered a positionless
+berth** — the worst moment (e.g. 4O38 seen leaving Maidenhead then vanishing at 1623). `_BERTH_MI`
+gives every corridor berth a coarse signed distance (interpolated west→east between the station
+anchors), used by `_berth_info` **only as a last resort** (SMART/chain still win when they have a
+real position). It also feeds the frontend's distance-based cell placement (mirrored as
+`BERTH_MI`). Values are approximate and tuned per observation — notably Up Main, where trains are
+heard passing the house at berths **1640→1626** (2 berths west of the earlier assumption), so those
+straddle 0 and the distance zero-crossing house-event fires there.
+
 **Live-berth ETA refinement** (`_berth_eta_to_house_s`, `_td_enrich_trains`): for a matched train
 with a live berth, `house_pass_ts` is refined from the real distance (speed by line/passenger),
 capped at 8 mi out (constant-speed estimate unreliable further, with intermediate stops). The live
@@ -650,7 +662,16 @@ source matched. Physical presence beats the name-token corridor heuristic; ident
 operator) is filled from the RTT pre-filter index or today's CIF. Trains sitting AT Maidenhead/
 Reading stations stay excluded (they may reverse, e.g. Elizabeth Line Maidenhead terminators).
 Trains also carry `td_dist_mi`/`td_place`/`td_berth`/`td_berth_age` so the frontends don't need
-to join `/api/td-live` themselves.
+to join `/api/td-live` themselves. **Identity guard** (2026-07-06 eve): if a synthesis candidate's
+known endpoints say it never passes Twyford (`_passes_twyford` false — e.g. a CrossCountry service
+from the north that reverses at Reading and sits in a D1 throat berth ~4.8 mi), it is skipped;
+known endpoints beat a lone ambiguous berth fix.
+
+**Phantom CIF drop** (`_phantom_cif`, 2026-07-06 eve): a CIF freight predicted to pass within
+`now + 600` s would already be inside the corridor reporting TD berths; if it has no sighting at
+all (`not confirmed and not td_berth and not twy_actual`) it isn't running — it's dropped so it
+can't show a bogus "N min". Freight further out is kept as a timetable prediction and reappears
+once TD sees it.
 
 **Stale-train filter**: after sorting, trains whose pass moment is long gone are dropped —
 confirmed keep 30 min (feeds the lineside passing log), unconfirmed estimates 12 min.
@@ -773,30 +794,44 @@ occupancy is ground truth for what's coming, how far away it is and how it's mov
 the trackboard (Barlow Condensed / Barlow / IBM Plex Mono; relief = teal, main = steel blue,
 house = amber).
 
-- **Berth panel (top, 398 px):** topological layout (cells evenly spaced per segment, not
-  distance-true), **WEST/Reading = LEFT**, north at top, rows top→bottom = Up Relief · Down
-  Relief · Up Main · Down Main (the real geographic order — matches Tracksy). Cell sequences
-  were derived from the learned CA berth chain (`berth_chain.json`) + SMART and are hardcoded
-  in the `LINES` array, west→east, e.g. Up Relief `1676…1642 → [1630 = TWY P4] → 1628…0594 →
-  [0574/0576 = MAID P4/5] → 0568`. Platform berths confirmed by CA dwell EWMAs (1630/1637
-  dwell ≈ 90–110 s; TWY P2 = 1618, P1 = 1655, MAID 0570/0573/0577).
+- **Berth panel (top, 398 px):** **WEST/Reading = LEFT**, north at top, rows top→bottom = Up
+  Relief · Down Relief · Up Main · Down Main (the real geographic order — matches Tracksy). Cell
+  sequences were derived from the learned CA berth chain (`berth_chain.json`) + SMART and are
+  hardcoded in the `LINES` array, west→east, e.g. Up Relief `1676…1642 → [1630 = TWY P4] →
+  1628…0594 → [0574/0576 = MAID P4/5] → 0568`.
+  **Distance-based cell placement** (2026-07-06 evening): cells are positioned by a per-berth
+  signed distance (`BERTH_MI`, mirrors backend `_BERTH_MI`) on **one shared scale per segment**,
+  not evenly spaced — so Main and Relief line up by real position and near-house berths cluster
+  at the house (the sparse fast lines no longer read as "off"). `segCenter()` maps distance→x
+  within the west/east segments; each cell tiles Voronoi-style (midpoint-to-midpoint, edge cells
+  to the segment bound) so they never overlap, floored so a 4-char headcode stays legible.
+  Distances are approximate interpolations between the station anchors (Reading +5.1 / Kennet Br
+  +3.34 / Twyford +0.1 / Maidenhead −6.7) — good enough for which-side-of-house + rough timing,
+  tuned per observation (e.g. **Up Main house crossing is at 1640→1626**, so those straddle 0 and
+  1626 is the UM `twy` cell; 1618 moved east). Platform berths from CA dwell EWMAs (TWY P4 = 1630,
+  P3 = 1637, P1 = 1655, MAID 0570/0573/0577).
   Extras: **Henley branch** rising top-left (P5 bay = A641/B641/R641, jn cell 1643/1632,
   mid-branch BYDN/BYUP "Wargrave · Shiplake", 1636 = Henley), **Crossrail stabling** stub
   top-right (3570/0578–0590/6296), **Reading box** (orange, trains inside Reading station
   berths shown as headcode chips), Twyford + Maidenhead station bands with Tracksy-orange
   platform bars, junction captions (Kennet Br Jn, Ruscombe Jn, Henley Br Jn), amber dashed
   house line + ★ east of the Twyford band (glows when a house-straddling berth 1628/1635/
-  1614/1633 is occupied <90 s).
+  1640/1626/1633 is occupied <90 s).
   Empty cells show their berth number faintly; occupied cells fill with the operator colour
-  (from the /api/trains headcode join), bold headcode, leading-edge direction chevron,
-  destination abbreviation underneath, amber dashed outline when held, dimmed when the fix
-  is >180 s old, faded stale cutoff 420 s. Extra occupants of one cell stack below (branch
-  cells stack upward). Only areas D1/D6 are mapped (D4 berth numbers could collide).
+  (from the /api/trains headcode join), bold headcode, leading-edge direction chevron (dropped
+  on cells <42 px so it can't collide with the headcode; row direction is still shown by the
+  line label + line-end arrowhead), destination abbreviation underneath, amber dashed outline
+  when held, dimmed when the fix is >180 s old, faded stale cutoff 420 s. Extra occupants of one
+  cell stack below (branch cells stack upward). Only areas D1/D6 are mapped (D4 could collide).
 - **Next past the house (bottom left):** all upcoming trains merged (both directions, next
-  45 min, sorted by `house_pass_ts`): big ETA countdown (`NOW` pulse / `HELD` / `AT STN`),
-  line chip (→M/←R in line colour), operator pill, destination + origin/headcode subline,
-  sched HH:MM + punctuality (`✓ actual` only once past), and live berth fix
-  `● berth · place · X.X mi` (falls back to `td_dist_mi`, then "~ schedule").
+  45 min, sorted by `house_pass_ts`): big ETA countdown, line chip (→M/←R in line colour),
+  operator pill, destination + origin/headcode subline, sched HH:MM + punctuality (`✓ actual`
+  only once past), and live berth fix `● berth · place · X.X mi` (falls back to `td_dist_mi`,
+  then "~ schedule"). ETA/list rules keeping the list honest vs the berth map (2026-07-06 eve):
+  a train whose Twyford **call is cancelled but which has a live berth fix** is kept (it still
+  passes the house) and flagged `✗ not stopping`; **`NOW` (pulse) only fires with a live sighting**
+  (recent TD fix or recorded actual pass) — a schedule-only train past its booked time shows a
+  muted **`DUE`** instead, since it isn't on the map; `HELD` / `AT STN` still take priority.
 - **Info pane (bottom right):** passing log (client-side, confirmed passes, last 30 min) +
   NRCC message + stats (trains next hour, freight count, live TD fixes).
 - Polling: /api/trains 15 s, /api/td-live 5 s (feed dot blinks green each tick, turns red
