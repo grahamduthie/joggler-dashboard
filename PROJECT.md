@@ -763,36 +763,47 @@ The proxy caches the access token and refreshes it 60 s before expiry without bl
 
 **Rate limits:** 30 req/min, 750/hr, 9000/day. Two queries per 30 s = 5,760/day (within limit).
 
-### lineside.html — Standalone "signalbox panel" detail SPA
+### lineside.html — Standalone TD berth panel SPA (Tracksy-style)
 
-Served at `GET /lineside`. Rebuilt 2026-07-06 as a close-up enthusiast view on a fixed
+Served at `GET /lineside`. Rebuilt again 2026-07-06 (second pass, same day) as a
+**Tracksy-style signalbox berth panel**: every TD berth section Reading → Maidenhead is drawn
+as a cell, and a train's describer lights the cell it currently occupies — physical berth
+occupancy is ground truth for what's coming, how far away it is and how it's moving. Fixed
 **1280×720 canvas** scaled to fill the window (`scaleToWindow`). Same font/colour system as
 the trackboard (Barlow Condensed / Barlow / IBM Plex Mono; relief = teal, main = steel blue,
 house = amber).
 
-- **Schematic (top, 296 px):** x-axis = true signed miles from the house (`xOf(mi) = 565 −
-  99·mi`; **WEST/Reading = LEFT, EAST/Maidenhead = RIGHT**), covering Reading (+5.1) to
-  Maidenhead (−6.7) with mile ticks, landmark verticals (Sonning Cutting, Ruscombe, Waltham),
-  a translucent Twyford station box on the relief pair, and the amber dashed house line + ★
-  (which enlarges/glows when a live train is within 0.35 mi). Four track rows in physical
-  order (Up Relief y104 … Down Main y236). Train blips: operator-coloured rounded rects with
-  destination abbreviation + headcode, green-stroked when live (berth fix), dashed/faded when
-  schedule-estimated, ⏸ amber-tinted when held/at-station, direction arrowheads (up → right).
-  **TD-only blips** (live fixes with no /api/trains match) are drawn from `/api/td-live` with
-  direction from the berth step — the raw radar view, including out-of-corridor movements.
-  Per-row declutter prevents label overlap.
-- **Four detail columns (middle, 236 px)**, one per line: destination + big ETA (`NOW` pulse /
-  `HELD` / `AT STN`), operator pill + headcode + origin, then mono meta lines — `sched HH:MM`
-  with `✓ actual` (only once the time has passed) or `exp HH:MM (+N)`, stops/passes + platform
-  + vehicle count + freight class, and the live fix `● <place> · X.X mi · berth NNNN` (or
-  "no live fix"). Two follow-on trains with times + headcodes at the column foot.
-- **Passing log (bottom left):** client-side log of confirmed passes (time-to-the-second, line
-  ↑M/↓R etc., headcode, destination), newest first, two columns, last 30 min.
-- **Info pane (bottom right):** NRCC network messages + stats (trains next hour, freight count,
-  live TD fixes).
-- Polling: /api/trains 15 s, /api/td-live 5 s (feed dot blinks green on each tick),
-  /api/nrcc 5 min; re-render every 1 s.
+- **Berth panel (top, 398 px):** topological layout (cells evenly spaced per segment, not
+  distance-true), **WEST/Reading = LEFT**, north at top, rows top→bottom = Up Relief · Down
+  Relief · Up Main · Down Main (the real geographic order — matches Tracksy). Cell sequences
+  were derived from the learned CA berth chain (`berth_chain.json`) + SMART and are hardcoded
+  in the `LINES` array, west→east, e.g. Up Relief `1676…1642 → [1630 = TWY P4] → 1628…0594 →
+  [0574/0576 = MAID P4/5] → 0568`. Platform berths confirmed by CA dwell EWMAs (1630/1637
+  dwell ≈ 90–110 s; TWY P2 = 1618, P1 = 1655, MAID 0570/0573/0577).
+  Extras: **Henley branch** rising top-left (P5 bay = A641/B641/R641, jn cell 1643/1632,
+  mid-branch BYDN/BYUP "Wargrave · Shiplake", 1636 = Henley), **Crossrail stabling** stub
+  top-right (3570/0578–0590/6296), **Reading box** (orange, trains inside Reading station
+  berths shown as headcode chips), Twyford + Maidenhead station bands with Tracksy-orange
+  platform bars, junction captions (Kennet Br Jn, Ruscombe Jn, Henley Br Jn), amber dashed
+  house line + ★ east of the Twyford band (glows when a house-straddling berth 1628/1635/
+  1614/1633 is occupied <90 s).
+  Empty cells show their berth number faintly; occupied cells fill with the operator colour
+  (from the /api/trains headcode join), bold headcode, leading-edge direction chevron,
+  destination abbreviation underneath, amber dashed outline when held, dimmed when the fix
+  is >180 s old, faded stale cutoff 420 s. Extra occupants of one cell stack below (branch
+  cells stack upward). Only areas D1/D6 are mapped (D4 berth numbers could collide).
+- **Next past the house (bottom left):** all upcoming trains merged (both directions, next
+  45 min, sorted by `house_pass_ts`): big ETA countdown (`NOW` pulse / `HELD` / `AT STN`),
+  line chip (→M/←R in line colour), operator pill, destination + origin/headcode subline,
+  sched HH:MM + punctuality (`✓ actual` only once past), and live berth fix
+  `● berth · place · X.X mi` (falls back to `td_dist_mi`, then "~ schedule").
+- **Info pane (bottom right):** passing log (client-side, confirmed passes, last 30 min) +
+  NRCC message + stats (trains next hour, freight count, live TD fixes).
+- Polling: /api/trains 15 s, /api/td-live 5 s (feed dot blinks green each tick, turns red
+  when TD silent >30 s), /api/nrcc 5 min; countdown re-render every 1 s.
 - Signal-aspect dots remain out (positions unconfirmed); `/api/td-live` still returns `signals`.
+- Reference screenshots of the real Tracksy layout: `ReadingToTwyford.png`,
+  `TwyfordToMaidenhead.png` (repo root).
 
 ### Buses View
 

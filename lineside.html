@@ -9,10 +9,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* ═══════════════════════════════════════════════════════════════════
-   LINESIDE TWYFORD — signalbox panel for the enthusiast, close-up.
+   LINESIDE TWYFORD — TD berth panel, Tracksy-style.
    Fixed 1280×720 canvas, scaled to fill the window.
-   Schematic x-axis is TRUE DISTANCE from the house (SMART/BPLAN chainage):
-   + = west (Reading, LEFT) · − = east (Maidenhead/London, RIGHT).
+   Every berth section Reading → Maidenhead drawn as a cell; a train's
+   TD describer lights the cell it occupies.  Topological layout
+   (cells evenly spaced per segment), west/Reading LEFT, north at TOP:
+   rows top→bottom = Up Relief · Down Relief · Up Main · Down Main,
+   Henley branch rising top-left, Crossrail stabling top-right.
    ═══════════════════════════════════════════════════════════════════ */
 :root {
   --bg:       #05070b;
@@ -59,6 +62,7 @@ body {
   background: var(--faint); transition: background .3s;
 }
 #feed-dot.on { background: var(--live); }
+#feed-dot.stale { background: var(--cancel); }
 #topdate {
   font-family: var(--cond); font-weight: 500; font-size: 16px;
   letter-spacing: .06em; color: var(--dim);
@@ -69,92 +73,76 @@ body {
 }
 #clock .sec { color: var(--faint); font-size: 17px; }
 
-/* ── Schematic ── */
-#schematic { position: relative; height: 296px; border-bottom: 1px solid var(--rule);
+/* ── Berth panel ── */
+#schematic { position: relative; height: 398px; border-bottom: 1px solid var(--rule);
   background:
-    radial-gradient(1100px 340px at 50% -80px, rgba(63,183,196,0.05), transparent 70%),
+    radial-gradient(1100px 440px at 50% -80px, rgba(63,183,196,0.05), transparent 70%),
     var(--panel);
 }
 #track-svg { position: absolute; inset: 0; }
 
-/* ── Line detail columns ── */
-#cols { display: flex; height: 236px; border-bottom: 1px solid var(--rule); }
-.col { flex: 1; min-width: 0; border-right: 1px solid var(--rule);
-       display: flex; flex-direction: column; }
-.col:last-child { border-right: none; }
-.col-hdr {
-  height: 26px; flex: 0 0 auto;
-  display: flex; align-items: center; gap: 7px; padding: 0 12px;
-  font-family: var(--cond); font-weight: 600; font-size: 15px;
-  letter-spacing: .12em;
-  border-bottom: 1px solid var(--rule);
-  background: rgba(255,255,255,0.015);
-}
-.col[data-ln="relief"] .col-hdr { color: var(--relief); }
-.col[data-ln="main"]   .col-hdr { color: var(--main-ln); }
-.col-body { flex: 1; min-height: 0; padding: 8px 12px 6px; display: flex; flex-direction: column; }
-.col-empty {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  font-family: var(--cond); font-size: 16px; letter-spacing: .14em; color: var(--faint);
-}
-.nx-destrow { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.nx-dest {
-  font-family: var(--cond); font-weight: 700; font-size: 30px; line-height: 1;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
-}
-.nx-dest.cancelled { text-decoration: line-through; color: var(--cancel); }
-.nx-eta {
-  margin-left: auto; flex-shrink: 0;
-  font-family: var(--cond); font-weight: 700; font-size: 30px; line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.nx-eta .u { font-size: 15px; color: var(--dim); font-weight: 600; }
-.nx-eta.now { color: var(--amber); animation: pulse 1.2s infinite; }
-.nx-eta.warn { color: var(--late); font-size: 21px; }
-@keyframes pulse { 50% { opacity: .5; } }
-.nx-oprow {
-  display: flex; align-items: center; gap: 8px; margin-top: 5px;
-  font-size: 13px; color: var(--dim);
-  white-space: nowrap; overflow: hidden;
-}
-.op-pill {
-  font-family: var(--cond); font-weight: 600; font-size: 12px;
-  letter-spacing: .04em; padding: 1px 7px; border-radius: 3px; flex-shrink: 0;
-}
-.nx-hc { font-family: var(--mono); font-size: 12px; color: var(--dim); flex-shrink: 0; }
-.nx-meta {
-  margin-top: 6px; font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
-  color: var(--dim); font-variant-numeric: tabular-nums;
-}
-.nx-meta .lbl { color: var(--faint); }
-.nx-meta .ontime { color: var(--ontime); }
-.nx-meta .late { color: var(--late); }
-.nx-meta .cancel { color: var(--cancel); }
-.nx-meta .live { color: var(--live); }
-.nx-meta .est { color: var(--faint); font-style: italic; }
-.nx-follow {
-  margin-top: auto; border-top: 1px solid var(--rule); padding-top: 5px;
-  font-size: 12px; color: var(--faint); line-height: 1.7;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap; overflow: hidden;
-}
-.nx-follow b { color: var(--dim); font-weight: 500; }
-.nx-follow .fhc { font-family: var(--mono); font-size: 11px; }
-
-/* ── Bottom strip: log + alerts ── */
-#bottom { display: flex; height: 145px; }
-#log-pane { flex: 1.6; border-right: 1px solid var(--rule); padding: 7px 14px 6px;
-            display: flex; flex-direction: column; min-width: 0; }
-#info-pane { flex: 1; padding: 7px 14px 6px; display: flex; flex-direction: column; min-width: 0; }
+/* ── Bottom: approaching + log/info ── */
+#bottom { display: flex; height: 278px; }
+#appr-pane { flex: 1.62; border-right: 1px solid var(--rule);
+             padding: 6px 14px 4px; display: flex; flex-direction: column; min-width: 0; }
+#info-pane { flex: 1; padding: 6px 14px 4px; display: flex; flex-direction: column; min-width: 0; }
 .pane-hdr {
   font-family: var(--cond); font-weight: 600; font-size: 13px;
-  letter-spacing: .16em; color: var(--faint); margin-bottom: 4px;
-  display: flex; gap: 10px; align-items: baseline;
+  letter-spacing: .16em; color: var(--faint); margin-bottom: 3px;
+  display: flex; gap: 10px; align-items: baseline; flex: 0 0 auto;
 }
 .pane-hdr .cnt { font-family: var(--mono); font-size: 11px; }
-#log-body { flex: 1; overflow: hidden; column-count: 2; column-gap: 22px; }
+#appr-body { flex: 1; overflow: hidden; }
+#appr-empty {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  font-family: var(--cond); font-size: 17px; letter-spacing: .14em; color: var(--faint);
+}
+.ap-row {
+  display: grid; grid-template-columns: 78px 40px 46px 1fr 140px 194px;
+  gap: 8px; align-items: center; height: 40px;
+  border-bottom: 1px solid rgba(20,27,40,.7);
+}
+.ap-eta {
+  font-family: var(--cond); font-weight: 700; font-size: 27px; line-height: 1;
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.ap-eta .u { font-size: 13px; color: var(--dim); font-weight: 600; }
+.ap-eta.now { color: var(--amber); animation: pulse 1.2s infinite; }
+.ap-eta.warn { color: var(--late); font-size: 17px; }
+@keyframes pulse { 50% { opacity: .5; } }
+.ap-chip {
+  font-family: var(--cond); font-weight: 700; font-size: 14px; letter-spacing: .06em;
+  text-align: center; border: 1px solid; border-radius: 3px; padding: 1px 0;
+}
+.ap-chip.r { color: var(--relief); border-color: rgba(63,183,196,.5); }
+.ap-chip.m { color: var(--main-ln); border-color: rgba(111,159,216,.5); }
+.op-pill {
+  font-family: var(--cond); font-weight: 600; font-size: 12px; text-align: center;
+  letter-spacing: .04em; padding: 1px 0; border-radius: 3px;
+}
+.ap-name { min-width: 0; line-height: 1.15; }
+.ap-dest {
+  font-family: var(--cond); font-weight: 700; font-size: 19px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ap-sub {
+  font-size: 11px; color: var(--dim); font-family: var(--mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ap-sched { font-family: var(--mono); font-size: 12px; color: var(--dim);
+            font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.ap-live  { font-family: var(--mono); font-size: 11.5px;
+            font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.ontime { color: var(--ontime); }
+.late   { color: var(--late); }
+.cancel { color: var(--cancel); }
+.live   { color: var(--live); }
+.est    { color: var(--faint); font-style: italic; }
+.lbl    { color: var(--faint); }
+
+#log-body { flex: 1; overflow: hidden; }
 .log-row {
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.75;
+  font-family: var(--mono); font-size: 12px; line-height: 1.68;
   color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
@@ -162,15 +150,16 @@ body {
 .log-row .ln { font-size: 11px; }
 .log-row .ln.r { color: var(--relief); }
 .log-row .ln.m { color: var(--main-ln); }
-.log-row .d { color: var(--dim); font-family: var(--body); font-size: 12.5px; }
+.log-row .d { color: var(--dim); font-family: var(--body); font-size: 12px; }
 .log-row .hcc { color: var(--faint); }
 #log-empty { color: var(--faint); font-size: 12px; font-style: italic; }
-#nrcc-body { flex: 1; overflow: hidden; font-size: 12.5px; line-height: 1.45; color: var(--late); }
+#nrcc-body { flex: 0 0 auto; max-height: 44px; overflow: hidden; margin-top: 3px;
+             font-size: 12px; line-height: 1.4; color: var(--late); }
 #nrcc-body .none { color: var(--faint); font-style: italic; }
 #stats-row {
   border-top: 1px solid var(--rule); margin-top: 4px; padding-top: 4px;
   font-family: var(--mono); font-size: 11.5px; color: var(--faint);
-  display: flex; gap: 16px; font-variant-numeric: tabular-nums;
+  display: flex; gap: 16px; font-variant-numeric: tabular-nums; flex: 0 0 auto;
 }
 #stats-row b { color: var(--dim); font-weight: 500; }
 </style>
@@ -179,7 +168,7 @@ body {
 
 <div id="topbar">
   <span class="title">LINESIDE</span>
-  <span class="subtitle">TWYFORD · READING ⇄ MAIDENHEAD · TD D1/D6</span>
+  <span class="subtitle">TWYFORD BERTH PANEL · READING ⇄ MAIDENHEAD · TD D1/D6</span>
   <span class="fill"></span>
   <span id="topdate">—</span>
   <span id="clock">--:--<span class="sec">--</span></span>
@@ -187,38 +176,21 @@ body {
 </div>
 
 <div id="schematic">
-  <svg id="track-svg" viewBox="0 0 1280 296" xmlns="http://www.w3.org/2000/svg">
+  <svg id="track-svg" viewBox="0 0 1280 398" xmlns="http://www.w3.org/2000/svg">
     <g id="static-layer"></g>
+    <g id="cells-layer"></g>
     <g id="trains-layer"></g>
   </svg>
 </div>
 
-<div id="cols">
-  <div class="col" data-ln="relief" id="col-ur">
-    <div class="col-hdr">→ UP RELIEF</div>
-    <div class="col-body" id="body-ur"></div>
-  </div>
-  <div class="col" data-ln="relief" id="col-dr">
-    <div class="col-hdr">← DOWN RELIEF</div>
-    <div class="col-body" id="body-dr"></div>
-  </div>
-  <div class="col" data-ln="main" id="col-um">
-    <div class="col-hdr">→ UP MAIN</div>
-    <div class="col-body" id="body-um"></div>
-  </div>
-  <div class="col" data-ln="main" id="col-dm">
-    <div class="col-hdr">← DOWN MAIN</div>
-    <div class="col-body" id="body-dm"></div>
-  </div>
-</div>
-
 <div id="bottom">
-  <div id="log-pane">
-    <div class="pane-hdr">PASSING LOG <span class="cnt" id="log-cnt"></span></div>
-    <div id="log-body"><div id="log-empty">Nothing logged yet this session</div></div>
+  <div id="appr-pane">
+    <div class="pane-hdr">NEXT PAST THE HOUSE <span class="cnt" id="appr-cnt"></span></div>
+    <div id="appr-body"></div>
   </div>
   <div id="info-pane">
-    <div class="pane-hdr">NETWORK MESSAGES</div>
+    <div class="pane-hdr">PASSING LOG <span class="cnt" id="log-cnt"></span></div>
+    <div id="log-body"><div id="log-empty">Nothing logged yet this session</div></div>
     <div id="nrcc-body"><span class="none">No disruption reported</span></div>
     <div id="stats-row">
       <span>next hour <b id="st-hour">–</b></span>
@@ -231,31 +203,56 @@ body {
 <script>
 'use strict';
 
-/* ── Geometry: true distance → x ─────────────────────────────────────
-   dist_mi: + = west of house (Reading side, LEFT); − = east (RIGHT).   */
-const PX_PER_MI = 99, HOUSE_X = 565;
-const X_MIN = 16, X_MAX = 1264;
-const xOf = mi => HOUSE_X - mi * PX_PER_MI;
-const inView = mi => { const x = xOf(mi); return x > X_MIN - 8 && x < X_MAX + 8; };
+/* ═════════ Berth layout (derived from learned TD CA chains + SMART) ═════════
+   Cell order is geographic WEST → EAST.  Berth IDs are unique across D1/D6 in
+   this corridor (fringe berths 16xx are the same physical berth in both). */
+const X_WEST = [118, 585];    // Reading throat → Twyford
+const X_TWY  = [592, 656];    // Twyford platform column
+const X_EAST = [666, 1078];   // house → Maidenhead approach
+const X_MAID = [1086, 1150];  // Maidenhead platform column
+const X_STUB = [1158, 1204];  // east of Maidenhead
+const HOUSE_X = 676;
 
-/* Track rows, physical order from the house (top = nearest) */
-const ROWS = [
-  {key:'ur', y:104, name:'UP RELIEF',   cls:'relief', dir:'up',   main:false},
-  {key:'dr', y:148, name:'DOWN RELIEF', cls:'relief', dir:'down', main:false},
-  {key:'um', y:192, name:'UP MAIN',     cls:'main',   dir:'up',   main:true},
-  {key:'dm', y:236, name:'DOWN MAIN',   cls:'main',   dir:'down', main:true},
+const LINES = [
+  {key:'ur', y:152, main:false, dir:'up',   name:'UP RELIEF',  plat:'4',
+   west:['1676','1668','1664','1660','1652','1648','1644','1642'],
+   twy:['1630'],
+   east:['1628','1624','1622','1620','1616','1612','1608','1604','0598','0594'],
+   maid:['0574','0576'], stub:['0568']},
+  {key:'dr', y:208, main:false, dir:'down', name:'DOWN RELIEF', plat:'3',
+   west:['1687','1677','1669','1665','1661','1657'],
+   twy:['1637'],
+   east:['1635','1631','1627','1623','1611','1607','1603','0595'],
+   maid:['0577'], stub:['0571']},
+  {key:'um', y:264, main:true,  dir:'up',   name:'UP MAIN',     plat:'2',
+   west:['1672','1666','1662','1658','1650','1646','1640','1626'],
+   twy:['1618'],
+   east:['1614','1610','1606','1602','0596','0592'],
+   maid:['0570'], stub:['0566']},
+  {key:'dm', y:320, main:true,  dir:'down', name:'DOWN MAIN',   plat:'1',
+   west:['1675','1667','1663','1659'],
+   twy:['1655'],
+   east:['1633','1629','1625','1621','1609','1605','1601','0593'],
+   maid:['0573'], stub:['0569']},
 ];
-const ROW_Y = {ur:104, dr:148, um:192, dm:236};
 
-/* Landmarks (mi from house) — SMART anchors + waypoints for flavour */
-const LANDMARKS = [
-  {mi:  5.1, big: true,  label: 'READING'},
-  {mi:  2.6, big: false, label: 'Sonning Cutting'},
-  {mi:  0.25,big: false, label: ''},          // Twyford station box drawn separately
-  {mi: -1.4, big: false, label: 'Ruscombe'},
-  {mi: -3.7, big: false, label: 'Waltham'},
-  {mi: -6.7, big: true,  label: 'MAIDENHEAD'},
+/* Henley branch (single line, top-left) + Crossrail stabling (top-right) */
+const BRANCH_CELLS = [
+  {berths:['1636'],               x:[246,308], y:64,  cap:'HENLEY-ON-THAMES', capAbove:true},
+  {berths:['BYDN','BYUP'],        x:[330,412], y:64,  cap:'WARGRAVE · SHIPLAKE'},
+  {berths:['1643','1632'],        x:[462,524], y:86},
+  {berths:['A641','B641','R641'], x:[592,656], y:118, cap:'P5 BAY', capAbove:true},
 ];
+const STAB_CELL = {berths:['3570','0578','0580','0582','0584','0586','0588','0590','6296'],
+                   x:[956,1046], y:104, cap:'CROSSRAIL STABLING', capAbove:true};
+
+/* Trains inside Reading station show as chips in the Reading box */
+const READ_BERTHS = ['1684','1685','1686','1688','1694','1697','1698','1702','1706',
+  '1708','1709','1711','1716','1718','1721','1724','1727','1730','1731','1732','1733',
+  '1740','SSTE','A701','B701','C701','A703','B703','C703','A705','B705','C705','R701'];
+
+/* Berths that straddle the house (first section east of the platforms) */
+const HOUSE_BERTHS = {'1628':1, '1635':1, '1614':1, '1633':1};
 
 const C_RELIEF = '#3fb7c4', C_MAIN = '#6f9fd8', C_AMBER = '#ffb000';
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -266,68 +263,150 @@ function el(tag, attrs, text) {
   return e;
 }
 
+/* Build berth → cell index.  Each cell: {x, y, w, key, berths} */
+const CELLS = [];          // draw order
+const BERTH_CELL = {};     // berth id → cell
+const READ_SET = {};
+for (const b of READ_BERTHS) READ_SET[b] = 1;
+
+function addCell(cell) {
+  CELLS.push(cell);
+  for (const b of cell.berths) BERTH_CELL[b] = cell;
+}
+function layoutSeg(berths, xr, y, key) {
+  const n = berths.length, gap = 3;
+  const w = (xr[1] - xr[0] - (n - 1) * gap) / n;
+  berths.forEach((b, i) =>
+    addCell({berths:[b], x: xr[0] + i * (w + gap), y, w, key}));
+}
+for (const ln of LINES) {
+  layoutSeg(ln.west, X_WEST, ln.y, ln.key);
+  addCell({berths: ln.twy,  x: X_TWY[0],  y: ln.y, w: X_TWY[1]  - X_TWY[0],  key: ln.key, plat: true});
+  layoutSeg(ln.east, X_EAST, ln.y, ln.key);
+  addCell({berths: ln.maid, x: X_MAID[0], y: ln.y, w: X_MAID[1] - X_MAID[0], key: ln.key, plat: true});
+  layoutSeg(ln.stub, X_STUB, ln.y, ln.key);
+}
+for (const c of BRANCH_CELLS)
+  addCell({berths: c.berths, x: c.x[0], y: c.y, w: c.x[1] - c.x[0], key: 'br'});
+addCell({berths: STAB_CELL.berths, x: STAB_CELL.x[0], y: STAB_CELL.y,
+         w: STAB_CELL.x[1] - STAB_CELL.x[0], key: 'st'});
+
+const LINE_OF = {};   // row key → line def
+for (const ln of LINES) LINE_OF[ln.key] = ln;
+
+/* ── Static panel ── */
 function drawStatic() {
   const g = document.getElementById('static-layer');
-  // landmark verticals + labels
-  for (const lm of LANDMARKS) {
-    if (!lm.label) continue;
-    const x = xOf(lm.mi);
-    g.appendChild(el('line', {x1:x, y1:34, x2:x, y2:262,
-      stroke:'#101a28', 'stroke-width':1, 'stroke-dasharray':'2,6'}));
-    g.appendChild(el('text', {x:x, y:24, fill: lm.big ? '#41597a' : '#2a3c54',
-      'font-size': lm.big ? 13 : 11, 'text-anchor':'middle',
-      'font-family':"'Barlow Condensed',sans-serif", 'font-weight':600,
-      'letter-spacing':'.12em'}, lm.label));
+  const capFont = {'font-family':"'Barlow Condensed',sans-serif", 'font-weight':600,
+                   'letter-spacing':'.12em'};
+
+  /* running lines */
+  for (const ln of LINES) {
+    const col = ln.main ? C_MAIN : C_RELIEF;
+    g.appendChild(el('line', {x1:106, y1:ln.y, x2:X_STUB[1]+18, y2:ln.y,
+      stroke: ln.main ? '#0e1c30' : '#0c2226', 'stroke-width':10}));
+    g.appendChild(el('line', {x1:106, y1:ln.y, x2:X_STUB[1]+18, y2:ln.y,
+      stroke: col, 'stroke-width':1.25, opacity:0.5}));
+    g.appendChild(el('text', Object.assign({x:120, y:ln.y-15, fill:col, opacity:0.85,
+      'font-size':11}, capFont),
+      (ln.dir === 'up' ? '→ ' : '← ') + ln.name));
+    /* direction arrowhead at the right end */
+    const ax = X_STUB[1] + 26, half = ln.y;
+    g.appendChild(el('polygon', {points: ln.dir === 'up'
+        ? `${ax},${half} ${ax-7},${half-4} ${ax-7},${half+4}`
+        : `${ax-7},${half} ${ax},${half-4} ${ax},${half+4}`,
+      fill: col, opacity:0.55}));
   }
-  // mile ticks every mile
-  for (let mi = -6; mi <= 5; mi++) {
-    const x = xOf(mi);
-    g.appendChild(el('line', {x1:x, y1:256, x2:x, y2:262, stroke:'#22334a', 'stroke-width':1}));
-    g.appendChild(el('text', {x:x, y:276, fill:'#2a3c54', 'font-size':10,
-      'text-anchor':'middle', 'font-family':"'IBM Plex Mono',monospace"},
-      mi === 0 ? '★' : Math.abs(mi) + 'mi'));
+
+  /* Henley branch line */
+  g.appendChild(el('line', {x1:240, y1:64, x2:470, y2:64,
+    stroke:'#0c2226', 'stroke-width':10}));
+  g.appendChild(el('line', {x1:470, y1:64, x2:560, y2:118,
+    stroke:'#0c2226', 'stroke-width':10}));
+  g.appendChild(el('line', {x1:560, y1:118, x2:656, y2:118,
+    stroke:'#0c2226', 'stroke-width':10}));
+  g.appendChild(el('line', {x1:560, y1:118, x2:532, y2:152,
+    stroke:'#0c2226', 'stroke-width':7}));
+  for (const seg of [[240,64,470,64],[470,64,560,118],[560,118,656,118],[560,118,532,152]])
+    g.appendChild(el('line', {x1:seg[0], y1:seg[1], x2:seg[2], y2:seg[3],
+      stroke:C_RELIEF, 'stroke-width':1, opacity:0.4}));
+  g.appendChild(el('line', {x1:240, y1:56, x2:240, y2:72, stroke:'#274058', 'stroke-width':3}));
+
+  /* Crossrail stabling stub */
+  g.appendChild(el('line', {x1:950, y1:104, x2:1064, y2:104,
+    stroke:'#0c2226', 'stroke-width':10}));
+  g.appendChild(el('line', {x1:1064, y1:104, x2:1104, y2:152,
+    stroke:'#0c2226', 'stroke-width':7}));
+  for (const seg of [[950,104,1064,104],[1064,104,1104,152]])
+    g.appendChild(el('line', {x1:seg[0], y1:seg[1], x2:seg[2], y2:seg[3],
+      stroke:C_RELIEF, 'stroke-width':1, opacity:0.35}));
+
+  /* captions for branch/stub cells */
+  for (const c of BRANCH_CELLS.concat([STAB_CELL])) {
+    if (!c.cap) continue;
+    const cx = (c.x[0] + c.x[1]) / 2;
+    const cy = c.capAbove ? c.y - 16 : c.y + 22;
+    g.appendChild(el('text', Object.assign({x:cx, y:cy, fill:'#41597a',
+      'font-size':10, 'text-anchor':'middle'}, capFont), c.cap));
   }
-  // tracks
-  for (const r of ROWS) {
-    const col = r.main ? C_MAIN : C_RELIEF;
-    g.appendChild(el('line', {x1:X_MIN, y1:r.y, x2:X_MAX, y2:r.y,
-      stroke: r.main ? '#0e1c30' : '#0c2226', 'stroke-width':9}));
-    g.appendChild(el('line', {x1:X_MIN, y1:r.y, x2:X_MAX, y2:r.y,
-      stroke: col, 'stroke-width':1.5, opacity:0.65}));
-    // labels each side, above the blip envelope so trains never hide them
-    for (const anchor of [[X_MIN+4,'start'],[X_MAX-4,'end']]) {
-      g.appendChild(el('text', {x:anchor[0], y:r.y-16, fill:col, opacity:0.8,
-        'font-size':10, 'text-anchor':anchor[1],
-        'font-family':"'Barlow Condensed',sans-serif", 'font-weight':600,
-        'letter-spacing':'.1em'},
-        (r.dir === 'up' ? '→ ' : '← ') + r.name));
+
+  /* Reading box */
+  g.appendChild(el('rect', {x:14, y:130, width:92, height:212, rx:4,
+    fill:'rgba(255,176,0,0.045)', stroke:'#7a5a1e', 'stroke-width':1.2}));
+  g.appendChild(el('text', Object.assign({x:30, y:236, fill:'#c8963c', 'font-size':15,
+    'text-anchor':'middle', transform:'rotate(-90 30 236)'}, capFont), 'READING'));
+  g.appendChild(el('text', Object.assign({x:60, y:124, fill:'#41597a', 'font-size':10,
+    'text-anchor':'middle'}, capFont), '5.1 MI WEST'));
+
+  /* station bands + platform bars: Twyford + Maidenhead */
+  for (const st of [
+      {x:X_TWY,  name:'TWYFORD',    sub:'HOUSE +0.2 MI'},
+      {x:X_MAID, name:'MAIDENHEAD', sub:'6.7 MI EAST'}]) {
+    const x0 = st.x[0] - 6, x1 = st.x[1] + 6;
+    g.appendChild(el('rect', {x:x0, y:132, width:x1-x0, height:206, rx:3,
+      fill:'#0b1520', 'fill-opacity':0.5, stroke:'#274058', 'stroke-width':1}));
+    g.appendChild(el('text', Object.assign({x:(x0+x1)/2, y:126, fill:'#41597a',
+      'font-size':12, 'text-anchor':'middle'}, capFont), st.name));
+    g.appendChild(el('text', Object.assign({x:(x0+x1)/2, y:352, fill:'#2a3c54',
+      'font-size':9, 'text-anchor':'middle'}, capFont), st.sub));
+    /* platform bars, Tracksy-orange: p4/5 above UR · p3/2 island · p1 below DM */
+    for (const bar of [{y:136, n:'4·5'}, {y:233, n:'3·2'}, {y:331, n:'1'}]) {
+      g.appendChild(el('rect', {x:x0+4, y:bar.y, width:x1-x0-8, height:5, rx:1,
+        fill:'#b87a1e', opacity:0.8}));
     }
   }
-  // direction hints
-  g.appendChild(el('text', {x:X_MIN+4, y:292, fill:'#41597a', 'font-size':11,
-    'font-family':"'Barlow Condensed',sans-serif", 'letter-spacing':'.1em'},
-    '← WEST · READING'));
-  g.appendChild(el('text', {x:X_MAX-4, y:292, fill:'#41597a', 'font-size':11,
-    'text-anchor':'end', 'font-family':"'Barlow Condensed',sans-serif",
-    'letter-spacing':'.1em'}, 'LONDON · EAST →'));
-  // Twyford station: platforms on the relief pair
-  const sx1 = xOf(0.45), sx2 = xOf(0.08);
-  g.appendChild(el('rect', {x:sx1, y:86, width:sx2-sx1, height:80, rx:3,
-    fill:'#0b1520', 'fill-opacity':0.45, stroke:'#274058', 'stroke-width':1}));
-  g.appendChild(el('rect', {x:sx1+2, y:92,  width:sx2-sx1-4, height:6, fill:'#16283a'}));
-  g.appendChild(el('rect', {x:sx1+2, y:156, width:sx2-sx1-4, height:6, fill:'#16283a'}));
-  g.appendChild(el('text', {x:(sx1+sx2)/2, y:81, fill:'#41597a', 'font-size':12,
-    'text-anchor':'middle', 'font-family':"'Barlow Condensed',sans-serif",
-    'font-weight':600, 'letter-spacing':'.14em'}, 'TWYFORD'));
-  // the house
-  g.appendChild(el('line', {x1:HOUSE_X, y1:40, x2:HOUSE_X, y2:258,
-    stroke:C_AMBER, 'stroke-width':1, 'stroke-dasharray':'4,4', opacity:0.55}));
-  const star = el('text', {x:HOUSE_X, y:46, fill:C_AMBER, 'font-size':17,
-    'text-anchor':'middle', id:'house-star'}, '★');
-  g.appendChild(star);
-  g.appendChild(el('text', {x:HOUSE_X+6, y:274, fill:'#8a6a10', 'font-size':10,
-    'font-family':"'Barlow Condensed',sans-serif", 'letter-spacing':'.12em'},
-    'HOUSE'));
+
+  /* the house */
+  g.appendChild(el('line', {x1:HOUSE_X, y1:36, x2:HOUSE_X, y2:352,
+    stroke:C_AMBER, 'stroke-width':1, 'stroke-dasharray':'4,4', opacity:0.5}));
+  g.appendChild(el('text', {x:HOUSE_X, y:30, fill:C_AMBER, 'font-size':16,
+    'text-anchor':'middle', id:'house-star'}, '★'));
+  g.appendChild(el('text', Object.assign({x:HOUSE_X+5, y:362, fill:'#8a6a10',
+    'font-size':10}, capFont), 'HOUSE'));
+
+  /* junction captions */
+  g.appendChild(el('text', Object.assign({x:150, y:362, fill:'#2a3c54', 'font-size':9},
+    capFont), 'KENNET BR JN'));
+  g.appendChild(el('text', Object.assign({x:790, y:362, fill:'#2a3c54', 'font-size':9,
+    'text-anchor':'middle'}, capFont), 'RUSCOMBE JN'));
+  g.appendChild(el('text', Object.assign({x:492, y:110, fill:'#2a3c54', 'font-size':9,
+    'text-anchor':'middle'}, capFont), 'HENLEY BR JN'));
+
+  /* compass corners */
+  g.appendChild(el('text', Object.assign({x:16, y:390, fill:'#41597a', 'font-size':11},
+    capFont), '◀ WEST · READING'));
+  g.appendChild(el('text', Object.assign({x:1264, y:390, fill:'#41597a', 'font-size':11,
+    'text-anchor':'end'}, capFont), 'MAIDENHEAD · LONDON ▶'));
+
+  /* empty berth cells (drawn once; occupancy overlays on trains-layer) */
+  const cg = document.getElementById('cells-layer');
+  for (const c of CELLS) {
+    cg.appendChild(el('rect', {x:c.x, y:c.y-10, width:c.w, height:20, rx:3,
+      fill:'#0d1420', stroke: c.plat ? '#2c405a' : '#1c2a3e', 'stroke-width':1}));
+    cg.appendChild(el('text', {x:c.x + c.w/2, y:c.y+3.5, fill:'#2f4058',
+      'font-size':7.5, 'text-anchor':'middle', opacity:0.9,
+      'font-family':"'IBM Plex Mono',monospace"}, c.berths[0]));
+  }
 }
 
 /* ── Operator colours ── */
@@ -340,11 +419,11 @@ const OPS = {
 };
 const isFrtHc = hc => hc && '45678'.indexOf(hc[0]) >= 0;
 function opInfo(t) {
-  const o = OPS[t.op_code];
+  const o = t && OPS[t.op_code];
   if (o) return o;
-  if (t.passenger === false || isFrtHc(t.headcode))
+  if (t && (t.passenger === false || isFrtHc(t.headcode)))
     return {bg:'#7d8f4a', fg:'#111504', ab:'FRT'};
-  return {bg:'#3c4c60', fg:'#dfe7f0', ab:(t.op_code || '?')};
+  return {bg:'#3c4c60', fg:'#dfe7f0', ab:(t && t.op_code) || '?'};
 }
 function frtClass(hc) {
   const c = hc ? hc[0] : '';
@@ -366,12 +445,13 @@ const DEST_ABBR = {
   'Reading':'RDG','Maidenhead':'MAI','Slough':'SLO','Ealing Broadway':'EAL',
   'Abbey Wood':'ABW','Shenfield':'SHF','Heathrow Terminal 4':'HT4',
   'Heathrow Terminal 5':'HT5','Heathrow Terminals 1-3':'HT1','Twyford':'TWY',
+  'Henley-on-Thames':'HEN',
 };
 function destAbbr(d) {
-  if (!d) return '???';
+  if (!d) return '';
   if (DEST_ABBR[d]) return DEST_ABBR[d];
   const w = d.split(/[\s\-]/)[0].replace(/[^A-Za-z]/g, '');
-  return (w.slice(0, 3) || '???').toUpperCase();
+  return (w.slice(0, 3) || '').toUpperCase();
 }
 function shortPlace(name) {
   if (!name) return '';
@@ -415,6 +495,7 @@ const fmtHMS = v => {
 
 /* ── State ── */
 let trains = [];
+let hcTrain = {};      // headcode → train (schedule/identity join)
 let tdPos = {};        // headcode → live berth fix
 let nrccMsgs = [];
 let lastTd = 0;
@@ -430,6 +511,8 @@ function trackKey(t) {
 function fetchTrains() {
   fetch('/api/trains').then(r => r.json()).then(d => {
     trains = d.trains || [];
+    hcTrain = {};
+    for (const t of trains) if (t.headcode) hcTrain[t.headcode] = t;
     harvestLog();
     render();
   }).catch(() => {});
@@ -438,13 +521,14 @@ function fetchTd() {
   fetch('/api/td-live').then(r => r.json()).then(d => {
     tdPos = {};
     for (const p of (d.positions || [])) {
-      if (p.age_s < 300) tdPos[p.headcode] = p;
+      if ((p.area === 'D1' || p.area === 'D6') && p.age_s < 420) tdPos[p.headcode] = p;
     }
     lastTd = Date.now();
     const dot = document.getElementById('feed-dot');
+    dot.classList.remove('stale');
     dot.classList.add('on');
     setTimeout(() => dot.classList.remove('on'), 450);
-    renderSchematic();
+    renderPanel();
   }).catch(() => {});
 }
 function fetchNrcc() {
@@ -475,212 +559,191 @@ function harvestLog() {
   if (passLog.length > 12) passLog.length = 12;
 }
 
-/* ── Schematic trains ── */
-function renderSchematic() {
+/* ── Berth occupancy overlay ── */
+function renderPanel() {
   const layer = document.getElementById('trains-layer');
   while (layer.firstChild) layer.removeChild(layer.firstChild);
-  const now = Date.now();
-  const shown = {};
-  const W = 62, H = 26;
 
-  // schedule-known trains (live berth pos preferred, else time-estimated pos)
-  for (const t of trains) {
-    if (t.cancelled) continue;
-    const key = trackKey(t);
-    if (!key) continue;
-    let mi = null, live = false;
-    const p = tdPos[t.headcode];
-    if (p && p.dist_mi != null && p.age_s < 150) { mi = p.dist_mi; live = true; }
-    else {
-      const ms = trainMs(t);
-      if (!ms) continue;
-      const dtH = (ms - now) / 3600000;
-      if (dtH < -0.08 || dtH > 0.5) continue;
-      const mph = t.track === 'Main'
-        ? (t.passenger === false ? 50 : 90) : (t.passenger === false ? 35 : 60);
-      mi = (t.direction === 'up' ? 1 : -1) * dtH * mph;
-    }
-    if (mi == null || !inView(mi)) continue;
-    const frt = t.passenger === false || isFrtHc(t.headcode);
-    shown[t.headcode] = {
-      hc: t.headcode, mi, live, key,
-      held: !!t.held, stn: !!t.at_station,
-      op: opInfo(t),
-      lab: frt ? (t.dest ? destAbbr(t.dest) : 'FRT') : destAbbr(t.dest),
-    };
-  }
-  // TD-only blips (position ground truth, direction from berth step)
-  for (const hc in tdPos) {
-    if (shown[hc]) continue;
-    const p = tdPos[hc];
-    if (p.dist_mi == null || p.age_s > 150 || !inView(p.dist_mi)) continue;
-    let dir = null;
-    const fb = parseInt(p.from_berth, 10), tb = parseInt(p.berth, 10);
-    if (!isNaN(fb) && !isNaN(tb) && fb !== tb) dir = tb > fb ? 'down' : 'up';
-    if (p.line !== 'Main' && p.line !== 'Relief') continue;
-    if (!dir) continue;
-    const frt = isFrtHc(hc);
-    shown[hc] = {
-      hc, mi: p.dist_mi, live: true,
-      key: (dir === 'up' ? 'u' : 'd') + (p.line === 'Main' ? 'm' : 'r'),
-      held: false, stn: false,
-      op: frt ? {bg:'#7d8f4a', fg:'#111504', ab:'FRT'} : {bg:'#3c4c60', fg:'#dfe7f0', ab:'?'},
-      lab: hc,
-    };
-  }
-
-  // declutter per row
-  const byRow = {};
-  for (const hc in shown) {
-    const tr = shown[hc];
-    tr.x = Math.max(X_MIN + W/2, Math.min(X_MAX - W/2, xOf(tr.mi)));
-    (byRow[tr.key] = byRow[tr.key] || []).push(tr);
-  }
+  /* group occupants by cell */
+  const byCell = new Map();
+  const reading = [];
   let houseGlow = false;
-  for (const key in byRow) {
-    const grp = byRow[key].sort((a, b) => a.x - b.x);
-    for (let i = 1; i < grp.length; i++) {
-      if (grp[i].x - grp[i-1].x < W + 4) grp[i].x = grp[i-1].x + W + 4;
-    }
-    for (const tr of grp) {
-      if (Math.abs(tr.mi) < 0.35 && tr.live) houseGlow = true;
-      drawBlip(layer, tr, W, H);
-    }
+  for (const hc in tdPos) {
+    const p = tdPos[hc];
+    if (READ_SET[p.berth]) { reading.push(p); continue; }
+    const cell = BERTH_CELL[p.berth];
+    if (!cell) continue;
+    if (!byCell.has(cell)) byCell.set(cell, []);
+    byCell.get(cell).push(p);
+    if (HOUSE_BERTHS[p.berth] && p.age_s < 90) houseGlow = true;
   }
+
+  byCell.forEach((occ, cell) => {
+    occ.sort((a, b) => a.age_s - b.age_s);
+    occ.slice(0, 3).forEach((p, i) => drawOccupant(layer, cell, p, i));
+  });
+
+  /* Reading box chips */
+  reading.sort((a, b) => a.age_s - b.age_s);
+  reading.slice(0, 10).forEach((p, i) => {
+    const t = hcTrain[p.headcode];
+    const op = opInfo(t || {headcode: p.headcode});
+    const y = 148 + i * 18;
+    const g = el('g', {});
+    g.appendChild(el('rect', {x:40, y, width:60, height:15, rx:2.5,
+      fill:op.bg, opacity: p.age_s > 180 ? 0.5 : 0.92}));
+    g.appendChild(el('text', {x:70, y:y+11, 'text-anchor':'middle', fill:op.fg,
+      'font-size':10, 'font-family':"'IBM Plex Mono',monospace",
+      'font-weight':600}, p.headcode));
+    layer.appendChild(g);
+  });
+  if (reading.length > 10) {
+    layer.appendChild(el('text', {x:70, y:336, 'text-anchor':'middle', fill:'#7286a0',
+      'font-size':9, 'font-family':"'IBM Plex Mono',monospace"},
+      '+' + (reading.length - 10) + ' more'));
+  }
+
   const star = document.getElementById('house-star');
   if (star) {
     star.setAttribute('fill', houseGlow ? '#ffe27a' : C_AMBER);
-    star.setAttribute('font-size', houseGlow ? 24 : 17);
+    star.setAttribute('font-size', houseGlow ? 23 : 16);
   }
 }
 
-function drawBlip(layer, tr, W, H) {
-  const y = ROW_Y[tr.key];
-  if (!y) return;
-  const g = el('g', {transform: `translate(${tr.x - W/2},${y - H/2})`});
-  const rect = el('rect', {width:W, height:H, rx:4,
-    fill: tr.held || tr.stn ? '#3a2a10' : tr.op.bg,
-    opacity: tr.live ? 1 : 0.42});
-  if (tr.live) { rect.setAttribute('stroke', '#35d07f'); rect.setAttribute('stroke-width', 1); }
-  else { rect.setAttribute('stroke', tr.op.bg); rect.setAttribute('stroke-dasharray', '3,2'); }
+function drawOccupant(layer, cell, p, stackIdx) {
+  const t = hcTrain[p.headcode];
+  const op = opInfo(t || {headcode: p.headcode});
+  const dim = p.age_s > 180;
+  const held = t && t.held;
+  /* extra occupants stack downwards into the inter-row gap; branch cells
+     stack upwards so they don't bleed into the Up Relief row below */
+  const y = cell.y - 10 + stackIdx * (cell.key === 'br' ? -23 : 23);
+  const g = el('g', {});
+  const rect = el('rect', {x:cell.x, y, width:cell.w, height:20, rx:3,
+    fill:op.bg, opacity: dim ? 0.55 : 1});
+  if (held) {
+    rect.setAttribute('stroke', C_AMBER);
+    rect.setAttribute('stroke-width', 1.5);
+    rect.setAttribute('stroke-dasharray', '4,3');
+  }
   g.appendChild(rect);
-  g.appendChild(el('text', {x:W/2, y:11.5, 'text-anchor':'middle',
-    fill: tr.held || tr.stn ? '#ffb864' : tr.op.fg, 'font-size':10.5,
-    'font-family':"'Barlow Condensed',sans-serif", 'font-weight':700,
-    'letter-spacing':'.05em'}, (tr.held ? '⏸' : '') + tr.lab));
-  g.appendChild(el('text', {x:W/2, y:22, 'text-anchor':'middle',
-    fill: tr.held || tr.stn ? '#c89a58' : tr.op.fg, 'font-size':8.5, opacity:0.8,
-    'font-family':"'IBM Plex Mono',monospace"}, tr.hc));
-  // travel-direction arrow: up → east (right), down → west (left)
-  const right = tr.key[0] === 'u';
-  const ax = right ? W + 9 : -9, half = H / 2;
-  g.appendChild(el('polygon', {
-    points: right
-      ? `${ax-6},${half-4} ${ax},${half} ${ax-6},${half+4}`
-      : `${ax+6},${half-4} ${ax},${half} ${ax+6},${half+4}`,
-    fill: tr.op.bg, opacity: tr.live ? 0.9 : 0.45}));
+  g.appendChild(el('text', {x:cell.x + cell.w/2, y:y+14, 'text-anchor':'middle',
+    fill:op.fg, 'font-size':12, 'font-family':"'Barlow Condensed',sans-serif",
+    'font-weight':700, 'letter-spacing':'.05em'}, p.headcode));
+  /* direction chevron on the leading edge (up rows → east/right) */
+  const ln = LINE_OF[cell.key];
+  const dir = ln ? ln.dir : (cell.key === 'st' ? null : null);
+  if (dir) {
+    const cx = dir === 'up' ? cell.x + cell.w - 6 : cell.x + 6;
+    const pts = dir === 'up'
+      ? `${cx-4},${y+5} ${cx+2},${y+10} ${cx-4},${y+15}`
+      : `${cx+4},${y+5} ${cx-2},${y+10} ${cx+4},${y+15}`;
+    g.appendChild(el('polygon', {points:pts, fill:op.fg, opacity:0.65}));
+  }
+  /* destination abbreviation under the cell (matched trains, first occupant;
+     skipped on branch/stabling cells where it collides with station furniture) */
+  if (t && stackIdx === 0 && cell.key !== 'br' && cell.key !== 'st') {
+    const frt = t.passenger === false || isFrtHc(t.headcode);
+    const ab = frt ? (t.dest ? destAbbr(t.dest) : 'FRT') : destAbbr(t.dest);
+    if (ab) g.appendChild(el('text', {x:cell.x + cell.w/2, y:cell.y + 21,
+      'text-anchor':'middle', fill:op.bg, 'font-size':8.5, opacity:0.85,
+      'font-family':"'Barlow Condensed',sans-serif", 'font-weight':600,
+      'letter-spacing':'.06em'}, (held ? '⏸ ' : '') + ab));
+  }
   layer.appendChild(g);
 }
 
-/* ── Detail columns ── */
+/* ── Approaching list ── */
 function render() {
-  const now = Date.now();
-  const byKey = {ur:[], dr:[], um:[], dm:[]};
-  for (const t of trains) {
-    const k = trackKey(t);
-    if (!k || !byKey[k]) continue;
-    const ms = trainMs(t);
-    if (!ms || ms < now - 60000 || ms > now + 65 * 60000) continue;
-    if (t.cancelled) continue;
-    byKey[k].push(t);
-  }
-  for (const k of ['ur','dr','um','dm']) {
-    byKey[k].sort((a, b) => trainMs(a) - trainMs(b));
-    renderCol(k, byKey[k], now);
-  }
+  renderAppr();
   renderLog();
   renderInfo();
-  renderSchematic();
+  renderPanel();
 }
 
-function renderCol(key, list, now) {
-  const body = document.getElementById('body-' + key);
-  const t = list[0];
-  if (!t) { body.innerHTML = '<div class="col-empty">NO TRAIN DUE</div>'; return; }
-
-  const op  = opInfo(t);
-  const ms  = trainMs(t);
-  const diff = ms - now;
-  const frt = t.passenger === false || isFrtHc(t.headcode);
-  const dest = frt ? (t.dest ? shortPlace(t.dest) : frtClass(t.headcode))
-                   : shortPlace(t.dest || t.headcode);
-
-  let etaHtml, etaCls = '';
-  if (t.at_station)      { etaHtml = 'AT STN'; etaCls = 'warn'; }
-  else if (t.held)       { etaHtml = 'HELD';   etaCls = 'warn'; }
-  else if (diff <= 25000){ etaHtml = 'NOW';    etaCls = 'now'; }
-  else if (diff < 90000) { etaHtml = Math.round(diff/1000) + '<span class="u">s</span>'; }
-  else                   { etaHtml = Math.round(diff/60000) + '<span class="u">min</span>'; }
-
-  /* meta lines */
-  const rows = [];
-  const schedT = t.twy_sched ? fmtHM(t.twy_sched) : '—';
-  /* twy_actual carries RTT's realtime FORECAST until the pass happens —
-     only show the confirmation tick once the time is actually in the past */
-  let stat;
-  const actMs = t.twy_actual ? new Date(t.twy_actual).getTime() : 0;
-  if (actMs && actMs <= now + 20000)
-                            stat = '<span class="ontime">✓ ' + fmtHM(t.twy_actual) + '</span>';
-  else if (actMs)           stat = (t.late_min >= 1)
-                              ? '<span class="late">exp ' + fmtHM(actMs) + ' (+' + t.late_min + ')</span>'
-                              : '<span class="ontime">exp ' + fmtHM(actMs) + ' · on time</span>';
-  else if (t.late_min == null) stat = '<span class="est">no rt data</span>';
-  else if (t.late_min >= 1) stat = '<span class="late">exp ' + fmtHM(ms) + ' (+' + t.late_min + ')</span>';
-  else                      stat = '<span class="ontime">on time</span>';
-  rows.push('<span class="lbl">sched</span> ' + schedT + '  ' + stat);
-
-  const bits2 = [];
-  bits2.push(t.call_type === 'STOP'
-    ? 'stops' + (t.platform ? ' · plat ' + esc(t.platform) : '') : 'passes');
-  if (t.num_veh) bits2.push(t.num_veh + ' veh');
-  if (frt) bits2.push(frtClass(t.headcode).toLowerCase());
-  if (t.source === 'td') bits2.push('TD-only');
-  rows.push('<span class="lbl">' + bits2.join(' · ') + '</span>');
-
-  const p = tdPos[t.headcode];
-  if (p && p.dist_mi != null && p.age_s < 150) {
-    const mi = Math.abs(p.dist_mi);
-    rows.push('<span class="live">● ' +
-      (mi < 0.35 ? 'passing the house' :
-        (p.place ? esc(placeName(p.place)) + ' · ' : '') + mi.toFixed(1) + ' mi') +
-      '</span> <span class="lbl">berth ' + esc(p.berth) + '</span>');
-  } else if (t.td_dist_mi != null && !t.twy_actual) {
-    rows.push('<span class="live">● ' + Math.abs(t.td_dist_mi).toFixed(1) +
-      ' mi</span> <span class="lbl">berth ' + esc(t.td_berth || '?') + '</span>');
-  } else {
-    rows.push('<span class="est">no live fix</span>');
+function renderAppr() {
+  const body = document.getElementById('appr-body');
+  const now = Date.now();
+  const list = [];
+  for (const t of trains) {
+    if (t.cancelled) continue;
+    const ms = trainMs(t);
+    if (!ms || ms < now - 90000 || ms > now + 45 * 60000) continue;
+    list.push(t);
   }
+  list.sort((a, b) => trainMs(a) - trainMs(b));
+  document.getElementById('appr-cnt').textContent =
+    list.length ? list.length + ' in next 45 min' : '';
+  if (!list.length) {
+    body.innerHTML = '<div id="appr-empty">NO TRAINS DUE</div>';
+    return;
+  }
+  body.innerHTML = list.slice(0, 6).map(t => {
+    const op   = opInfo(t);
+    const ms   = trainMs(t);
+    const diff = ms - now;
+    const frt  = t.passenger === false || isFrtHc(t.headcode);
+    const dest = frt ? (t.dest ? shortPlace(t.dest) : frtClass(t.headcode))
+                     : shortPlace(t.dest || t.headcode);
+    const key  = trackKey(t) || '--';
+    const chip = (key[0] === 'u' ? '→' : '←') + (key[1] === 'm' ? 'M' : 'R');
 
-  /* follow-on */
-  const fol = list.slice(1, 3).map(n => {
-    const nd = (n.passenger === false || isFrtHc(n.headcode))
-      ? (n.dest ? destAbbr(n.dest) : 'FRT') : destAbbr(n.dest);
-    return '<b>' + fmtHM(trainMs(n)) + '</b> ' + esc(nd) +
-           ' <span class="fhc">' + esc(n.headcode) + '</span>';
-  }).join(' &nbsp;·&nbsp; ');
+    let eta, etaCls = '';
+    if (t.at_station)        { eta = 'AT STN'; etaCls = 'warn'; }
+    else if (t.held)         { eta = 'HELD';   etaCls = 'warn'; }
+    else if (diff <= 0)      { eta = 'NOW';    etaCls = 'now'; }
+    else if (diff <= 25000)  { eta = 'NOW';    etaCls = 'now'; }
+    else if (diff < 90000)   { eta = Math.round(diff/1000) + '<span class="u">s</span>'; }
+    else                     { eta = Math.round(diff/60000) + '<span class="u">min</span>'; }
 
-  body.innerHTML =
-    '<div class="nx-destrow">' +
-      '<span class="nx-dest' + (t.cancelled ? ' cancelled' : '') + '">' + esc(dest) + '</span>' +
-      '<span class="nx-eta ' + etaCls + '">' + etaHtml + '</span>' +
-    '</div>' +
-    '<div class="nx-oprow">' +
-      '<span class="op-pill" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.ab) + '</span>' +
-      '<span class="nx-hc">' + esc(t.headcode) + '</span>' +
-      (t.origin ? '<span>from ' + esc(shortPlace(t.origin)) + '</span>' : '') +
-    '</div>' +
-    '<div class="nx-meta">' + rows.join('<br>') + '</div>' +
-    (fol ? '<div class="nx-follow">then ' + fol + '</div>' : '');
+    /* sched + punctuality (twy_actual is a forecast until it's in the past) */
+    const schedT = t.twy_sched ? fmtHM(t.twy_sched) : '—';
+    const actMs  = t.twy_actual ? new Date(t.twy_actual).getTime() : 0;
+    let stat;
+    if (actMs && actMs <= now + 20000)
+                              stat = '<span class="ontime">✓ ' + fmtHM(t.twy_actual) + '</span>';
+    else if (actMs)           stat = (t.late_min >= 1)
+                                ? '<span class="late">+' + t.late_min + '</span>'
+                                : '<span class="ontime">on time</span>';
+    else if (t.late_min == null) stat = '<span class="est">no rt</span>';
+    else if (t.late_min >= 1) stat = '<span class="late">+' + t.late_min + '</span>';
+    else                      stat = '<span class="ontime">on time</span>';
+
+    /* live berth fix */
+    const p = tdPos[t.headcode];
+    let live;
+    if (p && p.dist_mi != null && p.age_s < 150) {
+      const mi = Math.abs(p.dist_mi);
+      live = '<span class="live">● ' + esc(p.berth) + ' · ' +
+        (mi < 0.35 ? 'at house' :
+          (p.place ? esc(placeName(p.place)) + ' · ' : '') + mi.toFixed(1) + ' mi') +
+        '</span>';
+    } else if (p && p.age_s < 150) {
+      live = '<span class="live">● ' + esc(p.berth) + '</span>';
+    } else if (t.td_dist_mi != null && !t.twy_actual) {
+      live = '<span class="live">● ' + Math.abs(t.td_dist_mi).toFixed(1) +
+             ' mi</span> <span class="lbl">' + esc(t.td_berth || '') + '</span>';
+    } else {
+      live = '<span class="est">~ schedule</span>';
+    }
+
+    const sub = [t.headcode,
+                 t.origin ? 'from ' + shortPlace(t.origin) : '',
+                 t.call_type === 'STOP' ? 'stops' + (t.platform ? ' p' + t.platform : '') : '',
+                 t.source === 'td' ? 'TD-only' : '']
+                .filter(Boolean).join(' · ');
+
+    return '<div class="ap-row">' +
+      '<div class="ap-eta ' + etaCls + '">' + eta + '</div>' +
+      '<div class="ap-chip ' + (key[1] === 'm' ? 'm' : 'r') + '">' + chip + '</div>' +
+      '<div class="op-pill" style="background:' + op.bg + ';color:' + op.fg + '">' +
+        esc(op.ab) + '</div>' +
+      '<div class="ap-name"><div class="ap-dest">' + esc(dest) + '</div>' +
+        '<div class="ap-sub">' + esc(sub) + '</div></div>' +
+      '<div class="ap-sched">' + schedT + ' ' + stat + '</div>' +
+      '<div class="ap-live">' + live + '</div>' +
+    '</div>';
+  }).join('');
 }
 
 /* ── Log + info panes ── */
@@ -692,7 +755,7 @@ function renderLog() {
     body.innerHTML = '<div id="log-empty">Nothing logged yet this session</div>';
     return;
   }
-  body.innerHTML = passLog.slice(0, 10).map(e => {
+  body.innerHTML = passLog.slice(0, 8).map(e => {
     const lnCls = e.key[1] === 'm' ? 'm' : 'r';
     const lnTxt = (e.key[0] === 'u' ? '↑' : '↓') + (e.key[1] === 'm' ? 'M' : 'R');
     return '<div class="log-row"><span class="t">' + fmtHMS(e.ms) + '</span> ' +
@@ -705,8 +768,8 @@ function renderLog() {
 function renderInfo() {
   const nb = document.getElementById('nrcc-body');
   if (nrccMsgs.length) {
-    nb.innerHTML = nrccMsgs.slice(0, 2).map(m =>
-      '⚠ ' + esc(String(m).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150))
+    nb.innerHTML = nrccMsgs.slice(0, 1).map(m =>
+      '⚠ ' + esc(String(m).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 130))
     ).join('<br>');
   } else {
     nb.innerHTML = '<span class="none">No disruption reported</span>';
@@ -735,7 +798,10 @@ function tick() {
     '<span class="sec">' + String(d.getSeconds()).padStart(2, '0') + '</span>';
   document.getElementById('topdate').textContent =
     d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'});
-  render();
+  if (lastTd && Date.now() - lastTd > 30000)
+    document.getElementById('feed-dot').classList.add('stale');
+  renderAppr();
+  renderInfo();
 }
 function scaleToWindow() {
   const sc = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
