@@ -41,7 +41,6 @@ body {
   width: 1280px; height: 720px; position: absolute;
   color: var(--text); font-family: var(--body); font-size: 14px;
 }
-@media (hover: hover) and (pointer: fine) { body.hidecursor * { cursor: none; } }
 
 /* ── Topbar ── */
 #topbar {
@@ -164,6 +163,43 @@ body {
   display: flex; gap: 16px; font-variant-numeric: tabular-nums; flex: 0 0 auto;
 }
 #stats-row b { color: var(--dim); font-weight: 500; }
+
+/* ── Calibration overlay (temporary tool: press when a train is heard
+   passing the house, to compare heard-time against predicted house_pass_ts) ── */
+#cal-toggle {
+  font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .1em;
+  color: var(--dim); border: 1px solid var(--faint); border-radius: 3px;
+  padding: 2px 8px; cursor: pointer; user-select: none;
+}
+#cal-toggle.active { color: var(--amber); border-color: var(--amber); }
+#calib-panel {
+  display: none; position: absolute; top: 8px; right: 8px; width: 236px;
+  background: rgba(9,13,20,.96); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 8px 9px; z-index: 20; box-shadow: 0 4px 18px rgba(0,0,0,.5);
+}
+#calib-panel.show { display: block; }
+.cal-hdr { font-family: var(--cond); font-weight: 600; font-size: 12px;
+  letter-spacing: .1em; color: var(--amber); margin-bottom: 2px; }
+.cal-hint { display: block; font-family: var(--body); font-weight: 400;
+  font-size: 10.5px; letter-spacing: 0; color: var(--dim); margin-bottom: 6px; }
+.cal-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 6px; }
+.cal-btn {
+  font-family: var(--cond); font-weight: 700; font-size: 15px; letter-spacing: .04em;
+  padding: 9px 0; border-radius: 4px; border: 1px solid; background: transparent;
+  cursor: pointer; transition: background .15s, color .15s;
+}
+.cal-btn.r { color: var(--relief); border-color: rgba(63,183,196,.6); }
+.cal-btn.m { color: var(--main-ln); border-color: rgba(111,159,216,.6); }
+.cal-btn.flash { background: var(--live); color: #05070b; }
+#cal-stats { font-family: var(--mono); font-size: 10px; color: var(--faint);
+  display: flex; flex-wrap: wrap; gap: 5px 9px; margin-bottom: 5px; }
+#cal-stats b { color: var(--dim); font-weight: 500; }
+#cal-list { max-height: 128px; overflow: hidden; }
+.cal-row { font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  line-height: 1.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-row .ln.r { color: var(--relief); } .cal-row .ln.m { color: var(--main-ln); }
+.cal-row .off-p { color: var(--late); } .cal-row .off-n { color: var(--ontime); }
+#cal-empty { font-size: 10.5px; color: var(--faint); font-style: italic; }
 </style>
 </head>
 <body>
@@ -172,6 +208,7 @@ body {
   <span class="title">LINESIDE</span>
   <span class="subtitle">TWYFORD BERTH PANEL · READING ⇄ MAIDENHEAD · TD D1/D6</span>
   <span class="fill"></span>
+  <span id="cal-toggle" onmousedown="toggleCalib()">⏱ CAL</span>
   <span id="topdate">—</span>
   <span id="clock">--:--<span class="sec">--</span></span>
   <span id="feed-dot"></span>
@@ -183,6 +220,19 @@ body {
     <g id="cells-layer"></g>
     <g id="trains-layer"></g>
   </svg>
+  <div id="calib-panel">
+    <div class="cal-hdr">CALIBRATE
+      <span class="cal-hint">press the line you just heard pass the house</span>
+    </div>
+    <div class="cal-btns">
+      <button class="cal-btn r" id="cal-btn-ur" onmousedown="logCalibration('ur')">UR</button>
+      <button class="cal-btn r" id="cal-btn-dr" onmousedown="logCalibration('dr')">DR</button>
+      <button class="cal-btn m" id="cal-btn-um" onmousedown="logCalibration('um')">UM</button>
+      <button class="cal-btn m" id="cal-btn-dm" onmousedown="logCalibration('dm')">DM</button>
+    </div>
+    <div id="cal-stats"></div>
+    <div id="cal-list"><div id="cal-empty">No presses logged yet</div></div>
+  </div>
 </div>
 
 <div id="bottom">
@@ -554,6 +604,9 @@ let nrccMsgs = [];
 let lastTd = 0;
 const passLog = [];    // {ms, hc, op, dest, key} newest first
 const logged = {};     // uid → true
+let calibLog = [];     // calibration presses, newest first (from /api/calibration + local appends)
+let calibApplied = {}; // line key -> seconds currently being added to house_pass_ts server-side
+let calibMinN = 4;     // samples needed on a line before its offset is trusted/applied
 
 function trackKey(t) {
   if (!t.direction || !t.track) return null;
@@ -717,6 +770,23 @@ function render() {
   renderPanel();
 }
 
+// "NOW" window is asymmetric around the predicted pass: starts a bit later on
+// approach (train needs to be genuinely close) and holds a bit longer after
+// passing (gives time to register it before it vanishes).
+const NOW_LEAD_MS = 20000;   // flashing starts this long BEFORE predicted pass
+const NOW_TAIL_MS = 30000;   // flashing continues this long AFTER predicted pass
+
+function hasPassedHouse(t) {
+  // Ground truth from the live berth fix's signed distance (+ west, - east):
+  // an UP train (west→east) has passed once it reads negative; a DOWN train
+  // (east→west) has passed once it reads positive. Immediate, no timer —
+  // used to drop a train off the approaching list the moment TD shows it in
+  // the section beyond the house, instead of waiting on a fixed countdown.
+  const lp = tdPos[t.headcode];
+  if (!lp || lp.age_s > 150 || lp.dist_mi == null) return false;
+  return t.direction === 'up' ? lp.dist_mi < -0.05 : lp.dist_mi > 0.05;
+}
+
 function renderAppr() {
   const body = document.getElementById('appr-body');
   const now = Date.now();
@@ -728,8 +798,11 @@ function renderAppr() {
     // cancelled with no physical presence (never ran / turned back short).
     const live = tdPos[t.headcode];
     if (t.cancelled && !(live && live.age_s < 300)) continue;
+    if (hasPassedHouse(t)) continue;
     const ms = trainMs(t);
-    if (!ms || ms < now - 90000 || ms > now + 45 * 60000) continue;
+    // Matches the NOW window below so nothing lingers showing a stale/negative
+    // countdown once it drops out of NOW.
+    if (!ms || ms < now - NOW_TAIL_MS || ms > now + 45 * 60000) continue;
     list.push(t);
   }
   list.sort((a, b) => trainMs(a) - trainMs(b));
@@ -759,7 +832,7 @@ function renderAppr() {
     let eta, etaCls = '';
     if (t.at_station)        { eta = 'AT STN'; etaCls = 'warn'; }
     else if (t.held)         { eta = 'HELD';   etaCls = 'warn'; }
-    else if (diff <= 25000)  {
+    else if (diff >= -NOW_TAIL_MS && diff <= NOW_LEAD_MS) {
       if (sighted)           { eta = 'NOW';    etaCls = 'now'; }
       else                   { eta = 'DUE';    etaCls = 'due'; }
     }
@@ -862,6 +935,131 @@ function renderInfo() {
   document.getElementById('st-live').textContent = liveN;
 }
 
+/* ── Calibration ("heard it pass" button) ──
+   Records the exact moment a train is heard passing the house against the
+   model's predicted house_pass_ts for whichever train on that line is
+   currently nearest in time — building up a per-line/direction bias that
+   can later correct the ETA formula. Server timestamps the press itself
+   (avoids client clock skew against the server-computed prediction). */
+function toggleCalib() {
+  const panel = document.getElementById('calib-panel');
+  const on = panel.classList.toggle('show');
+  document.getElementById('cal-toggle').classList.toggle('active', on);
+}
+
+function physicalLineOf(hc) {
+  // Ground truth from the live TD berth, not the schedule's booked Main/Relief —
+  // a train can switch line at a junction near the house (e.g. Down Main to Down
+  // Relief at Ruscombe Jn) after RTT/CIF already tagged it with its booked track.
+  const p = tdPos[hc];
+  if (!p) return null;
+  const cell = BERTH_CELL[p.berth];
+  const ln = cell && LINE_OF[cell.key];
+  return ln ? ln.key : null;
+}
+
+function pickCalibCandidate(lineKey) {
+  const now = Date.now();
+  // 1) Prefer a live sighting that is PHYSICALLY on this line right now — this
+  //    is what "I heard it pass on line X" actually means, and it's immune to
+  //    a late line change the booked schedule doesn't know about.
+  let bestLive = null, bestAge = Infinity;
+  for (const hc in tdPos) {
+    if (physicalLineOf(hc) !== lineKey) continue;
+    const age = tdPos[hc].age_s;
+    if (age < 90 && age < bestAge) { bestAge = age; bestLive = hc; }
+  }
+  if (bestLive) return hcTrain[bestLive] || {headcode: bestLive};
+  // 2) No live fix on this line yet — fall back to the nearest-in-time train
+  //    booked for this line by schedule.
+  let best = null, bestDiff = Infinity;
+  for (const t of trains) {
+    if (trackKey(t) !== lineKey) continue;
+    const ms = trainMs(t);
+    if (!ms) continue;
+    const diff = Math.abs(ms - now);
+    if (diff < bestDiff && diff < 4 * 60000) { bestDiff = diff; best = t; }
+  }
+  return best;
+}
+
+function logCalibration(lineKey) {
+  const t = pickCalibCandidate(lineKey);
+  const lp = t ? tdPos[t.headcode] : null;
+  const params = new URLSearchParams({line: lineKey});
+  if (t) {
+    params.set('headcode', t.headcode || '');
+    params.set('dest', t.dest || '');
+    if (t.house_pass_ts) params.set('predicted_ts', String(t.house_pass_ts));
+    if (t.twy_sched) {
+      const s = Date.parse(t.twy_sched);
+      if (!isNaN(s)) params.set('sched_ts', String(Math.round(s / 1000)));
+    }
+    params.set('confirmed', t.confirmed ? '1' : '0');
+  }
+  if (lp) {
+    params.set('sighted', lp.age_s < 150 ? '1' : '0');
+    params.set('td_berth', lp.berth || '');
+    if (lp.dist_mi != null) params.set('dist_mi', String(lp.dist_mi));
+  }
+  fetch('/api/calibrate?' + params.toString()).then(r => r.json()).then(d => {
+    if (d && d.entry) {
+      calibLog.unshift(d.entry);
+      if (calibLog.length > 300) calibLog.length = 300;
+      renderCalib();
+      fetchCalibration();   // pick up the server's freshly recomputed applied offset
+    }
+  }).catch(() => {});
+  const btn = document.getElementById('cal-btn-' + lineKey);
+  if (btn) { btn.classList.add('flash'); setTimeout(() => btn.classList.remove('flash'), 350); }
+}
+
+function renderCalib() {
+  const statsEl = document.getElementById('cal-stats');
+  const byLine = {ur: [], dr: [], um: [], dm: []};
+  for (const e of calibLog) if (e.offset_s != null && byLine[e.line]) byLine[e.line].push(e.offset_s);
+  statsEl.innerHTML = ['ur', 'dr', 'um', 'dm'].map(ln => {
+    const offs = byLine[ln];
+    const n = offs.length;
+    if (!n) return '<span>' + ln.toUpperCase() + ' –</span>';
+    const applied = calibApplied[ln];
+    if (applied != null) {
+      // Matches the server's applied correction (median, once n >= calibMinN)
+      return '<span>' + ln.toUpperCase() + ' <b>' + (applied >= 0 ? '+' : '') +
+        applied.toFixed(1) + 's ✓</b> (n=' + n + ')</span>';
+    }
+    return '<span>' + ln.toUpperCase() + ' (n=' + n + ', need ' + calibMinN + ')</span>';
+  }).join('');
+
+  const list = document.getElementById('cal-list');
+  if (!calibLog.length) {
+    list.innerHTML = '<div id="cal-empty">No presses logged yet</div>';
+    return;
+  }
+  list.innerHTML = calibLog.slice(0, 6).map(e => {
+    const d = new Date(e.ts * 1000);
+    const t = d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    const lnCls = (e.line === 'um' || e.line === 'dm') ? 'm' : 'r';
+    let off = '<span class="est">no prediction</span>';
+    if (e.offset_s != null) {
+      const cls = e.offset_s >= 0 ? 'off-p' : 'off-n';
+      off = '<span class="' + cls + '">' + (e.offset_s >= 0 ? '+' : '') + e.offset_s.toFixed(1) + 's</span>';
+    }
+    return '<div class="cal-row"><span class="t">' + t + '</span> ' +
+      '<span class="ln ' + lnCls + '">' + e.line.toUpperCase() + '</span> ' +
+      esc(e.headcode || '—') + ' ' + off + '</div>';
+  }).join('');
+}
+
+function fetchCalibration() {
+  fetch('/api/calibration').then(r => r.json()).then(d => {
+    calibLog = (d.entries || []).slice().reverse();
+    calibApplied = d.applied || {};
+    calibMinN = d.min_n || calibMinN;
+    renderCalib();
+  }).catch(() => {});
+}
+
 /* ── Clock / scale ── */
 function tick() {
   const d = new Date();
@@ -885,10 +1083,9 @@ function scaleToWindow() {
 window.addEventListener('resize', scaleToWindow);
 
 /* ── Boot ── */
-document.body.classList.add('hidecursor');
 scaleToWindow();
 drawStatic();
-fetchTrains(); fetchTd(); fetchNrcc();
+fetchTrains(); fetchTd(); fetchNrcc(); fetchCalibration();
 setInterval(fetchTrains, 15000);
 setInterval(fetchTd, 5000);
 setInterval(fetchNrcc, 300000);

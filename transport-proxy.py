@@ -97,12 +97,17 @@ BUS_STOPS_TTL   = 14400  # 4-hour in-memory cache; file reused indefinitely
 
 APP_DIR            = '/home/gduthie/twyford-dashboard'
 AIRPORT_NAMES_FILE = os.path.join(APP_DIR, 'airport-names.json')
+CALIBRATION_FILE   = os.path.join(APP_DIR, 'calibration_log.jsonl')
 MIME    = {'.html': 'text/html', '.js': 'application/javascript',
            '.png':  'image/png',  '.svg': 'image/svg+xml',
            '.json': 'application/json', '.css': 'text/css'}
 
 _cache         = {}
 _lock          = threading.Lock()
+_calib_lock    = threading.Lock()
+_CALIB_OFFSETS   = {}   # line key ('ur'/'dr'/'um'/'dm') -> seconds to add to house_pass_ts
+_calib_offsets_ts = 0
+_CALIB_MIN_N     = 4    # need at least this many logged presses on a line before trusting it
 _airport_names = {}
 
 def _clean_airport_name(raw):
@@ -1300,6 +1305,50 @@ def _iso_to_ts(iso):
         return 0.0
 
 
+def _calib_line_key(t):
+    """Same line key as lineside.html's trackKey(): direction + Main/Relief."""
+    d = 'u' if t.get('direction') == 'up' else 'd'
+    m = 'm' if t.get('track') == 'Main' else 'r'
+    return d + m
+
+
+def _load_calib_offsets():
+    """Recompute the per-line house_pass_ts correction from logged 'heard it
+    pass' presses (see /api/calibrate). Logged offset_s = press time (server
+    clock) minus the predicted house_pass_ts at press time, so a positive
+    median means real trains pass LATER than predicted on that line — add it
+    back on. Median (not mean) because a handful of samples can include one
+    mismatched candidate (see lineside 'physicalLineOf' notes on junction line
+    changes) and the median shrugs that off better than a mean would. Requires
+    _CALIB_MIN_N samples on a line before it's trusted at all."""
+    global _CALIB_OFFSETS, _calib_offsets_ts
+    by_line = {}
+    with _calib_lock:
+        try:
+            with open(CALIBRATION_FILE) as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+    for ln in lines:
+        try:
+            e = json.loads(ln)
+        except Exception:
+            continue
+        if e.get('offset_s') is None:
+            continue
+        by_line.setdefault(e.get('line'), []).append(e['offset_s'])
+    offsets = {}
+    for line, offs in by_line.items():
+        if len(offs) < _CALIB_MIN_N:
+            continue
+        offs.sort()
+        mid = len(offs) // 2
+        median = offs[mid] if len(offs) % 2 else (offs[mid - 1] + offs[mid]) / 2
+        offsets[line] = median
+    _CALIB_OFFSETS = offsets
+    _calib_offsets_ts = time.time()
+
+
 def _rtt_build_trains():
     global _rtt_trains_ts, _rtt_trains_data
     now = time.time()
@@ -1494,6 +1543,18 @@ def _rtt_build_trains():
         t['house_pass_ts'] = int(ts) if ts else 0
 
     _td_enrich_trains(trains, now, ident)
+
+    # Apply the learned per-line calibration correction (from lineside.html's
+    # "heard it pass" button, see /api/calibrate) to house_pass_ts. Refreshed
+    # from calibration_log.jsonl at most every 5 min — it's a small file, but
+    # no need to re-read it on every request.
+    if now - _calib_offsets_ts > 300:
+        _load_calib_offsets()
+    if _CALIB_OFFSETS:
+        for t in trains:
+            off = _CALIB_OFFSETS.get(_calib_line_key(t))
+            if off and t.get('house_pass_ts'):
+                t['house_pass_ts'] = int(t['house_pass_ts'] + off)
 
     # Drop phantom CIF freight paths.  A freight predicted to pass within the
     # next ~10 min would already be inside the tracked Reading↔Maidenhead
@@ -1755,27 +1816,34 @@ _BERTH_MI = {
 
 def _berth_info(area, berth_str):
     """Return {'dir','line','stanme','dist_mi'} for a TD berth, or None.
-    SMART is authoritative for line/place; CA-interpolated positions fill in
-    dist_mi for intermediate berths SMART doesn't carry; a coarse static
-    _BERTH_MI table is the last-resort fill for the unanchored near-house
-    throat berths so corridor trains aren't dropped there."""
+    SMART is authoritative for line/place, but NOT for dist_mi on berths that
+    also appear in _BERTH_MI: SMART only ties a berth to its *reporting
+    STANOX*, so several west-approach berths (e.g. UM 1646, a genuine 1.2 mi
+    out) get anchored to the same coarse blanket distance as the Twyford
+    platform itself (dist_mi≈0.1) — SMART "has" a value, it's just wrong by
+    over a mile. _BERTH_MI was hand-tuned from live observation for exactly
+    this corridor, so it overrides SMART's dist_mi (but not SMART's line/
+    place, which are reliable) whenever the berth is one it covers. CA-chain
+    interpolation fills in intermediate berths neither source carries; the
+    same _BERTH_MI table is the last-resort fill after that for the
+    unanchored near-house throat berths so corridor trains aren't dropped."""
     with _smart_lock:
         info = _smart_berth.get((area, berth_str))
+    fb = _BERTH_MI.get(berth_str)
+    if fb:
+        line, mi = fb
+        if info:
+            info = dict(info)
+            if not info.get('line'):
+                info['line'] = line
+            info['dist_mi'] = mi
+            return info
+        return {'dir': '', 'line': line, 'stanme': '', 'dist_mi': mi}
     if info and info.get('dist_mi') is not None:
         return info
     with _chain_lock:
         cd = _chain_pos.get((area, berth_str))
     if cd is None:
-        fb = _BERTH_MI.get(berth_str)
-        if fb:
-            line, mi = fb
-            if info:
-                info = dict(info)
-                if not info.get('line'):
-                    info['line'] = line
-                info['dist_mi'] = mi
-                return info
-            return {'dir': '', 'line': line, 'stanme': '', 'dist_mi': mi}
         return info                      # unknown position → caller falls back to schedule
     if info:
         info = dict(info); info['dist_mi'] = cd
@@ -2813,6 +2881,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._td_log(qs)
         elif parsed.path == '/api/td-live':
             self._td_live(qs)
+        elif parsed.path == '/api/calibrate':
+            self._calibrate(qs)
+        elif parsed.path == '/api/calibration':
+            self._calibration_stats(qs)
         else:
             self._static(parsed.path)
 
@@ -3425,6 +3497,75 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        for (a, addr), (d, t) in _sf_state.items()}
         self._json({'positions': list(positions.values()),
                     'signals': signals, 'ts': int(now_ts)})
+
+    def _calibrate(self, qs):
+        """Log a lineside 'heard it pass' button press for ETA calibration.
+        Server timestamps the press (avoids client clock skew vs house_pass_ts,
+        which is computed server-side); client supplies which train it thinks
+        this was, so offset_s = actual (server 'now') - predicted house_pass_ts."""
+        line = (qs.get('line', [''])[0] or '').lower()
+        if line not in ('ur', 'dr', 'um', 'dm'):
+            self._respond(400, 'text/plain', b'bad line'); return
+        now = time.time()
+
+        def _f(name):
+            v = qs.get(name, [''])[0]
+            try:
+                return float(v) if v else None
+            except ValueError:
+                return None
+
+        predicted_ts = _f('predicted_ts')
+        entry = {
+            'ts':           now,
+            'line':         line,
+            'headcode':     qs.get('headcode', [''])[0],
+            'dest':         qs.get('dest', [''])[0],
+            'predicted_ts': predicted_ts,
+            'offset_s':     round(now - predicted_ts, 1) if predicted_ts else None,
+            'sched_ts':     _f('sched_ts'),
+            'sighted':      qs.get('sighted', ['0'])[0] == '1',
+            'td_berth':     qs.get('td_berth', [''])[0],
+            'dist_mi':      _f('dist_mi'),
+            'confirmed':    qs.get('confirmed', ['0'])[0] == '1',
+        }
+        with _calib_lock:
+            try:
+                with open(CALIBRATION_FILE, 'a') as f:
+                    f.write(json.dumps(entry) + '\n')
+            except Exception:
+                pass
+        self._json({'ok': True, 'entry': entry})
+
+    def _calibration_stats(self, qs):
+        """Recent calibration presses + per-line offset stats (mean/stdev)."""
+        limit = min(int(qs.get('n', ['500'])[0] or 500), 5000)
+        entries = []
+        with _calib_lock:
+            try:
+                with open(CALIBRATION_FILE) as f:
+                    lines = f.readlines()[-limit:]
+            except FileNotFoundError:
+                lines = []
+        for ln in lines:
+            try:
+                entries.append(json.loads(ln))
+            except Exception:
+                pass
+        by_line = {}
+        for e in entries:
+            if e.get('offset_s') is None:
+                continue
+            by_line.setdefault(e['line'], []).append(e['offset_s'])
+        stats = {}
+        for ln, offs in by_line.items():
+            n = len(offs)
+            mean = sum(offs) / n
+            var = sum((x - mean) ** 2 for x in offs) / n if n > 1 else 0
+            stats[ln] = {'n': n, 'mean_s': round(mean, 1), 'stdev_s': round(var ** 0.5, 1)}
+        _load_calib_offsets()  # always fresh for display, unlike the 5-min /api/trains cache
+        self._json({'entries': entries[-50:], 'stats': stats,
+                    'applied': _CALIB_OFFSETS, 'min_n': _CALIB_MIN_N})
 
     def _static(self, path):
         if '..' in path:
