@@ -1758,10 +1758,11 @@ def _load_smart():
             line      = _smart_line(plat, fl)
             mi        = _STANME_MI.get(stanme)
             table[key] = {
-                'dir':     'down' if direction == 'D' else ('up' if direction == 'U' else ''),
-                'line':    line,
-                'stanme':  stanme,
-                'dist_mi': (mi - _HOUSE_MI) if mi is not None else None,
+                'dir':      'down' if direction == 'D' else ('up' if direction == 'U' else ''),
+                'line':     line,
+                'stanme':   stanme,
+                'dist_mi':  (mi - _HOUSE_MI) if mi is not None else None,
+                'platform': plat,
             }
         with _smart_lock:
             _smart_berth = table
@@ -1838,7 +1839,7 @@ def _berth_info(area, berth_str):
                 info['line'] = line
             info['dist_mi'] = mi
             return info
-        return {'dir': '', 'line': line, 'stanme': '', 'dist_mi': mi}
+        return {'dir': '', 'line': line, 'stanme': '', 'dist_mi': mi, 'platform': ''}
     if info and info.get('dist_mi') is not None:
         return info
     with _chain_lock:
@@ -1848,7 +1849,7 @@ def _berth_info(area, berth_str):
     if info:
         info = dict(info); info['dist_mi'] = cd
         return info
-    return {'dir': '', 'line': '', 'stanme': '', 'dist_mi': cd}
+    return {'dir': '', 'line': '', 'stanme': '', 'dist_mi': cd, 'platform': ''}
 
 
 def _rebuild_chain_positions():
@@ -2169,6 +2170,13 @@ _NR_IDLE_TIMEOUT   = 90      # seconds without a poll → disconnect STOMP
 _td_lock      = threading.Lock()
 _td_buffer    = []   # recent TD CA (berth step) messages, newest last, D1/D4/D6 only
 _TD_BUF_MAX   = 3000
+_td_berth_occupant = {}  # (area, stanme, platform) -> (descr, ts): who's really at that
+                          # PHYSICAL LOCATION, for CC supersession (not keyed by raw berth
+                          # code — see _handle_td, some sidings use two describer codes
+                          # for one physical track)
+_td_superseded = {}      # headcode -> ts it was superseded (a CC relabelled its berth to a
+                          # different descr) — /api/td-live hides that headcode's sighting if
+                          # the sighting is no newer than this (see _td_live)
 _TD_AREAS     = {'D1', 'D4', 'D6'}   # Thames Valley SC: Reading, Hayes, Maidenhead
 
 # ── CA berth-chain learning ──────────────────────────────────────────────────
@@ -2582,7 +2590,8 @@ class _NRListener:
         threading.Thread(target=_nr_stomp_reconnect, daemon=True).start()
 
     def _handle_td(self, msgs):
-        """Process Train Describer (TD) messages: CA berth steps and SF signal flags."""
+        """Process Train Describer (TD) messages: CA berth steps, CC berth
+        interposes (in-place describer/headcode changes), and SF signal flags."""
         global _td_buffer, _rtt_trains_ts
         new_ca = []
         sf_updates = {}   # (area, addr) → (data, ts) — deduplicated to last value
@@ -2608,6 +2617,30 @@ class _NRListener:
                         'to':   body.get('to', ''),
                         'descr': descr,
                         'ts':   ts,
+                        'mtype': 'CA',
+                    })
+                elif mtype == 'CC':
+                    # Berth interpose: a signaller/TRUST relabels a berth's
+                    # descriptor WITHOUT the train moving — e.g. a reversing
+                    # train gets a new headcode for its next working while
+                    # still sitting in the same siding/platform (the exact
+                    # "5N41 became 9U41 in place" case). No 'from' berth
+                    # since nothing physically moved; treated like a step
+                    # with an empty origin so it still lands in _td_buffer
+                    # and /api/td-live picks it up as this headcode's current
+                    # position (the old headcode's last position stays put,
+                    # correctly frozen, until IT next moves).
+                    descr = body.get('descr', '').strip()
+                    to = body.get('to', '')
+                    if not descr or descr == '    ' or descr == '0000' or not to:
+                        continue
+                    new_ca.append({
+                        'area': area,
+                        'from': '',
+                        'to':   to,
+                        'descr': descr,
+                        'ts':   ts,
+                        'mtype': 'CC',
                     })
                 elif mtype == 'SF':
                     addr = body.get('address', '')
@@ -2615,10 +2648,39 @@ class _NRListener:
                     if addr:
                         sf_updates[(area, addr)] = (data, ts)
         if new_ca:
+            # Occupancy is tracked by PHYSICAL LOCATION (STANME + platform), not raw
+            # berth code — some sidings use two different describer codes for the same
+            # physical track (e.g. Maidenhead's turnback siding: R578 records the CA
+            # arrival step, 0578 is where a CC relabel lands). Keying by berth code
+            # alone misses the link between them, so a relabel via the "other" code
+            # would never find the true previous occupant. STANME+platform (not STANME
+            # alone) keeps busy multi-platform stations from cross-superseding — e.g.
+            # Maidenhead's platforms 1-5 all share STANME "MAIDENHED" but have distinct
+            # platform numbers. _berth_info() calls acquire _smart_lock/_chain_lock, so
+            # they're resolved before taking _td_lock to avoid nested-lock ordering.
+            place_keys = []
+            for evt in new_ca:
+                info = _berth_info(evt['area'], evt['to'])
+                stanme = (info.get('stanme') or '') if info else ''
+                platform = (info.get('platform') or '') if info else ''
+                place_keys.append((evt['area'], stanme, platform) if stanme
+                                   else (evt['area'], '', evt['to']))
             with _td_lock:
                 _td_buffer.extend(new_ca)
                 if len(_td_buffer) > _TD_BUF_MAX:
                     _td_buffer = _td_buffer[-_TD_BUF_MAX:]
+                # A CC (berth interpose) relabelling a location to a DIFFERENT
+                # descriptor means whoever was there before is superseded —
+                # their sighting should stop showing immediately rather than
+                # fading out over the next few minutes.
+                for evt, key in zip(new_ca, place_keys):
+                    prev = _td_berth_occupant.get(key)
+                    if evt['mtype'] == 'CC' and prev and prev[0] != evt['descr']:
+                        _td_superseded[prev[0]] = evt['ts']
+                    _td_berth_occupant[key] = (evt['descr'], evt['ts'])
+                cutoff = time.time() - 1800
+                for hc in [h for h, t in _td_superseded.items() if t < cutoff]:
+                    del _td_superseded[hc]
             for evt in new_ca:
                 _ca_observe(evt['area'], evt['from'], evt['to'], evt['descr'], evt['ts'])
         if sf_updates:
@@ -3480,26 +3542,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json({'count': len(entries), 'entries': entries})
 
     def _td_live(self, qs):
-        """Current train positions (one per headcode, most recent berth) + signal states."""
+        """Current train positions (one per headcode, most recent berth) + signal states.
+        Window is 1800s (not a tighter running-line value) because a CA berth step only
+        fires on movement — a train dwelling in a siding/turnback (e.g. the Maidenhead
+        turnback siding, or Crossrail stabling) can legitimately sit still for well over
+        10 minutes with no new message, and would otherwise wrongly vanish from the map
+        while still physically there. The client applies its own tighter threshold for
+        ordinary running-line berths and only uses this wider window for siding/branch
+        cells (see lineside.html fetchTd)."""
         now_ts = time.time()
         positions = {}   # headcode → entry (most recent only)
         with _td_lock:
+            superseded = dict(_td_superseded)
             for entry in reversed(_td_buffer):
                 hc = entry['descr']
-                if hc not in positions and now_ts - entry['ts'] < 600:
-                    info = _berth_info(entry['area'], entry['to'])
-                    positions[hc] = {
-                        'headcode':   hc,
-                        'area':       entry['area'],
-                        'berth':      entry['to'],
-                        'from_berth': entry['from'],
-                        'ts':         entry['ts'],
-                        'age_s':      int(now_ts - entry['ts']),
-                        # SMART-derived line + position (None when berth unknown)
-                        'line':       info['line']    if info else '',
-                        'place':      info['stanme']  if info else '',
-                        'dist_mi':    info['dist_mi'] if info else None,
-                    }
+                if hc in positions or now_ts - entry['ts'] >= 1800:
+                    continue
+                sup_ts = superseded.get(hc)
+                if sup_ts is not None and entry['ts'] <= sup_ts:
+                    continue   # this sighting predates being relabelled — don't show it
+                info = _berth_info(entry['area'], entry['to'])
+                positions[hc] = {
+                    'headcode':   hc,
+                    'area':       entry['area'],
+                    'berth':      entry['to'],
+                    'from_berth': entry['from'],
+                    'ts':         entry['ts'],
+                    'age_s':      int(now_ts - entry['ts']),
+                    # SMART-derived line + position (None when berth unknown)
+                    'line':       info['line']    if info else '',
+                    'place':      info['stanme']  if info else '',
+                    'dist_mi':    info['dist_mi'] if info else None,
+                    'platform':   (info.get('platform') or '') if info else '',
+                }
         with _sf_lock:
             signals = {f"{a}:{addr}": {'data': d, 'ts': t}
                        for (a, addr), (d, t) in _sf_state.items()}

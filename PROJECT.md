@@ -823,7 +823,7 @@ house = amber).
   Relief · Down Relief · Up Main · Down Main (the real geographic order — matches Tracksy). Cell
   sequences were derived from the learned CA berth chain (`berth_chain.json`) + SMART and are
   hardcoded in the `LINES` array, west→east, e.g. Up Relief `1676…1642 → [1630 = TWY P4] →
-  1628…0594 → [0574/0576 = MAID P4/5] → 0568`.
+  1628…0594 → [0574 = MAID P4] → 0568` plus the Platform 5 loop (see below).
   **Distance-based cell placement** (2026-07-06 evening): cells are positioned by a per-berth
   signed distance (`BERTH_MI`, mirrors backend `_BERTH_MI`) on **one shared scale per segment**,
   not evenly spaced — so Main and Relief line up by real position and near-house berths cluster
@@ -834,29 +834,30 @@ house = amber).
   +3.34 / Twyford +0.1 / Maidenhead −6.7) — good enough for which-side-of-house + rough timing,
   tuned per observation (e.g. **Up Main house crossing is at 1640→1626**, so those straddle 0 and
   1626 is the UM `twy` cell; 1618 moved east). Platform berths from CA dwell EWMAs (TWY P4 = 1630,
-  P3 = 1637, P1 = 1655, MAID 0570/0573/0577).
+  P3 = 1637, P1 = 1655, MAID 0570/0573).
   Extras: **Henley branch** rising top-left (P5 bay = A641/B641/R641, jn cell 1643/1632,
-  mid-branch BYDN/BYUP "Wargrave · Shiplake", 1636 = Henley), **Crossrail stabling** stub
-  top-right (3570/0578–0590/6296), **Reading box** (orange, trains inside Reading station
-  berths shown as headcode chips), Twyford + Maidenhead station bands with Tracksy-orange
-  platform bars, junction captions (Kennet Br Jn, Ruscombe Jn, Henley Br Jn), amber dashed
-  house line + ★ east of the Twyford band (glows when a house-straddling berth 1628/1635/
-  1640/1626/1633 is occupied <90 s).
+  mid-branch BYDN/BYUP "Wargrave · Shiplake", 1636 = Henley), **Reading box** (orange, trains
+  inside Reading station berths shown as headcode chips with a 3-letter destination + platform
+  label below each — see "Reading box labels" below), Twyford + Maidenhead station bands with
+  Tracksy-orange platform bars, junction captions (Kennet Br Jn, Ruscombe Jn, Henley Br Jn),
+  amber dashed house line + ★ east of the Twyford band (glows when a house-straddling berth
+  1628/1635/1640/1626/1633 is occupied <90 s).
   Empty cells show their berth number faintly; occupied cells fill with the operator colour
   (from the /api/trains headcode join), bold headcode, leading-edge direction chevron (dropped
   on cells <42 px so it can't collide with the headcode; row direction is still shown by the
   line label + line-end arrowhead), destination abbreviation underneath, amber dashed outline
-  when held, dimmed when the fix is >180 s old, faded stale cutoff 420 s. Extra occupants of one
-  cell stack below (branch cells stack upward). Only areas D1/D6 are mapped (D4 could collide).
+  when held, dimmed when the fix is >180 s old. Extra occupants of one cell stack below (branch
+  cells stack upward). Only areas D1/D6 are mapped (D4 could collide).
 - **Next past the house (bottom left):** all upcoming trains merged (both directions, next
   45 min, sorted by `house_pass_ts`): big ETA countdown, line chip (→M/←R in line colour),
-  operator pill, destination + origin/headcode subline, sched HH:MM + punctuality (`✓ actual`
-  only once past), and live berth fix `● berth · place · X.X mi` (falls back to `td_dist_mi`,
-  then "~ schedule"). ETA/list rules keeping the list honest vs the berth map (2026-07-06 eve):
-  a train whose Twyford **call is cancelled but which has a live berth fix** is kept (it still
-  passes the house) and flagged `✗ not stopping`; **`NOW` (pulse) only fires with a live sighting**
-  (recent TD fix or recorded actual pass) — a schedule-only train past its booked time shows a
-  muted **`DUE`** instead, since it isn't on the map; `HELD` / `AT STN` still take priority.
+  operator pill (now shows the **headcode**, kept in the operator colour — the short operator
+  code moved to the subline, next to origin), destination + origin subline, sched HH:MM +
+  punctuality + **live expected time** `+N → HH:MM` when it differs from schedule (`✓ actual`
+  once past), and live berth fix `● berth · place · X.X mi` (falls back to `td_dist_mi`, then
+  "~ schedule"). List/NOW rules (tuned 2026-07-06/07 — see "NOW window" and "Passing log" below
+  for the exact mechanics): a train whose Twyford **call is cancelled but which has a live berth
+  fix** is kept (it still passes the house) and flagged `✗ not stopping`; `HELD` / `AT STN` take
+  priority over `NOW`/`DUE`.
 - **Info pane (bottom right):** passing log (client-side, confirmed passes, last 30 min) +
   NRCC message + stats (trains next hour, freight count, live TD fixes).
 - Polling: /api/trains 15 s, /api/td-live 5 s (feed dot blinks green each tick, turns red
@@ -864,6 +865,123 @@ house = amber).
 - Signal-aspect dots remain out (positions unconfirmed); `/api/td-live` still returns `signals`.
 - Reference screenshots of the real Tracksy layout: `ReadingToTwyford.png`,
   `TwyfordToMaidenhead.png` (repo root).
+
+#### Calibration ("heard it pass" button, added 2026-07-06)
+
+"⏱ CAL" toggle in the topbar shows an overlay panel (hidden by default, absolutely positioned
+top-right of the schematic) with 4 buttons — UR/DR/UM/DM. Press whichever line you just heard
+pass the house: `pickCalibCandidate()` finds the train on that **physical** line (via live TD
+berth → `LINE_OF`, NOT the booked schedule track — a train can switch Main⇄Relief near
+Ruscombe Jn after RTT/CIF already tagged it with its original track, which caused an early
+mis-attribution to 9R56 when the real train was 5R43) whose `house_pass_ts` is nearest to now,
+and logs `{ts (server clock, not client — avoids clock skew), line, headcode, dest,
+predicted_ts, offset_s, sched_ts, sighted, td_berth, dist_mi, confirmed}` to
+`calibration_log.jsonl` via `GET /api/calibrate`. `GET /api/calibration` returns recent presses
++ per-line stats + `applied` offsets. Once a line has ≥4 samples, `_load_calib_offsets()`
+(median, refreshed ≤ every 5 min) feeds a correction straight into `house_pass_ts` in
+`_rtt_build_trains()` — all-positive corrections so far (model was predicting the house-pass
+15–35 s early on UR/DM/UM; DR noisier, smaller n). Panel shows a green ✓ + the live applied
+value per line once active, else "(n=X, need 4)".
+
+#### NOW window (tuned 2026-07-06/07)
+
+`renderAppr()`'s NOW/DUE flash is **asymmetric**: `NOW_LEAD_MS`=20000 before the predicted pass,
+`NOW_TAIL_MS`=30000 after — originally a bug had NO lower bound at all (`diff <= 25000` matched
+any amount in the past), so a train kept pulsing NOW for the full 90 s list-retention window
+long after it had actually passed. `hasPassedHouse(t)` gives an **immediate** physical override
+independent of any timer: a live TD sighting whose signed `dist_mi` has crossed the house for
+that direction (UP: negative, DOWN: positive) drops the train from the list right away — but
+with a `PASSED_GRACE_MS`=20000 grace period (`msSincePassed()`) so it doesn't vanish the instant
+it crosses, only 20 s later.
+
+#### Passing log (fixed 2026-07-06 eve)
+
+`harvestLog()` used to run only every 15 s (tied to `/api/trains`) on a **predicted-time**
+check, which could lag well behind physical reality — a train the map already showed as
+"gone" could take a long time to show up in the log. It's now driven by the same
+`msSincePassed`/`PASSED_GRACE_MS` signal as the approaching-list removal (checked every second
+via `tick()`), so a train is logged in the exact same tick it disappears from "Next Past The
+House" — no gap between the two. Falls back to the old predicted-time check only for
+schedule-only trains that never got a live TD fix at all.
+
+#### Maidenhead station rebuilt to match the real track layout (2026-07-07)
+
+Corrected against SMART/BPLAN data for TIPLOC `MDNHEAD` (STANOX 74005) plus live user
+cross-checks against Tracksy, after the original model wrongly merged Platforms 4 and 5 into
+one cell and mis-drew the Marlow branch:
+- **Platforms 4 (0574) and 5 (0576) are NOT in line** — Platform 5 is a **loop off the Up
+  Relief**, drawn on its own row (`maidLoopY`, above Platform 4 — real platform order top-to-
+  bottom is 5,4,3,2,1) with an island platform bar between the two rows.
+- Loop fed **west to east**: Crossrail stabling joins first (furthest west), then a **crossover**
+  back to the Up Relief through line (just after berth 0594, not before) — this crossover is
+  what lets a stabling train reach *either* platform — then the **Marlow branch** joins closest
+  to the platform, i.e. *after* the crossover, so branch trains can only ever reach Platform 5.
+  Berth `3570` (STANME confirmed via SMART: only ever connects to 0576/0581, nothing else) is
+  the branch's own token berth; Crossrail stabling proper is `0580,0582,0584,0586,0588,0590`
+  (confirmed via the *dedicated* Carriage Sidings BPLAN lookup, TIPLOC `MDNHDCS`/STANOX 74003,
+  STANME "MDNHD CS", each reaching both Platform 4 and 5) **plus `6296`, inherited from an
+  earlier session and not yet independently verified** — flag if it turns out wrong. `0578`
+  looked like a 7th stabling road at first (same fan, reaches P3/P4 like the others don't reach
+  P5) but is **not** — live STANME resolves it to "MDNHDMIDS", i.e. it's actually part of the
+  turnback siding (see below), not Crossrail stabling.
+- **Turnback siding is berths `R578` AND `0578` together** (both confirmed live with STANME
+  "MDNHDMIDS" — distinct from the carriage sidings' own R-berths R580-R590), positioned
+  **equidistant between the Up Relief and Down Relief rows** west of the station, fed by
+  connectors from BOTH Platform 3 (0577) and Platform 4 (0574/0579). One train fits in the
+  siding at a time; R578 is the physical *arrival* step (from 0577, a real CA move) while 0578
+  is where a CC headcode-relabel lands on the same physical track — confirmed live: 5N50
+  arrived at R578 from 0577, and ~5 s later 5N51 appeared at 0578 via an interpose (empty
+  `from_berth`). That's also the mechanism behind 5N14→5N21 and 5N41→9U41 elsewhere in the
+  siding/platform: a reversing train gets a new headcode for its return working without
+  physically moving — see "Headcode supersession" below. No text caption on this cell (removed
+  — user found it unhelpful; the two feed lines already show what it's for).
+
+#### TD staleness window widened to 30 min (2026-07-07)
+
+A CA berth step only fires on **movement** — a train dwelling in a siding/turnback (Maidenhead
+turnback siding, Crossrail stabling, Henley branch P5 bay) can sit for 15–30+ minutes with no
+new message, and was wrongly vanishing from the map well before it actually left. `/api/td-live`'s
+window widened from 600 s to 1800 s; the **client** (`fetchTd()` in lineside.html) applies that
+full 1800 s only to siding/branch cells (`BERTH_CELL[berth].key === 'br' || 'st'`) and keeps the
+tighter 420 s for ordinary running-line berths, where a reading that old really is more likely
+stale than dwelling.
+
+#### Headcode supersession (added 2026-07-07)
+
+NR's TD protocol has a **CC** message (berth interpose) separate from the CA step we already
+handled — it relabels a berth's descriptor directly, with no `from` berth, used when a
+reversing train gets a new headcode for its next working while still parked (confirmed live:
+5N41 → 9U41 in place at Maidenhead Platform 4). `_handle_td` now processes CC the same way as
+CA (added to `_td_buffer` with `from:''`) and additionally tracks `_td_berth_occupant`; when a
+CC's new descriptor differs from the previous occupant, the old headcode is recorded in
+`_td_superseded[hc] = ts`. `/api/td-live` skips a headcode's sighting if it's no newer than its
+own supersession timestamp — so the old code disappears **immediately** instead of fading out
+over the next few minutes, while a genuine later reuse of the same headcode (`ts` after the
+supersession point) still shows normally.
+
+`_td_berth_occupant` is keyed by **physical location** `(area, stanme, platform)`, NOT the raw
+berth code — first version used `(area, berth)` and failed on exactly the case it was built
+for: the Maidenhead turnback siding's arrival step (R578, a real CA move) and its CC relabel
+(0578) are different berth codes for the *same* physical track, so the relabel's lookup never
+found the arrival's entry (confirmed live: 5N50→5N51 across R578→0578 was NOT superseded,
+while 5N51→9U51 at the literal same berth 0574 DID work — proving the berth-code key was the
+gap). Platform is included alongside stanme (not stanme alone) because Maidenhead's platforms
+1-5 all share STANME "MAIDENHED" — stanme-only would cross-supersede unrelated platforms.
+
+TD-only sightings at Maidenhead (no RTT/CIF identity — corridor synthesis deliberately skips
+trains sitting at Maidenhead/Reading, they might terminate/reverse) used to render grey/unknown
+in lineside.html even though they're virtually always Elizabeth Line. `opInfo()` now has a
+`MAID_PLACES` fallback (STANME ∈ {MAIDENHED, MDNHDMIDS, MDNHD CS} → force EL purple) — scoped
+to location rather than a headcode-prefix guess that could misfire elsewhere on the corridor.
+
+#### Reading box labels (added 2026-07-07)
+
+Each headcode chip in the Reading box now has a label below it: 3-letter destination
+(`destAbbr(t.dest)`, needs an /api/trains identity match) + current platform. Platform data
+was being parsed from SMART (`PLATFORM` field) but discarded before reaching the API — now
+threaded through `_load_smart()` → `_berth_info()` → `/api/td-live`'s `platform` field. Rows
+grew from 18px to 24px tall to fit the label, so the box shows 8 chips (was 10) before
+"+N more".
 
 ### Buses View
 
@@ -933,8 +1051,10 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /aircraft` | Static — aircraft.html | — | Standalone full-screen aircraft SPA |
 | `GET /trains` | Static — trains.html | — | Standalone full-screen trains SPA |
 | `GET /lineside` | Static — lineside.html | — | Standalone visual track display SPA |
-| `GET /api/td-live` | In-memory TD/SF state | — | Live berth positions (tagged with SMART/CA `line`, `place`, `dist_mi`) + signal aspects from NR TD feed. No TTL. Positions expire after 10 min of inactivity. |
+| `GET /api/td-live` | In-memory TD/SF state | — | Live berth positions (tagged with SMART/CA `line`, `place`, `dist_mi`, `platform`) + signal aspects from NR TD feed. No TTL. Positions expire after 30 min of inactivity (widened 2026-07-07 from 10 min — a siding/turnback dwell can legitimately outlast that with no new CA step). A headcode superseded by a CC berth interpose (see message-type table above) disappears immediately rather than waiting to expire. |
 | `GET /api/nrcc` | Darwin SOAP nrccMessages | 300 s | NRCC disruption messages for Twyford area. Extracted from existing Darwin SOAP response (`{*}nrccMessages/{*}message`). Returns `{messages:["…"], ts}`. |
+| `GET /api/calibrate?line=&headcode=&dest=&predicted_ts=&sched_ts=&sighted=&td_berth=&dist_mi=&confirmed=` | Appends to `calibration_log.jsonl` | — | Logs one lineside.html "heard it pass" button press (line/direction, server-timestamped). See lineside.html § Calibration. |
+| `GET /api/calibration` | `calibration_log.jsonl` | — | Recent calibration presses + per-line `{n, mean_s, stdev_s}` + `applied` (median offsets currently being added to `house_pass_ts`, once a line has ≥4 samples) + `min_n`. |
 | `GET /` or `GET /icons/…` etc. | Static file from APP_DIR | — | dashboard.html, icons, hls.min.js |
 
 **National Rail SOAP details:**
@@ -1170,7 +1290,7 @@ Enquiries Darwin feed, which is gzip-compressed).
 | Topic | Feed | Rate | Description |
 |-------|------|------|-------------|
 | `TRAIN_MVT_ALL_TOC` | Train Movements | Up to 600/min | TRUST system — every train passing or calling at a timing point. Includes freight and non-stopping trains. Messages are batched. **The most useful feed for trains.html.** |
-| `TD_ALL_SIG_AREA` | Train Describer (TD) | ~6000/min | All signal areas combined — the **only available TD topic**. Area-specific topics (e.g. `TD_WTV_SIG_AREA` for Western Thames Valley) were deprecated years ago and no longer exist on the broker. Filter client-side. We filter to areas D1/D4/D6 in `_handle_td()` before buffering, reducing effective volume ~50×. Message types: **CA** (berth step — train moved from→to), **CB** (berth cancel), **CC** (berth interpose), **CT** (heartbeat, ignore), **SF** (signal flag — aspect change), **SG/SH** (signal flag variants). |
+| `TD_ALL_SIG_AREA` | Train Describer (TD) | ~6000/min | All signal areas combined — the **only available TD topic**. Area-specific topics (e.g. `TD_WTV_SIG_AREA` for Western Thames Valley) were deprecated years ago and no longer exist on the broker. Filter client-side. We filter to areas D1/D4/D6 in `_handle_td()` before buffering, reducing effective volume ~50×. Message types: **CA** (berth step — train moved from→to), **CB** (berth cancel, still ignored), **CC** (berth interpose — descriptor set/changed WITHOUT movement, e.g. a reversing train relabelled to its next working's headcode while still parked; processed since 2026-07-07, see "Headcode supersession" under lineside.html), **CT** (heartbeat, ignore), **SF** (signal flag — aspect change), **SG/SH** (signal flag variants, ignored). |
 | `VSTP_ALL` | VSTP | Low volume | Very Short Term Planning — late-notice schedule additions not in the daily SCHEDULE feed. |
 | `RTPPM_ALL` | RTPPM | 1/min | Aggregate performance metrics. Not useful for per-train display. |
 | `TSR_ALL_ROUTE` | TSR | ~11/week | Temporary speed restrictions from the Weekly Operating Notice. |
