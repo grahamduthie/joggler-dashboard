@@ -2059,13 +2059,21 @@ def _td_enrich_trains(trains, now, ident=None):
         if not info or info.get('dist_mi') is None:
             continue
         d = info['dist_mi']
-        direction = info.get('dir') or ''
-        if not direction and pos.get('from'):
+        # Actual from→to movement is ground truth for THIS train; SMART's 'dir'
+        # is a static property of the TD berth address and can disagree with it
+        # on sections worked bidirectionally near the house throat (a real train
+        # was seen wrongly gated out of the corridor this way — see PROJECT.md).
+        # So compute from movement first, and only fall back to SMART's stated
+        # dir when the from-berth has no usable distance to compare against.
+        direction = ''
+        if pos.get('from'):
             finfo = _berth_info(pos['area'], pos['from'])
             fd = (finfo['dist_mi']
                   if finfo and finfo.get('dist_mi') is not None else None)
             if fd is not None and fd != d:
                 direction = 'down' if d > fd else 'up'
+        if not direction:
+            direction = info.get('dir') or ''
         if not direction:
             continue
         if not ((direction == 'down' and -6.3 < d < -0.05)
