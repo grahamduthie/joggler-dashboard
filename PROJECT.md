@@ -170,6 +170,31 @@ twyford-dashboard.service
 
 cast-server.py is started separately (manually or via a second systemd unit). See PI-SETUP.md.
 
+**The Pi is shared with an unrelated project** (2026-07-07): it also runs
+`train-pi-controller.service`, the backend for a Raspberry-Pi-driven OLED train/bus/tube/
+flight departure board — a separate repo at `~/Programming/TrainPi` on the Mac, nothing to
+do with the Joggler dashboard. Same physical Pi (906 MB RAM), independent codebase, independent
+systemd unit.
+
+**Boot-time memory race (found and fixed 2026-07-07):** `transport-proxy.py` downloads and
+`gzip.decompress()`s the full daily CIF freight schedule synchronously at startup — 15 MB
+compressed → ~360 MB in memory (see `CIF: NN KB compressed → NN KB uncompressed` in
+`dashboard.log`). On a 906 MB Pi this is the single largest transient memory spike on the box.
+`train-pi-controller.service` used to have no ordering relative to `twyford-dashboard.service`
+and a very aggressive restart policy, so if its own boot-time Python import landed inside this
+spike it would crash-loop and give up permanently (`Start request repeated too quickly`),
+requiring manual SSH intervention. Fixed on the TrainPi side (not in this repo) by adding
+`After=twyford-dashboard.service` + a short `ExecStartPre=/bin/sleep 8` to
+`train-pi-controller.service`, plus a more forgiving restart policy (`RestartSec=3`,
+`StartLimitBurst=30`/`StartLimitIntervalSec=120`) so a collision self-heals instead of
+failing permanently. See `~/Programming/TrainPi/CLAUDE.md` for the full writeup.
+
+**Why this matters here:** if you ever change `transport-proxy.py`'s startup behaviour —
+especially anything that makes the CIF load bigger, slower, or moved earlier/later in
+startup — it changes the size/timing of this memory spike and could reopen the collision
+window for the co-hosted service. Not a reason to avoid changes, just worth knowing the Pi
+isn't dedicated to this project alone.
+
 ---
 
 ## SSH Access
