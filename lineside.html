@@ -872,7 +872,7 @@ function renderAppr() {
       live = '<span class="est">~ schedule</span>';
     }
 
-    const sub = [t.headcode,
+    const sub = [t.op_name || op.ab,
                  t.origin ? 'from ' + shortPlace(t.origin) : '',
                  t.call_type === 'STOP' ? 'stops' + (t.platform ? ' p' + t.platform : '') : '',
                  t.source === 'td' ? 'TD-only' : '']
@@ -882,7 +882,7 @@ function renderAppr() {
       '<div class="ap-eta ' + etaCls + '">' + eta + '</div>' +
       '<div class="ap-chip ' + (key[1] === 'm' ? 'm' : 'r') + '">' + chip + '</div>' +
       '<div class="op-pill" style="background:' + op.bg + ';color:' + op.fg + '">' +
-        esc(op.ab) + '</div>' +
+        esc(t.headcode || '') + '</div>' +
       '<div class="ap-name"><div class="ap-dest">' + esc(dest) + '</div>' +
         '<div class="ap-sub">' + esc(sub) + '</div></div>' +
       '<div class="ap-sched">' + schedT + ' ' + stat + '</div>' +
