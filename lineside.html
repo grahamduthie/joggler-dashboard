@@ -342,8 +342,21 @@ const LINES = [
 /* Henley branch (single line, top-left) + Crossrail stabling (top-right) */
 const BRANCH_CELLS = [
   {berths:['1636'],               x:[246,308], y:64,  cap:'HENLEY-ON-THAMES', capAbove:true},
-  {berths:['BYDN','BYUP'],        x:[330,412], y:64,  cap:'WARGRAVE · SHIPLAKE'},
-  {berths:['1643','1632'],        x:[462,524], y:86},
+  // Single-track branch, worked bidirectionally — TD gives each direction its
+  // own berth even though it's one physical line, same as the pair nearer
+  // Henley Br Jn below. BYUP/BYDN resolve (SMART + live TD) to STANME
+  // HENLEYONT — i.e. at Henley itself, NOT Wargrave/Shiplake (no berth
+  // coverage exists for those; SMART only covers TRUST reporting points).
+  // Stacked one above the other (same x, not side by side) — wide enough
+  // (≥42px) for the direction chevron to actually show without colliding
+  // with the headcode text.
+  {berths:['BYUP'],               x:[330,404], y:54,  dir:'up'},
+  {berths:['BYDN'],               x:[330,404], y:78,  dir:'down'},
+  // Henley Br Jn end of the branch (SMART: STANME TWYFORD, platform 4) —
+  // confirmed via live TD (2H42: A641 → 1643 → BYDN, 2026-07-07). Widened
+  // for the same chevron-visibility reason.
+  {berths:['1632'],               x:[440,506], y:86,  dir:'up'},
+  {berths:['1643'],               x:[510,576], y:86,  dir:'down'},
   {berths:['A641','B641','R641'], x:[592,656], y:118, cap:'P5 BAY', capAbove:true},
   // Turnback siding west of Maidenhead used by reversing Elizabeth Line
   // trains — a distinct berth (SMART STANME "MDNHDMIDS"), separate from the
@@ -476,7 +489,7 @@ for (const ln of LINES) {
   layoutSeg(ln.stub, X_STUB, ln.y, ln.key, 'east');
 }
 for (const c of BRANCH_CELLS)
-  addCell({berths: c.berths, x: c.x[0], y: c.y, w: c.x[1] - c.x[0], key: 'br'});
+  addCell({berths: c.berths, x: c.x[0], y: c.y, w: c.x[1] - c.x[0], key: 'br', dir: c.dir});
 addCell({berths: STAB_CELL.berths, x: STAB_CELL.x[0], y: STAB_CELL.y,
          w: STAB_CELL.x[1] - STAB_CELL.x[0], key: 'st'});
 
@@ -668,6 +681,12 @@ const MAID_PLACES = {'MAIDENHED':1, 'MDNHDMIDS':1, 'MDNHD CS':1};
 function opInfo(t) {
   const o = t && OPS[t.op_code];
   if (o) return o;
+  // Henley branch (2H headcodes) is 100% GWR-operated in reality, but these
+  // trains are deliberately excluded from every /api/trains path server-side
+  // ("Henley branch — excluded everywhere", out of scope for the Reading↔
+  // Maidenhead corridor ETA logic) — so op_code is never populated and they'd
+  // otherwise fall through to the grey unknown-operator colour below.
+  if (t && t.headcode && t.headcode.startsWith('2H')) return OPS.GW;
   if (t && isEcsHc(t.headcode))
     return {bg:'#4a7d9d', fg:'#04121a', ab:'ECS'};
   if (t && (t.passenger === false || isFrtHc(t.headcode)))
@@ -916,9 +935,15 @@ function drawOccupant(layer, cell, p, stackIdx) {
     'font-weight':700, 'letter-spacing': cell.w < 30 ? '0' : '.05em'}, p.headcode));
   /* direction chevron on the leading edge (up rows → east/right) — only on cells
      wide enough that the centred headcode won't collide with it (row direction is
-     also shown by the line label and the arrowhead at the line end) */
+     also shown by the line label and the arrowhead at the line end). Branch
+     direction-pair cells (Henley single line) set dir explicitly instead of
+     going through LINE_OF, but still respect the same width gate — at 38px
+     they're narrower than the 42px threshold, so the chevron correctly stays
+     off rather than colliding with the centred headcode; the split into two
+     boxes already conveys direction unambiguously on its own. */
   const ln = LINE_OF[cell.key];
-  const dir = (ln && cell.w >= 42) ? ln.dir : null;
+  const dirRaw = cell.dir || (ln && ln.dir);
+  const dir = (dirRaw && cell.w >= 42) ? dirRaw : null;
   if (dir) {
     const cx = dir === 'up' ? cell.x + cell.w - 6 : cell.x + 6;
     const pts = dir === 'up'

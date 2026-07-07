@@ -1588,6 +1588,21 @@ def _rtt_build_trains():
             if c:
                 t['cancelled'] = c['cancelled']
 
+    # Live identity changes from TRUST (msg_type 0007) — drop an unconfirmed
+    # entry once we know its headcode has changed: it will genuinely never be
+    # seen passing Twyford under this number again (the physical train
+    # continues as new_hc, which gets tracked independently once it starts
+    # reporting under that number). A CONFIRMED entry (already seen at/near
+    # Twyford under the old code before the change) is left alone — the
+    # identity change happened after it was already here.
+    with _nr_identity_lock:
+        identity_map = dict(_nr_identity_map)
+    if identity_map:
+        def _identity_changed_away(t):
+            chg = identity_map.get(t.get('headcode'))
+            return bool(chg) and not (t.get('confirmed') or t.get('td_berth') or t.get('twy_actual'))
+        trains = [t for t in trains if not _identity_changed_away(t)]
+
     # Drop phantom CIF freight paths.  A freight predicted to pass within the
     # next ~10 min would already be inside the tracked Reading↔Maidenhead
     # corridor and reporting TD berths.  If such an imminent CIF-scheduled train
@@ -2099,12 +2114,14 @@ def _td_enrich_trains(trains, now, ident=None):
         # So compute from movement first, and only fall back to SMART's stated
         # dir when the from-berth has no usable distance to compare against.
         direction = ''
+        direction_measured = False
         if pos.get('from'):
             finfo = _berth_info(pos['area'], pos['from'])
             fd = (finfo['dist_mi']
                   if finfo and finfo.get('dist_mi') is not None else None)
             if fd is not None and fd != d:
                 direction = 'down' if d > fd else 'up'
+                direction_measured = True
         if not direction:
             direction = info.get('dir') or ''
         if not direction:
@@ -2123,7 +2140,19 @@ def _td_enrich_trains(trains, now, ident=None):
         # Reading (Manchester→Reading) sits in a D1 throat berth at dist ~4.8
         # mi and — with an ambiguous from-berth — can read as "up, approaching
         # the house".  It never passes Twyford, so don't synthesise it.
-        if (who.get('origin') and who.get('dest')
+        #
+        # Only applied when direction had to fall back to SMART's static dir
+        # (the actual "ambiguous from-berth" case above) — NOT when direction
+        # is measured from a real from→to berth comparison. _passes_twyford's
+        # origin/dest check is a crude place-name-token heuristic (a small
+        # hardcoded list of "east of Twyford" tokens) that can just as easily
+        # be wrong the other way: 4O38 (Birmingham → "Freightliners (Maritime
+        # Terml)") was excluded for its entire ~32-minute, unambiguous,
+        # multi-berth approach through D4→D6→D1 because neither endpoint name
+        # matched a known token, so both were wrongly treated as "not east" —
+        # never mind that real, measured, continuous movement through the
+        # corridor is far stronger evidence than a name-matching guess.
+        if (not direction_measured and who.get('origin') and who.get('dest')
                 and not _passes_twyford(direction, who['origin'], who['dest'])):
             continue
         passenger = who['passenger'] if 'passenger' in who else (hc[:1] in '129')
@@ -2187,6 +2216,27 @@ _NR_STANOX_WATCH = {
         'main_plats':  frozenset(),  # no platform info for pass-through freight
         'up_fast':    0,  'down_fast':  0,
         'up_slow':    0,  'down_slow':  0,
+        'freight_only': False,
+    },
+    # Kennet Bridge Jn — Reading's eastern throat, ~5.1 mi from Twyford
+    # (confirmed empirically via live TD sightings at STANME 'KEN BG JN').
+    # Gives freight/ECS workings (e.g. 5E10, 6M93) real advance warning instead
+    # of zero lead time — they're not in RTT's public passenger schedule query
+    # at all, so 74023 (which fires essentially AT Twyford, offset 0) was
+    # previously our only visibility into them. Offsets from this project's
+    # existing freight/passenger speed model (_berth_eta_to_house_s: 50/35 mph
+    # main/relief freight, 90/60 mph main/relief passenger) at 5.1 mi. No
+    # platform data available at a junction (not a platform), so main_plats is
+    # empty and everything gets the relief-speed (slower, more conservative)
+    # estimate — acceptable since passenger trains are already well covered by
+    # RTT and this point matters most for freight/ECS. UP = approaching
+    # Twyford (positive future offset); DOWN here means already past Twyford
+    # heading toward Reading (negative offset), same convention as the
+    # existing Reading RTT query being UP-only for the same reason.
+    '74233': {
+        'main_plats':  frozenset(),
+        'up_fast':    6,  'down_fast':  -6,
+        'up_slow':    9,  'down_slow':  -9,
         'freight_only': False,
     },
 }
@@ -2836,6 +2886,18 @@ def _cif_refresh_loop():
 _nr_cancel_lock   = threading.Lock()
 _nr_cancellations = {}   # headcode -> {'cancelled': bool, 'ts': float, 'reason': str}
 
+# Live identity changes from TRUST (msg_type 0007) — a working reports under
+# a new headcode partway through its own journey (e.g. 6H81 became 4H81).
+# Same physical train, same underlying schedule UID, different reporting
+# number. We don't yet carry data forward to the new headcode (that needs
+# re-keying tracked state — bigger job), but we DO use this to stop showing
+# the OLD headcode once we know it's not going to arrive under that number:
+# without this, an unconfirmed old-headcode entry could sit in the
+# approaching list forever, since it will genuinely never be seen passing
+# Twyford as that headcode again.
+_nr_identity_lock = threading.Lock()
+_nr_identity_map  = {}   # old_headcode -> {'new_hc': str, 'ts': float}
+
 
 class _NRListener:
     def __init__(self):
@@ -2997,12 +3059,26 @@ class _NRListener:
                     with _lock:
                         _rtt_trains_ts = 0   # force immediate refresh
                     continue
-                if msg_type in ('0006', '0007'):
-                    # Change of Origin / Change of Identity — not yet merged
-                    # into train records (would need re-keying tracked state
-                    # by headcode, e.g. carrying data across an identity
-                    # swap); logged for visibility until that's built out.
-                    print(f'NR STOMP: {msg_type} for {reporting_hc or train_id}: {body}')
+                if msg_type == '0007':
+                    # Change of Identity: same physical train, new reporting
+                    # headcode from here on. revised_train_id is the same
+                    # 10-char PPHHHHSSSS format as train_id.
+                    revised = body.get('revised_train_id', '')
+                    new_hc  = revised[2:6] if len(revised) >= 6 else ''
+                    if reporting_hc and new_hc:
+                        with _nr_identity_lock:
+                            _nr_identity_map[reporting_hc] = {'new_hc': new_hc, 'ts': time.time()}
+                            stale = [hc for hc, e in _nr_identity_map.items()
+                                     if time.time() - e['ts'] > 86400]
+                            for hc in stale:
+                                del _nr_identity_map[hc]
+                        print(f'NR STOMP: 0007 identity change {reporting_hc} -> {new_hc}')
+                    continue
+                if msg_type == '0006':
+                    # Change of Origin — not yet merged into train records
+                    # (would need a STANOX->place reverse lookup, which CORPUS
+                    # doesn't give us directly); logged for visibility.
+                    print(f'NR STOMP: 0006 for {reporting_hc or train_id}: {body}')
                     continue
 
                 stanox = body.get('loc_stanox', '')
@@ -3049,6 +3125,17 @@ class _NRListener:
                     variation = int(body.get('timetable_variation') or 0)
                 except (TypeError, ValueError):
                     variation = 0
+                # offset_min == 0 means this STANOX IS Twyford itself (74023) —
+                # a genuine confirmed pass. Any other watched STANOX (e.g.
+                # 74233, Kennet Bridge Jn, 5.1 mi out) only tells us where the
+                # train was AT THAT OTHER LOCATION; twy_iso there is a
+                # projected ETA, not an observed Twyford pass. Marking it
+                # twy_actual/confirmed=True regardless of offset wrongly
+                # showed a train 5+ miles away as having already passed the
+                # house (5E56 case, 2026-07-07) — _td_enrich_trains() still
+                # correctly promotes this to confirmed once a real Twyford-
+                # area TD sighting actually happens.
+                at_twyford = offset_min == 0
                 entry = {
                     'uid':        'nr:' + train_id,
                     'headcode':   reporting_hc,
@@ -3063,12 +3150,12 @@ class _NRListener:
                     'orig_dep':   '',
                     'dest_arr':   '',
                     'twy_sched':  twy_iso,
-                    'twy_actual': twy_iso,
+                    'twy_actual': twy_iso if at_twyford else '',
                     'late_min':   variation,
                     'cancelled':  False,
                     'status':     body.get('variation_status'),
                     'platform':   '',
-                    'confirmed':  True,
+                    'confirmed':  at_twyford,
                     'num_veh':    None,
                 }
                 with _nr_lock:
