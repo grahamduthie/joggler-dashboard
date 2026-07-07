@@ -111,8 +111,8 @@ fetch the S3 URL **WITHOUT** the auth header (S3 rejects both auth mechanisms). 
 | Type param | Endpoint | What it is | Code |
 |---|---|---|---|
 | `SMART` | `SupportingFileAuthenticate?type=SMART` → `SMARTExtract.json.gz` | **Berth → line + reporting point** map. Each step has `TD`, `FROMBERTH`/`TOBERTH`, `FROMLINE` (U/D/M/R…), `PLATFORM`, `STANOX`/`STANME`, `BERTHOFFSET`. Only covers berths that are TRUST reporting points (platforms/junctions), NOT every signal berth. | `_load_smart` |
-| `CIF_FREIGHT_FULL_DAILY` | `CifFileAuthenticate?type=CIF_FREIGHT_FULL_DAILY&day=toc-full` | Daily freight working timetable (~15 MB gz). Indexed by headcode for trains with a TWYFORD `pass`. | `_load_cif` |
-| `CIF_ALL_FULL_DAILY` | `CifFileAuthenticate?type=CIF_ALL_FULL_DAILY` | Full WTT incl. passenger (~200 MB). Not currently downloaded — option if RTT is insufficient. | — |
+| `CIF_FREIGHT_FULL_DAILY` | `CifFileAuthenticate?type=CIF_FREIGHT_FULL_DAILY&day=toc-full` | Daily freight working timetable (~15 MB gz / ~370 MB uncompressed, ~36k schedules). Indexed by headcode for trains with a TWYFORD `pass`. | `_load_cif` |
+| `CIF_ALL_FULL_DAILY` | `CifFileAuthenticate?type=CIF_ALL_FULL_DAILY&day=toc-full` | Full WTT incl. passenger (~70 MB gz / ~2 GB uncompressed, ~200k+ schedules — confirmed real size 2026-07-07). Downloaded daily for stock-type display (Power Type/Timing Load/Speed/Category, keyed by headcode) and as a broader origin/dest fallback than the freight-only feed. Both this and `_load_cif` stream-decompress via `gzip.GzipFile(fileobj=resp)` rather than reading the whole file into memory first — the Pi only has 906 MB RAM, nowhere near enough to hold ~2 GB decompressed at once. | `_load_pax_cif` |
 
 **SMART line decoding (GWML platform convention, verified):** platform `1`=Down Main, `2`=Up Main,
 `3`=Down Relief, `4`/`5`=Up Relief; `FROMLINE` `U`/`D`=direction. See `_smart_line`.

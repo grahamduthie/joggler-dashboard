@@ -96,44 +96,76 @@ body {
   height: 100%; display: flex; align-items: center; justify-content: center;
   font-family: var(--cond); font-size: 17px; letter-spacing: .14em; color: var(--faint);
 }
+/* One line per train reads left→right as countdown, expected time, direction,
+   headcode, destination — everything about "when/what" grouped at the start,
+   in natural reading order (matches the "3 min 13:13 →M 1P22 <dest>" request).
+   The detail line (operator, origin, stock type, coaches, live position) hangs
+   directly under the destination only — not under the countdown/time prefix —
+   so it reads as "details about this destination", one visual unit per row,
+   with nothing floating in a separate far-right column any more. */
 .ap-row {
-  display: grid; grid-template-columns: 78px 40px 46px 1fr 140px 194px;
-  gap: 8px; align-items: center; height: 40px;
+  display: grid;
+  grid-template-columns: 44px 50px 28px 44px 1fr;
+  grid-template-areas:
+    "eta sched chip pill dest"
+    ".   .     .    .    sub";
+  column-gap: 8px; row-gap: 1px;
+  padding: 3px 0;
   border-bottom: 1px solid rgba(20,27,40,.7);
 }
+/* Faint banding ties each row's two lines together as one visual unit. */
+.ap-row:nth-child(even) { background: rgba(255,255,255,.025); }
 .ap-eta {
-  font-family: var(--cond); font-weight: 700; font-size: 27px; line-height: 1;
+  grid-area: eta; align-self: center;
+  font-family: var(--cond); font-weight: 700; font-size: 18px; line-height: 1;
   text-align: right; font-variant-numeric: tabular-nums;
 }
-.ap-eta .u { font-size: 13px; color: var(--dim); font-weight: 600; }
+.ap-eta .u { font-size: 10px; color: var(--dim); font-weight: 600; }
 .ap-eta.now { color: var(--amber); animation: pulse 1.2s infinite; }
-.ap-eta.warn { color: var(--late); font-size: 17px; }
+.ap-eta.warn { color: var(--late); font-size: 12.5px; }
 /* scheduled time reached but no live berth sighting — softer than NOW */
-.ap-eta.due { color: #a8791f; font-size: 18px; }
+.ap-eta.due { color: #a8791f; font-size: 13px; }
 @keyframes pulse { 50% { opacity: .5; } }
+.ap-sched {
+  grid-area: sched; align-self: center; min-width: 0;
+  font-family: var(--mono); font-size: 12px; color: var(--dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .ap-chip {
-  font-family: var(--cond); font-weight: 700; font-size: 14px; letter-spacing: .06em;
+  grid-area: chip; align-self: center;
+  font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing: .06em;
   text-align: center; border: 1px solid; border-radius: 3px; padding: 1px 0;
 }
 .ap-chip.r { color: var(--relief); border-color: rgba(63,183,196,.5); }
 .ap-chip.m { color: var(--main-ln); border-color: rgba(111,159,216,.5); }
 .op-pill {
-  font-family: var(--cond); font-weight: 600; font-size: 12px; text-align: center;
+  grid-area: pill; align-self: center;
+  font-family: var(--cond); font-weight: 600; font-size: 11.5px; text-align: center;
   letter-spacing: .04em; padding: 1px 0; border-radius: 3px;
 }
-.ap-name { min-width: 0; line-height: 1.15; }
 .ap-dest {
-  font-family: var(--cond); font-weight: 700; font-size: 19px;
+  grid-area: dest; align-self: center; min-width: 0;
+  font-family: var(--cond); font-weight: 700; font-size: 16.5px; line-height: 1.15;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Scheduled time + on-time/late status, trailing the destination on the same
+   line — kept visually secondary (smaller, mono, dim) and right next to what
+   it describes, rather than off in a detached far-right column. If the row's
+   too narrow, this is what the ellipsis eats first, not the destination. */
+.ap-schedinfo {
+  font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--dim);
+  margin-left: 6px;
 }
 .ap-sub {
-  font-size: 11px; color: var(--dim); font-family: var(--mono);
+  grid-area: sub; align-self: start; min-width: 0;
+  font-size: 10.5px; color: var(--dim); font-family: var(--mono); line-height: 1.25;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.ap-sched { font-family: var(--mono); font-size: 12px; color: var(--dim);
-            font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
-.ap-live  { font-family: var(--mono); font-size: 11.5px;
-            font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.sep { color: var(--faint); }
+.pw-dot {
+  width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+  margin-right: 4px; vertical-align: 1px;
+}
 .ontime { color: var(--ontime); }
 .late   { color: var(--late); }
 .cancel { color: var(--cancel); }
@@ -200,6 +232,14 @@ body {
 .cal-row .ln.r { color: var(--relief); } .cal-row .ln.m { color: var(--main-ln); }
 .cal-row .off-p { color: var(--late); } .cal-row .off-n { color: var(--ontime); }
 #cal-empty { font-size: 10.5px; color: var(--faint); font-style: italic; }
+
+#power-legend { display: flex; align-items: center; gap: 10px;
+  font-size: 10.5px; letter-spacing: .04em; color: var(--dim); }
+#power-legend span { display: flex; align-items: center; gap: 4px; }
+#power-legend i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.pw-diesel   { background: #9a9a9a; }
+.pw-electric { background: #e8c34a; }
+.pw-bimode   { background: #4ac0c0; }
 </style>
 </head>
 <body>
@@ -207,6 +247,11 @@ body {
 <div id="topbar">
   <span class="title">LINESIDE</span>
   <span class="subtitle">TWYFORD BERTH PANEL · READING ⇄ MAIDENHEAD · TD D1/D6</span>
+  <span id="power-legend">
+    <span><i class="pw-diesel"></i>Diesel/DMU</span>
+    <span><i class="pw-electric"></i>Electric/EMU</span>
+    <span><i class="pw-bimode"></i>Bi-mode/IET</span>
+  </span>
   <span class="fill"></span>
   <span id="cal-toggle" onmousedown="toggleCalib()">⏱ CAL</span>
   <span id="topdate">—</span>
@@ -607,7 +652,12 @@ const OPS = {
   DW:{bg:'#f04a4a',fg:'#1c0505',ab:'DB'},   FL:{bg:'#4fae62',fg:'#07130a',ab:'FLR'},
   ZZ:{bg:'#f07b3c',fg:'#1a0a02',ab:'COL'},  ZN:{bg:'#e8c34a',fg:'#171102',ab:'NR'},
 };
-const isFrtHc = hc => hc && '45678'.indexOf(hc[0]) >= 0;
+const isFrtHc = hc => hc && '4678'.indexOf(hc[0]) >= 0;
+const isEcsHc = hc => hc && hc[0] === '5';
+/* Power-type indicator colours (berth-diagram cap stripe + topbar legend) —
+   independent of the operator fill colour, so e.g. a GWR DMU and a GWR IET
+   are still visually distinguishable at a glance. */
+const POWER_COLORS = {diesel:'#9a9a9a', electric:'#e8c34a', bimode:'#4ac0c0'};
 // Maidenhead-local STANMEs (turnback siding, carriage sidings, the station
 // itself): a TD-only sighting there (no RTT/CIF schedule match — reversal/
 // depot moves are deliberately excluded from corridor synthesis, so we never
@@ -618,6 +668,8 @@ const MAID_PLACES = {'MAIDENHED':1, 'MDNHDMIDS':1, 'MDNHD CS':1};
 function opInfo(t) {
   const o = t && OPS[t.op_code];
   if (o) return o;
+  if (t && isEcsHc(t.headcode))
+    return {bg:'#4a7d9d', fg:'#04121a', ab:'ECS'};
   if (t && (t.passenger === false || isFrtHc(t.headcode)))
     return {bg:'#7d8f4a', fg:'#111504', ab:'FRT'};
   if (t && MAID_PLACES[t.place]) return OPS.XR;
@@ -768,10 +820,10 @@ function harvestLog() {
       if (!(t.twy_actual || t.confirmed)) continue;
     }
     logged[t.uid] = true;
-    const frt = t.passenger === false || isFrtHc(hc);
+    const frt = t.passenger === false || isFrtHc(hc) || isEcsHc(hc);
     passLog.unshift({
       ms: trainMs(t) || now, hc, op: opInfo(t),
-      dest: frt ? (t.dest ? shortPlace(t.dest) : frtClass(hc))
+      dest: frt ? (t.dest ? shortPlace(t.dest) : (t.stock_type || frtClass(hc)))
                 : shortPlace(t.dest || '—'),
       key: trackKey(t) || '--',
     });
@@ -855,6 +907,9 @@ function drawOccupant(layer, cell, p, stackIdx) {
     rect.setAttribute('stroke-dasharray', '4,3');
   }
   g.appendChild(rect);
+  const pwColor = t && POWER_COLORS[t.power_bucket];
+  if (pwColor) g.appendChild(el('rect', {x:cell.x, y, width:cell.w, height:2.5,
+    rx:1.25, fill:pwColor, opacity: dim ? 0.6 : 0.95}));
   g.appendChild(el('text', {x:cell.x + cell.w/2, y:y+14, 'text-anchor':'middle',
     fill:op.fg, 'font-size': cell.w < 30 ? 10.5 : 12,
     'font-family':"'Barlow Condensed',sans-serif",
@@ -874,8 +929,8 @@ function drawOccupant(layer, cell, p, stackIdx) {
   /* destination abbreviation under the cell (matched trains, first occupant;
      skipped on branch/stabling cells where it collides with station furniture) */
   if (t && stackIdx === 0 && cell.key !== 'br' && cell.key !== 'st') {
-    const frt = t.passenger === false || isFrtHc(t.headcode);
-    const ab = frt ? (t.dest ? destAbbr(t.dest) : 'FRT') : destAbbr(t.dest);
+    const frt = t.passenger === false || isFrtHc(t.headcode) || isEcsHc(t.headcode);
+    const ab = frt ? (t.dest ? destAbbr(t.dest) : (isEcsHc(t.headcode) ? 'ECS' : 'FRT')) : destAbbr(t.dest);
     if (ab) g.appendChild(el('text', {x:cell.x + cell.w/2, y:cell.y + 21,
       'text-anchor':'middle', fill:op.bg, 'font-size':8.5, opacity:0.85,
       'font-family':"'Barlow Condensed',sans-serif", 'font-weight':600,
@@ -951,8 +1006,12 @@ function renderAppr() {
     const op   = opInfo(t);
     const ms   = trainMs(t);
     const diff = ms - now;
-    const frt  = t.passenger === false || isFrtHc(t.headcode);
-    const dest = frt ? (t.dest ? shortPlace(t.dest) : frtClass(t.headcode))
+    const frt  = t.passenger === false || isFrtHc(t.headcode) || isEcsHc(t.headcode);
+    // Prefer real CIF-derived stock type over the crude headcode-class guess
+    // (frtClass) when we have no matched destination either — e.g. a freight
+    // working absent from the freight-only feed but present in the fuller
+    // all-TOC one, so its real Power Type is known even without a route.
+    const dest = frt ? (t.dest ? shortPlace(t.dest) : (t.stock_type || frtClass(t.headcode)))
                      : shortPlace(t.dest || t.headcode);
     const key  = trackKey(t) || '--';
     const chip = (key[0] === 'u' ? '→' : '←') + (key[1] === 'm' ? 'M' : 'R');
@@ -982,18 +1041,21 @@ function renderAppr() {
     // expected time alongside the delay, when it differs from the original
     // scheduled time.
     const expT = t.house_pass_ts ? fmtHM(t.house_pass_ts * 1000) : '';
-    const lateBit = (expT && expT !== schedT) ? ' <span class="lbl">→ ' + expT + '</span>' : '';
     let stat;
     if (actMs && actMs <= now + 20000)
                               stat = '<span class="ontime">✓ ' + fmtHM(t.twy_actual) + '</span>';
     else if (actMs)           stat = (t.late_min >= 1)
-                                ? '<span class="late">+' + t.late_min + '</span>' + lateBit
+                                ? '<span class="late">+' + t.late_min + '</span>'
                                 : '<span class="ontime">on time</span>';
     else if (t.late_min == null) stat = '<span class="est">no rt</span>';
-    else if (t.late_min >= 1) stat = '<span class="late">+' + t.late_min + '</span>' + lateBit;
+    else if (t.late_min >= 1) stat = '<span class="late">+' + t.late_min + '</span>';
     else                      stat = '<span class="ontime">on time</span>';
     /* Twyford call cancelled but the train is physically running through */
     if (t.cancelled) stat = '<span class="cancel">✗ not stopping</span>';
+    // Bare clock time paired with the countdown — the model's current best
+    // prediction (same basis the countdown itself is computed from), not the
+    // original timetable slot, so "3 min" and the clock time always agree.
+    const etaClock = expT || (schedT !== '—' ? schedT : '');
 
     /* live berth fix */
     const p = tdPos[t.headcode];
@@ -1007,27 +1069,50 @@ function renderAppr() {
     } else if (p && p.age_s < 150) {
       live = '<span class="live">● ' + esc(p.berth) + '</span>';
     } else if (t.td_dist_mi != null && !t.twy_actual) {
-      live = '<span class="live">● ' + Math.abs(t.td_dist_mi).toFixed(1) +
-             ' mi</span> <span class="lbl">' + esc(t.td_berth || '') + '</span>';
+      // Fallback source (t.td_dist_mi/td_berth/td_place, embedded directly in
+      // /api/trains) used when the separately-polled /api/td-live map has no
+      // fresh fix for this headcode yet. Same "berth · place · distance"
+      // template as the primary branch above — it was previously a different,
+      // inconsistent format (distance first, bare dim berth code, no place).
+      const mi = Math.abs(t.td_dist_mi);
+      live = '<span class="live">● ' + esc(t.td_berth || '?') + ' · ' +
+        (t.td_place ? esc(placeName(t.td_place)) + ' · ' : '') + mi.toFixed(1) + ' mi</span>';
     } else {
       live = '<span class="est">~ schedule</span>';
     }
 
-    const sub = [op.ab,
-                 t.origin ? 'from ' + shortPlace(t.origin) : '',
-                 t.call_type === 'STOP' ? 'stops' + (t.platform ? ' p' + t.platform : '') : '',
-                 t.source === 'td' ? 'TD-only' : '']
-                .filter(Boolean).join(' · ');
+    // Power-type dot mirrors the berth-diagram cap stripe so the two views
+    // read as one system: same colour means the same thing everywhere.
+    const pwColor  = POWER_COLORS[t.power_bucket] || '';
+    const stockTxt = t.stock_type
+      ? (pwColor ? '<i class="pw-dot" style="background:' + pwColor + '"></i>' : '') + esc(t.stock_type)
+      : '';
+    // Live position, then scheduled-time/status last — the detail line reads
+    // as "who/where it's coming from, where it is now, and when it's due".
+    const sub = [esc(op.ab),
+                 t.origin ? esc('from ' + shortPlace(t.origin)) : '',
+                 t.call_type === 'STOP' ? esc('stops' + (t.platform ? ' p' + t.platform : '')) : '',
+                 t.source === 'td' ? 'TD-only' : '',
+                 live,
+                 schedT + ' ' + stat]
+                .filter(Boolean).join(' <span class="sep">·</span> ');
+
+    // Stock type + coaches sit on the top line, between destination and the
+    // pill — "what it is" belongs with "where it's going".
+    const destExtra = [stockTxt,
+                        t.num_veh ? esc(t.num_veh + ' coaches') : '']
+                       .filter(Boolean).join(' <span class="sep">·</span> ');
 
     return '<div class="ap-row">' +
       '<div class="ap-eta ' + etaCls + '">' + eta + '</div>' +
+      '<div class="ap-sched">' + etaClock + '</div>' +
       '<div class="ap-chip ' + (key[1] === 'm' ? 'm' : 'r') + '">' + chip + '</div>' +
       '<div class="op-pill" style="background:' + op.bg + ';color:' + op.fg + '">' +
         esc(t.headcode || '') + '</div>' +
-      '<div class="ap-name"><div class="ap-dest">' + esc(dest) + '</div>' +
-        '<div class="ap-sub">' + esc(sub) + '</div></div>' +
-      '<div class="ap-sched">' + schedT + ' ' + stat + '</div>' +
-      '<div class="ap-live">' + live + '</div>' +
+      '<div class="ap-dest">' + esc(dest) +
+        (destExtra ? ' <span class="ap-schedinfo"><span class="sep">·</span> ' + destExtra + '</span>' : '') +
+        '</div>' +
+      '<div class="ap-sub">' + sub + '</div>' +
     '</div>';
   }).join('');
 }
@@ -1066,7 +1151,7 @@ function renderInfo() {
     const ms = trainMs(t);
     if (ms > now && ms < now + 3600000 && !t.cancelled) {
       hour++;
-      if (t.passenger === false || isFrtHc(t.headcode)) frt++;
+      if (!isEcsHc(t.headcode) && (t.passenger === false || isFrtHc(t.headcode))) frt++;
     }
   }
   document.getElementById('st-hour').textContent = hour + ' trains';

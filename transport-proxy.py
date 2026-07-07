@@ -18,6 +18,7 @@ import re
 import subprocess
 import html as _html
 import gzip
+import io
 import base64
 from urllib.parse import urlparse, parse_qs, quote
 from zoneinfo import ZoneInfo
@@ -1451,7 +1452,7 @@ def _rtt_build_trains():
         if any(abs(ets - x) < 600 for x in existing_hc.get(hc, [])):
             continue   # same working already tracked via RTT
         if not entry.get('origin'):
-            ci = _cif_ident(hc) or ident.get(hc)
+            ci = _cif_ident(hc) or _cif_pax_ident(hc) or ident.get(hc)
             if ci:
                 entry['origin']   = ci.get('origin') or ''
                 entry['dest']     = ci.get('dest') or ''
@@ -1555,6 +1556,37 @@ def _rtt_build_trains():
             off = _CALIB_OFFSETS.get(_calib_line_key(t))
             if off and t.get('house_pass_ts'):
                 t['house_pass_ts'] = int(t['house_pass_ts'] + off)
+
+    # Stock type (display only) from today's full CIF schedule, keyed by
+    # headcode — independent of the freight/ECS index above. Each headcode can
+    # have multiple schedule entries (STP overrides); _cif_best picks the one
+    # actually running today, same priority rule the freight index uses.
+    for t in trains:
+        pax = _cif_pax_best(t.get('headcode'))
+        t['stock_type']   = _cif_stock_label(pax)
+        t['power_bucket'] = _cif_power_bucket(pax)
+        # 4L33-style case: a freight/ECS working matched here (real Power Type
+        # data) but missing from the dedicated freight-only feed — fill in the
+        # real destination instead of leaving it for the frontend's crude
+        # headcode-class guess (frtClass()) to paper over with a made-up label.
+        if pax and not t.get('dest'):
+            ci = _cif_pax_ident(t.get('headcode'))
+            if ci and ci.get('dest'):
+                t['origin']   = t.get('origin') or ci['origin']
+                t['dest']     = ci['dest']
+                t['orig_dep'] = t.get('orig_dep') or ci['orig_dep']
+                t['dest_arr'] = t.get('dest_arr') or ci['dest_arr']
+
+    # Live cancellation/reinstatement truth from TRUST (msg_type 0002/0005),
+    # overriding RTT's own cancelled flag — RTT's schedule snapshot can lag or
+    # simply never catch up with an operational change mid-journey.
+    with _nr_cancel_lock:
+        cancel_map = dict(_nr_cancellations)
+    if cancel_map:
+        for t in trains:
+            c = cancel_map.get(t.get('headcode'))
+            if c:
+                t['cancelled'] = c['cancelled']
 
     # Drop phantom CIF freight paths.  A freight predicted to pass within the
     # next ~10 min would already be inside the tracked Reading↔Maidenhead
@@ -2081,7 +2113,7 @@ def _td_enrich_trains(trains, now, ident=None):
                 or (direction == 'up' and 0.05 < d < 4.95)):
             continue          # outside the no-turnback corridor
         who = ident.get(hc) or {}
-        ci  = _cif_ident(hc)
+        ci  = _cif_ident(hc) or _cif_pax_ident(hc)
         if not who.get('origin') and ci:
             who = dict(who, origin=ci['origin'], dest=ci['dest'],
                        orig_dep=ci['orig_dep'], dest_arr=ci['dest_arr'])
@@ -2178,6 +2210,20 @@ _td_superseded = {}      # headcode -> ts it was superseded (a CC relabelled its
                           # different descr) — /api/td-live hides that headcode's sighting if
                           # the sighting is no newer than this (see _td_live)
 _TD_AREAS     = {'D1', 'D4', 'D6'}   # Thames Valley SC: Reading, Hayes, Maidenhead
+
+# Bay/siding berth codes known to be the same physical track across its
+# arrival/dwell/reversal phases, keyed to a shared canonical group regardless
+# of SMART coverage — SMART only positions TRUST reporting points, and a
+# siding's middle/dwell code sometimes isn't one at all (confirmed: Twyford's
+# P5 bay code B641 has no SMART entry in any area), so the normal STANME+
+# platform key falls back to the raw berth code there, which can silently
+# fail to link a reversing train's headcode change across a CC relabel,
+# leaving the old headcode stuck showing forever (2H37→2H38 case, 2026-07-07).
+# Mirrors lineside.html's own P5 BAY cell grouping (berths A641/B641/R641).
+_COLOCATED_BERTHS = {
+    'A641': 'twy-p5-bay', 'B641': 'twy-p5-bay', 'R641': 'twy-p5-bay',
+    '0578': 'mdnhd-turnback', 'R578': 'mdnhd-turnback',
+}
 
 # ── CA berth-chain learning ──────────────────────────────────────────────────
 # SMART only positions berths that are TRUST reporting points; intermediate
@@ -2277,8 +2323,8 @@ def _nr_freight_hc(hc):
 
 # ── CIF Freight Schedule (pre-arrival visibility) ──────────────────────────
 
-_CIF_URL = ('https://publicdatafeeds.networkrail.co.uk/ntrod/'
-            'CifFileAuthenticate?type=CIF_FREIGHT_FULL_DAILY&day=toc-full')
+_CIF_FREIGHT_TYPE = 'CIF_FREIGHT_FULL_DAILY'
+_CIF_PAX_TYPE     = 'CIF_ALL_FULL_DAILY'
 
 # TIPLOCs east of Twyford (towards London) — used to infer UP direction
 _CIF_EAST = frozenset({
@@ -2300,6 +2346,160 @@ _cif_lock  = threading.Lock()
 _cif_index = {}    # headcode → list of {uid, twy_hhmm, direction, stp}
 _cif_ts    = 0.0   # unix time of last successful load
 
+# ── CIF full (all-TOC) schedule — stock type only, not used for freight logic.
+# ~2 GB uncompressed vs. the freight feed's ~370 MB — too big to hold fully in
+# memory on the Pi's 906 MB, so this and the freight loader below both stream
+# through gzip rather than decompressing the whole file at once.
+_cif_pax_lock  = threading.Lock()
+_cif_pax_index = {}    # headcode → {category, power_type, timing_load, speed}
+_cif_pax_ts    = 0.0
+
+# Timing Load → marketing nickname. NR's public code table only covers the
+# legacy DMU/EMU fleets it was defined for (letter/short codes); newer stock
+# isn't in it and falls back to the bare power-type label below.
+_TIMING_LOAD_NICKNAME = {
+    'A': 'Pacer', 'E': 'Sprinter', 'N': 'Turbo', 'T': 'Turbo',
+    'S': 'Sprinter', 'V': 'Voyager', '69': 'Turbostar',
+}
+# Confirmed against this project's own live CIF_ALL_FULL_DAILY feed (2026-07-07):
+# for modern fleets NR just uses the class number itself as the Timing Load
+# code, e.g. ('EMU','345')=Elizabeth Line, ('EMU','387')=GWR/HEX Electrostar,
+# ('DMU','802') AND ('EMU','802')=IET — the IET's bi-mode nature means the
+# same '802' code shows up under either power type depending on that day's
+# working, so detection must key off Timing Load, not power type. Without
+# this, an IET and a Class 165/166 Turbo were both generic "DMU" — the whole
+# point of the diagram's power-type indicator lost on exactly the two fleets
+# most likely to share a headcode-class range on this route.
+_TIMING_LOAD_CLASS = {
+    '345': ('Class 345', 'electric'),
+    '387': ('Class 387', 'electric'),
+    '800': ('Class 800', 'bimode'),
+    '802': ('Class 802', 'bimode'),
+}
+_POWER_TYPE_LABEL = {
+    'D': 'Diesel', 'DEM': 'DEMU', 'DMU': 'DMU', 'E': 'Electric',
+    'ED': 'Electro-diesel', 'EML': 'EMU+loco', 'EMU': 'EMU', 'HST': 'HST',
+    'LDS': 'Diesel shunter',
+}
+# Coarse power-type bucket used for the berth-diagram colour indicator.
+_POWER_BUCKET = {
+    'D': 'diesel', 'DEM': 'diesel', 'DMU': 'diesel', 'LDS': 'diesel', 'HST': 'diesel',
+    'E': 'electric', 'EMU': 'electric',
+    'ED': 'bimode', 'EML': 'bimode',
+}
+
+
+def _cif_stock_label(entry):
+    """Human-readable stock description, e.g. 'Turbo DMU' or 'Class 802 IET',
+    from CIF Power Type + Timing Load. Timing Load's class-number form (see
+    _TIMING_LOAD_CLASS) takes priority over power type, since that's the only
+    reliable signal for bi-mode fleets like the IET."""
+    if not entry:
+        return ''
+    load = entry.get('timing_load') or ''
+    cls  = _TIMING_LOAD_CLASS.get(load)
+    if cls:
+        name, bucket = cls
+        return name + (' IET' if bucket == 'bimode' else ' EMU')
+    power = entry.get('power_type') or ''
+    nick  = _TIMING_LOAD_NICKNAME.get(load)
+    label = _POWER_TYPE_LABEL.get(power, power)
+    if not label:
+        return ''
+    return (nick + ' ' + label) if nick else label
+
+
+def _cif_power_bucket(entry):
+    """diesel/electric/bimode bucket for the berth-diagram colour indicator —
+    Timing Load's class-number form overrides power type for the same reason
+    as _cif_stock_label (IET's bi-mode nature isn't visible in power type alone)."""
+    if not entry:
+        return ''
+    cls = _TIMING_LOAD_CLASS.get(entry.get('timing_load') or '')
+    if cls:
+        return cls[1]
+    return _POWER_BUCKET.get(entry.get('power_type') or '', '')
+
+
+def _cif_open_stream(feed_type):
+    """Auth + open a streaming gzip decompressor over an NR CIF S3 download.
+    Returns a gzip.GzipFile positioned at the start of the JSONL body (caller
+    must close it), or None if credentials are missing."""
+    if not NR_USERNAME or not NR_PASSWORD:
+        print(f'CIF: NR credentials not available, skipping {feed_type}')
+        return None
+    url = ('https://publicdatafeeds.networkrail.co.uk/ntrod/'
+           f'CifFileAuthenticate?type={feed_type}&day=toc-full')
+    creds = base64.b64encode(f'{NR_USERNAME}:{NR_PASSWORD}'.encode()).decode()
+    req1 = urllib.request.Request(url)
+    req1.add_header('Authorization', f'Basic {creds}')
+    req1.add_header('User-Agent', 'twyford-dashboard/1.0')
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+            return None
+
+    opener1  = urllib.request.build_opener(_NoRedirect())
+    data_url = None
+    try:
+        with opener1.open(req1, timeout=30) as resp:
+            if resp.url == url:   # no redirect — rare; buffer it, still gzip
+                return gzip.GzipFile(fileobj=io.BytesIO(resp.read()))
+    except urllib.error.HTTPError as e:
+        if e.code in (301, 302, 303, 307, 308):
+            data_url = e.headers.get('Location')
+        else:
+            raise
+
+    print(f'CIF: downloading {feed_type}…')
+    req2 = urllib.request.Request(data_url)
+    req2.add_header('User-Agent', 'twyford-dashboard/1.0')
+    resp2 = urllib.request.urlopen(req2, timeout=180)
+    gz = gzip.GzipFile(fileobj=resp2)
+    gz._nr_raw_resp = resp2   # GzipFile.close() doesn't close fileobj — close it ourselves
+    return gz
+
+
+def _cif_scan(feed_type, handle_record):
+    """Stream a CIF feed line-by-line (never materialising the full
+    decompressed file) and call handle_record(v1) for every JsonScheduleV1
+    record that passes TWYFORD and is active today. Returns records seen."""
+    gz = _cif_open_stream(feed_type)
+    if gz is None:
+        return 0
+    today = datetime.date.today()
+    dow   = today.weekday()
+    seen  = 0
+    try:
+        for line in gz:
+            if not line or b'TWYFORD' not in line:   # fast pre-filter
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            v1 = rec.get('JsonScheduleV1')
+            if not v1:
+                continue
+            try:
+                start = datetime.date.fromisoformat(v1['schedule_start_date'])
+                end   = datetime.date.fromisoformat(v1['schedule_end_date'])
+            except Exception:
+                continue
+            if not (start <= today <= end):
+                continue
+            days = v1.get('schedule_days_runs', '1111111')
+            if len(days) > dow and days[dow] != '1':
+                continue
+            handle_record(v1)
+            seen += 1
+    finally:
+        gz.close()
+        raw = getattr(gz, '_nr_raw_resp', None)
+        if raw is not None:
+            raw.close()
+    return seen
+
 
 def _cif_direction(locs, twy_idx):
     """Derive UP/DOWN from the TIPLOC sequence relative to Twyford."""
@@ -2318,12 +2518,30 @@ def _cif_direction(locs, twy_idx):
     return None
 
 
-def _cif_best(entries):
-    """Pick highest-priority non-cancelled schedule entry (O > N > P; skip C)."""
+def _cif_best(entries, ref_ts=None):
+    """Pick the schedule entry actually relevant right now, not just the
+    highest-priority one. Freight/ECS headcodes are routinely reused for a
+    completely different job later the same day — picking by STP override
+    priority (O > N > P; skip C) alone, with no regard for time, can silently
+    match the wrong job and hand back nonsense endpoints for a train that's
+    live in front of us right now (seen in practice: 6M93 matched an entry
+    with a Twyford time of 21:09 while the real working was passing at 14:08,
+    and its garbled endpoints made _passes_twyford() wrongly conclude the
+    live train didn't pass Twyford at all). Where entries carry a Twyford-area
+    time (`twy_hhmm`), prefer whichever is closest to ref_ts (default: now);
+    STP priority remains the tie-breaker and the fallback when no entry has a
+    usable time (e.g. the full all-TOC feed's entries)."""
     priority = {'O': 0, 'N': 1, 'P': 2}
     valid = [e for e in entries if e.get('stp') != 'C']
     if not valid:
         return None
+    if ref_ts is None:
+        ref_ts = time.time()
+    timed = [(e, _hhmm_to_ts(e.get('twy_hhmm'))) for e in valid]
+    timed = [(e, ts) for e, ts in timed if ts is not None]
+    if timed:
+        return min(timed, key=lambda et:
+                    (abs(et[1] - ref_ts), priority.get(et[0].get('stp', 'P'), 99)))[0]
     return min(valid, key=lambda e: priority.get(e.get('stp', 'P'), 99))
 
 
@@ -2422,109 +2640,77 @@ def _tiploc_name(tip):
     return name
 
 
+def _cif_hhmm_iso(hhmm):
+    ts = _hhmm_to_ts(hhmm) if hhmm else None
+    if ts is None:
+        return ''
+    return datetime.datetime.fromtimestamp(ts, tz=_TZ_LONDON).isoformat()
+
+
+# How close a matched CIF entry's own Twyford-area time must be to "now" to
+# trust its origin/dest for identity purposes (not applied to stock-type
+# lookups, which are lower-stakes than the passes-Twyford exclusion check).
+# Guards against a reused headcode matching a same-day-but-unrelated job at a
+# wildly different time (see 6M93: a live train at Twyford 14:08 matched an
+# entry timed 21:09) — better to show a live-position-only estimate with no
+# identity than trust a match that isn't actually today's live working.
+_CIF_IDENT_TOLERANCE_S = 1800
+
+
+def _cif_entry_is_current(entry, ref_ts):
+    ts = _hhmm_to_ts(entry.get('twy_hhmm')) if entry.get('twy_hhmm') else None
+    return ts is not None and abs(ts - ref_ts) <= _CIF_IDENT_TOLERANCE_S
+
+
 def _cif_ident(hc):
     """Origin/destination identity for a freight headcode from today's CIF
     schedule: {'origin','dest','orig_dep','dest_arr'} (ISO times) or None."""
+    now = time.time()
     with _cif_lock:
         entries = _cif_index.get(hc)
-    best = _cif_best(entries) if entries else None
-    if not best:
+    best = _cif_best(entries, now) if entries else None
+    if not best or not _cif_entry_is_current(best, now):
         return None
-
-    def _iso(hhmm):
-        ts = _hhmm_to_ts(hhmm) if hhmm else None
-        if ts is None:
-            return ''
-        return datetime.datetime.fromtimestamp(ts, tz=_TZ_LONDON).isoformat()
-
     return {
         'origin':   _tiploc_name(best.get('orig_tip')),
         'dest':     _tiploc_name(best.get('dest_tip')),
-        'orig_dep': _iso(best.get('orig_hhmm')),
-        'dest_arr': _iso(best.get('dest_hhmm')),
+        'orig_dep': _cif_hhmm_iso(best.get('orig_hhmm')),
+        'dest_arr': _cif_hhmm_iso(best.get('dest_hhmm')),
+    }
+
+
+def _cif_pax_best(hc, ref_ts=None):
+    with _cif_pax_lock:
+        entries = _cif_pax_index.get(hc)
+    return _cif_best(entries, ref_ts) if entries else None
+
+
+def _cif_pax_ident(hc):
+    """Origin/destination identity from the full (all-TOC) CIF feed — broader
+    coverage than _cif_ident, used as a fallback when the dedicated
+    freight-only feed has no match for a working that's still present here."""
+    now = time.time()
+    best = _cif_pax_best(hc, now)
+    if not best or not _cif_entry_is_current(best, now):
+        return None
+    return {
+        'origin':   _tiploc_name(best.get('orig_tip')),
+        'dest':     _tiploc_name(best.get('dest_tip')),
+        'orig_dep': _cif_hhmm_iso(best.get('orig_hhmm')),
+        'dest_arr': _cif_hhmm_iso(best.get('dest_hhmm')),
     }
 
 
 def _load_cif():
     """Download and parse the NR daily CIF freight schedule; populate _cif_index."""
     global _cif_index, _cif_ts
-    nr_user = NR_USERNAME
-    nr_pass = NR_PASSWORD
-    if not nr_user or not nr_pass:
-        print('CIF: NR credentials not available, skipping')
-        return
-    try:
-        # Step 1: hit the auth endpoint (returns 302 to S3 pre-signed URL)
-        creds = base64.b64encode(f'{nr_user}:{nr_pass}'.encode()).decode()
-        req1 = urllib.request.Request(_CIF_URL)
-        req1.add_header('Authorization', f'Basic {creds}')
-        req1.add_header('User-Agent', 'twyford-dashboard/1.0')
-
-        class _NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
-                return None
-
-        opener1 = urllib.request.build_opener(_NoRedirect())
-        data_url = None
-        try:
-            with opener1.open(req1, timeout=30) as resp:
-                data_url = resp.url   # no redirect — rare
-                raw = resp.read()
-        except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308):
-                data_url = e.headers.get('Location')
-            else:
-                raise
-
-        # Step 2: download from the S3 pre-signed URL WITHOUT auth header
-        print('CIF: downloading freight schedule…')
-        if data_url and data_url != _CIF_URL:
-            req2 = urllib.request.Request(data_url)
-            req2.add_header('User-Agent', 'twyford-dashboard/1.0')
-            with urllib.request.urlopen(req2, timeout=180) as resp2:
-                raw = resp2.read()
-
-        if raw is None:
-            raise RuntimeError('no data received')
-        data = gzip.decompress(raw)
-        print(f'CIF: {len(raw) // 1024} KB compressed → {len(data) // 1024} KB uncompressed')
-    except Exception as exc:
-        body = ''
-        if hasattr(exc, 'read'):
-            try: body = exc.read(200).decode('utf-8', errors='replace')
-            except Exception: pass
-        print(f'CIF: download failed: {exc} {body}')
-        return
-
-    today = datetime.date.today()
-    dow   = today.weekday()   # 0=Mon … 6=Sun
     new_index: dict = {}
 
-    for line in data.split(b'\n'):
-        if not line or b'TWYFORD' not in line:   # fast pre-filter
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        v1 = rec.get('JsonScheduleV1')
-        if not v1:
-            continue
-        try:
-            start = datetime.date.fromisoformat(v1['schedule_start_date'])
-            end   = datetime.date.fromisoformat(v1['schedule_end_date'])
-        except Exception:
-            continue
-        if not (start <= today <= end):
-            continue
-        days = v1.get('schedule_days_runs', '1111111')
-        if len(days) > dow and days[dow] != '1':
-            continue
-
+    def handle(v1):
         seg = v1.get('schedule_segment', {})
         hc  = (seg.get('signalling_id') or '').strip()
         if not hc or hc.startswith('2H'):
-            continue
+            return
 
         uid = v1.get('CIF_train_uid', '')
         stp = v1.get('CIF_stp_indicator', 'P')
@@ -2541,7 +2727,7 @@ def _load_cif():
                     twy_idx = i
                 break
         if twy_t is None:
-            continue
+            return
 
         direction = _cif_direction(locs, twy_idx)
         o_loc = locs[0] if locs else {}
@@ -2555,6 +2741,12 @@ def _load_cif():
             'dest_hhmm': ((d_loc.get('arrival') or d_loc.get('pass') or '')[:4]),
         })
 
+    try:
+        _cif_scan(_CIF_FREIGHT_TYPE, handle)
+    except Exception as exc:
+        print(f'CIF: freight download failed: {exc}')
+        return
+
     with _cif_lock:
         _cif_index = new_index
         _cif_ts    = time.time()
@@ -2563,11 +2755,68 @@ def _load_cif():
     print(f'CIF: {count} freight trains passing Twyford today indexed')
 
 
+def _load_pax_cif():
+    """Download and parse NR's full (all-TOC) daily CIF schedule; populate
+    _cif_pax_index with stock-type fields AND origin/dest — this feed covers
+    every TOC (not just freight), so it's also used as a fallback identity
+    source when the dedicated freight-only feed (_cif_index) has no match for
+    a given working (seen in practice: a freight headcode with real Power
+    Type data here but absent from the freight-only feed)."""
+    global _cif_pax_index, _cif_pax_ts
+    new_index: dict = {}
+
+    def handle(v1):
+        seg = v1.get('schedule_segment', {})
+        hc  = (seg.get('signalling_id') or '').strip()
+        if not hc:
+            return
+        stp   = v1.get('CIF_stp_indicator', 'P')
+        locs  = seg.get('schedule_location', [])
+        o_loc = locs[0] if locs else {}
+        d_loc = locs[-1] if locs else {}
+        # Twyford-area time, same as the freight loader — needed so _cif_best()
+        # can tell today's actual working apart from a different job reusing
+        # the same headcode later (see 6M93 case: without this, a live train
+        # at Twyford at 14:08 matched an unrelated entry timed 21:09).
+        twy_t = ''
+        for loc in locs:
+            if loc.get('tiploc_code', '').startswith('TWYFORD'):
+                raw_t = (loc.get('pass') or loc.get('arrival') or loc.get('departure') or '')
+                if len(raw_t) >= 4:
+                    twy_t = raw_t[:4]
+                break
+        new_index.setdefault(hc, []).append({
+            'stp':         stp,
+            'category':    seg.get('CIF_train_category') or '',
+            'power_type':  (seg.get('CIF_power_type') or '').strip(),
+            'timing_load': (seg.get('CIF_timing_load') or '').strip(),
+            'speed':       seg.get('CIF_speed') or '',
+            'twy_hhmm':    twy_t,
+            'orig_tip':    (o_loc.get('tiploc_code') or '').strip(),
+            'dest_tip':    (d_loc.get('tiploc_code') or '').strip(),
+            'orig_hhmm':   ((o_loc.get('departure') or o_loc.get('pass') or '')[:4]),
+            'dest_hhmm':   ((d_loc.get('arrival') or d_loc.get('pass') or '')[:4]),
+        })
+
+    try:
+        count = _cif_scan(_CIF_PAX_TYPE, handle)
+    except Exception as exc:
+        print(f'CIF: full schedule download failed: {exc}')
+        return
+
+    with _cif_pax_lock:
+        _cif_pax_index = new_index
+        _cif_pax_ts    = time.time()
+
+    print(f'CIF: {len(new_index)} schedules passing Twyford today indexed ({count} scanned)')
+
+
 def _cif_refresh_loop():
     """Load SMART + CORPUS + CIF at startup, then refresh daily at 02:30."""
     _load_smart()
     _load_corpus()
     _load_cif()
+    _load_pax_cif()
     while True:
         now = datetime.datetime.now()
         nxt = (datetime.datetime(now.year, now.month, now.day, 2, 30)
@@ -2576,6 +2825,16 @@ def _cif_refresh_loop():
         _load_smart()
         _load_corpus()
         _load_cif()
+        _load_pax_cif()
+
+
+# Live cancellation/reinstatement truth from TRUST (msg_type 0002/0005),
+# keyed by headcode. RTT's schedule snapshot can lag or simply never catch up
+# with an operational change mid-journey (a train sat at a station for 15+
+# minutes with no update is otherwise indistinguishable from "still running,
+# just delayed") — this is the live, authoritative signal instead.
+_nr_cancel_lock   = threading.Lock()
+_nr_cancellations = {}   # headcode -> {'cancelled': bool, 'ts': float, 'reason': str}
 
 
 class _NRListener:
@@ -2660,6 +2919,10 @@ class _NRListener:
             # they're resolved before taking _td_lock to avoid nested-lock ordering.
             place_keys = []
             for evt in new_ca:
+                grp = _COLOCATED_BERTHS.get(evt['to'])
+                if grp:
+                    place_keys.append(('colocated', grp))
+                    continue
                 info = _berth_info(evt['area'], evt['to'])
                 stanme = (info.get('stanme') or '') if info else ''
                 platform = (info.get('platform') or '') if info else ''
@@ -2711,6 +2974,37 @@ class _NRListener:
             for msg in msgs:
                 body = msg.get('body', {})
                 msg_type = msg.get('header', {}).get('msg_type', '')
+                train_id = body.get('train_id', '')
+                reporting_hc = train_id[2:6] if len(train_id) >= 6 else train_id
+
+                # Cancellation / Reinstatement — live TRUST truth, applies
+                # regardless of which STANOX raised it (a train can be
+                # cancelled from a point well before it ever reaches our
+                # watched corridor). Merged onto matching trains in
+                # _rtt_build_trains(), overriding RTT's own (possibly stale)
+                # cancelled flag.
+                if msg_type in ('0002', '0005') and reporting_hc:
+                    with _nr_cancel_lock:
+                        _nr_cancellations[reporting_hc] = {
+                            'cancelled': msg_type == '0002',
+                            'ts': time.time(),
+                            'reason': body.get('canx_reason_code', '') if msg_type == '0002' else '',
+                        }
+                        stale = [hc for hc, e in _nr_cancellations.items()
+                                 if time.time() - e['ts'] > 86400]
+                        for hc in stale:
+                            del _nr_cancellations[hc]
+                    with _lock:
+                        _rtt_trains_ts = 0   # force immediate refresh
+                    continue
+                if msg_type in ('0006', '0007'):
+                    # Change of Origin / Change of Identity — not yet merged
+                    # into train records (would need re-keying tracked state
+                    # by headcode, e.g. carrying data across an identity
+                    # swap); logged for visibility until that's built out.
+                    print(f'NR STOMP: {msg_type} for {reporting_hc or train_id}: {body}')
+                    continue
+
                 stanox = body.get('loc_stanox', '')
                 # Twyford station (stopping trains). Invalidate RTT cache immediately
                 # so the next /api/trains request fetches fresh data with twy_actual,
@@ -2721,10 +3015,8 @@ class _NRListener:
                     continue
                 if msg_type != '0003' or stanox not in _NR_STANOX_WATCH:
                     continue
-                hc = body.get('train_id', '')
                 # TRUST train_id is 10 chars: 2-char schedule prefix + 4-char headcode + 4-char suffix.
                 # e.g. "731G21MR25" → prefix "73", headcode "1G21", suffix "MR25".
-                reporting_hc = hc[2:6] if len(hc) >= 6 else hc
                 info = _NR_STANOX_WATCH[stanox]
                 if info.get('freight_only', True) and not _nr_freight_hc(reporting_hc):
                     continue
@@ -2758,7 +3050,7 @@ class _NRListener:
                 except (TypeError, ValueError):
                     variation = 0
                 entry = {
-                    'uid':        'nr:' + hc,
+                    'uid':        'nr:' + train_id,
                     'headcode':   reporting_hc,
                     'op_code':    '',
                     'op_name':    '',
@@ -2780,7 +3072,7 @@ class _NRListener:
                     'num_veh':    None,
                 }
                 with _nr_lock:
-                    _nr_buffer['nr:' + hc] = entry
+                    _nr_buffer['nr:' + train_id] = entry
         except Exception as e:
             print(f'NR STOMP on_message: {e}')
 

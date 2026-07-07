@@ -484,6 +484,7 @@ function renderTrack(key, list, now) {
       '</span>';
   }
 
+  const stock = (t.stock_type && !frt) ? t.stock_type : '';
   const veh = (t.num_veh && !frt) ? t.num_veh + ' coaches' : '';
   const stopTxt = t.call_type === 'STOP' ? 'calls at Twyford' : '';
 
@@ -505,6 +506,7 @@ function renderTrack(key, list, now) {
       '<span class="op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.name) + '</span>' +
       (fromTxt ? '<span>' + esc(fromTxt) + '</span>' : '') +
       (stopTxt ? '<span>' + stopTxt + '</span>' : '') +
+      (stock ? '<span>' + esc(stock) + '</span>' : '') +
       (veh ? '<span>' + veh + '</span>' : '') +
       liveHtml +
       '<span class="hc">' + esc(t.headcode || '') + '</span>' +
