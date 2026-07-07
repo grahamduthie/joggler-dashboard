@@ -186,7 +186,7 @@ body {
 .log-row .d { color: var(--dim); font-family: var(--body); font-size: 12px; }
 .log-row .hcc { color: var(--faint); }
 #log-empty { color: var(--faint); font-size: 12px; font-style: italic; }
-#nrcc-body { flex: 0 0 auto; max-height: 44px; overflow: hidden; margin-top: 3px;
+#nrcc-body { flex: 0 0 auto; max-height: 72px; overflow: hidden; margin-top: 3px;
              font-size: 12px; line-height: 1.4; color: var(--late); }
 #nrcc-body .none { color: var(--faint); font-style: italic; }
 #stats-row {
@@ -1164,9 +1164,11 @@ function renderLog() {
 function renderInfo() {
   const nb = document.getElementById('nrcc-body');
   if (nrccMsgs.length) {
-    nb.innerHTML = nrccMsgs.slice(0, 1).map(m =>
-      '⚠ ' + esc(String(m).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 130))
-    ).join('<br>');
+    nb.innerHTML = nrccMsgs.slice(0, 1).map(m => {
+      const clean = String(m).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      const cut = clean.length > 280 ? clean.slice(0, 280).replace(/\s+\S*$/, '') + '…' : clean;
+      return '⚠ ' + esc(cut);
+    }).join('<br>');
   } else {
     nb.innerHTML = '<span class="none">No disruption reported</span>';
   }

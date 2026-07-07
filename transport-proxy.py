@@ -2141,18 +2141,25 @@ def _td_enrich_trains(trains, now, ident=None):
         # mi and — with an ambiguous from-berth — can read as "up, approaching
         # the house".  It never passes Twyford, so don't synthesise it.
         #
-        # Only applied when direction had to fall back to SMART's static dir
-        # (the actual "ambiguous from-berth" case above) — NOT when direction
-        # is measured from a real from→to berth comparison. _passes_twyford's
-        # origin/dest check is a crude place-name-token heuristic (a small
-        # hardcoded list of "east of Twyford" tokens) that can just as easily
-        # be wrong the other way: 4O38 (Birmingham → "Freightliners (Maritime
-        # Terml)") was excluded for its entire ~32-minute, unambiguous,
-        # multi-berth approach through D4→D6→D1 because neither endpoint name
-        # matched a known token, so both were wrongly treated as "not east" —
-        # never mind that real, measured, continuous movement through the
-        # corridor is far stronger evidence than a name-matching guess.
-        if (not direction_measured and who.get('origin') and who.get('dest')
+        # _passes_twyford's origin/dest check is a crude place-name-token
+        # heuristic that can be wrong the other way too: 4O38 (Birmingham →
+        # "Freightliners (Maritime Terml)") was excluded for its entire
+        # ~32-minute, unambiguous, multi-berth approach through D4→D6→D1
+        # because neither endpoint name matched a known token — real,
+        # sustained, measured movement is stronger evidence than a
+        # name-matching guess. But "measured" only needs ONE valid from→to
+        # step, and a train about to reverse can produce exactly one
+        # plausible-looking step before doing so — confirmed: a CrossCountry
+        # Manchester→Reading service briefly showed as approaching then
+        # vanished next poll (2026-07-07), the very failure mode this guard
+        # was built for. So still apply the check within the outer ~1 mi of
+        # either end of the tracked corridor (the Reading/Maidenhead throats,
+        # where reversing services actually sit) even when direction reads as
+        # measured; trust measured direction everywhere else in the corridor,
+        # where a train has real running room and reversal isn't in play.
+        in_outer_throat = (direction == 'up' and d >= 4.0) or (direction == 'down' and d <= -5.3)
+        trust_measured = direction_measured and not in_outer_throat
+        if (not trust_measured and who.get('origin') and who.get('dest')
                 and not _passes_twyford(direction, who['origin'], who['dest'])):
             continue
         passenger = who['passenger'] if 'passenger' in who else (hc[:1] in '129')
