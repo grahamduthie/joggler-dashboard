@@ -192,11 +192,11 @@ header {
 .ac-stat-label { font-family: var(--cond); font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; font-size: clamp(10px, 1.5vh, 17px); color: var(--air-dim); }
 .ac-stat-value {
   font-family: var(--mono); font-weight: 500; font-size: clamp(26px, 6vh, 80px); line-height: 1;
-  color: var(--text); display: flex; align-items: center; gap: 0.2em;
+  color: var(--text); display: flex; align-items: center; gap: 0.08em;
   max-width: 100%; overflow: hidden; white-space: nowrap;
 }
 .ac-stat-unit { font-family: var(--body); font-size: clamp(10px, 1.6vh, 18px); color: var(--text-faint); }
-.ac-heading-arrow { display: inline-block; font-size: 0.7em; transition: transform 0.4s; }
+.ac-heading-arrow { display: inline-block; font-size: 0.55em; transition: transform 0.4s; }
 
 /* ═══ Trains pane ═══ */
 #rail-content { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: repeat(4, 1fr); gap: 0.9vh; }
@@ -748,11 +748,11 @@ function renderAircraft() {
     '<div class="ac-stats">' +
       '<div class="ac-stat-card"><div class="ac-stat-label">Altitude</div><div class="ac-stat-value">' + (altM != null ? altM.toLocaleString() : '—') + '</div><div class="ac-stat-unit">metres</div></div>' +
       '<div class="ac-stat-card"><div class="ac-stat-label">Speed</div><div class="ac-stat-value">' + (kph != null ? kph : '—') + '</div><div class="ac-stat-unit">kph</div></div>' +
-      '<div class="ac-stat-card"><div class="ac-stat-label">Heading</div><div class="ac-stat-value">' + hdgDir + ' ' + arrowHtml + '</div><div class="ac-stat-unit">' + (hdg != null ? hdg + '°' : '') + '</div></div>' +
+      '<div class="ac-stat-card"><div class="ac-stat-label">Heading</div><div class="ac-stat-value">' + hdgDir + arrowHtml + '</div><div class="ac-stat-unit">' + (hdg != null ? hdg + '°' : '') + '</div></div>' +
       '<div class="ac-stat-card"><div class="ac-stat-label">Distance</div><div class="ac-stat-value">' + distKm + '</div><div class="ac-stat-unit">km from ' + CFG_NAME + '</div></div>' +
     '</div>';
 
-  fitTextGroup(Array.from(el.querySelectorAll('.ac-stat-value')), 14);
+  el.querySelectorAll('.ac-stat-value').forEach(v => fitText(v, 14));
   el.querySelectorAll('.ac-airport').forEach(v => fitText(v, 16));
   fitText(el.querySelector('.ac-flight-num'), 18);
 
@@ -850,23 +850,6 @@ function fitText(el, minPx) {
   while (el.scrollWidth > el.clientWidth + 1 && size > minPx && guard-- > 0) {
     size -= 2;
     el.style.fontSize = size + 'px';
-  }
-}
-/* Same idea, but for a row of visually-matched elements (the four stat
-   cards) that must all end up the SAME size — shrinking each independently
-   left "Heading" (letters + a rotated arrow glyph, e.g. "WSW ↖") visibly
-   smaller than its plain-number neighbours just because that particular
-   string happened to be wider. Finds the one size that fits all of them. */
-function fitTextGroup(els, minPx) {
-  els = els.filter(Boolean);
-  if (!els.length) return;
-  minPx = minPx || 15;
-  els.forEach(el => el.style.fontSize = '');
-  let size = Math.max.apply(null, els.map(el => parseFloat(getComputedStyle(el).fontSize)));
-  let guard = 24;
-  while (els.some(el => el.scrollWidth > el.clientWidth + 1) && size > minPx && guard-- > 0) {
-    size -= 2;
-    els.forEach(el => el.style.fontSize = size + 'px');
   }
 }
 function fmtHM(msOrIso) {
