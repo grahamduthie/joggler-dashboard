@@ -783,7 +783,10 @@ let tdPos = {};        // headcode → live berth fix
 let nrccMsgs = [];
 let lastTd = 0;
 const passLog = [];    // {ms, hc, op, dest, key} newest first
-const logged = {};     // uid → true
+const logged = {};     // headcode → true (not uid: the same physical train can get a
+                        // new uid once it crosses the house — e.g. its RTT entry ages
+                        // out and it's picked up fresh as a 'td:'-prefixed synthesised
+                        // entry — a uid-keyed dedup let it get harvested twice)
 let calibLog = [];     // calibration presses, newest first (from /api/calibration + local appends)
 let calibApplied = {}; // line key -> seconds currently being added to house_pass_ts server-side
 let calibMinN = 4;     // samples needed on a line before its offset is trusted/applied
@@ -843,7 +846,7 @@ function harvestLog() {
   const now = Date.now();
   for (const t of trains) {
     const hc = t.headcode;
-    if (!hc || logged[t.uid]) continue;
+    if (!hc || logged[hc]) continue;
     const sincePassed = msSincePassed(t);
     if (sincePassed != null) {
       if (sincePassed < PASSED_GRACE_MS) continue;   // still shown in the approaching list
@@ -852,7 +855,7 @@ function harvestLog() {
       if (!ms || ms > now - 5000 || ms < now - 30 * 60000) continue;
       if (!(t.twy_actual || t.confirmed)) continue;
     }
-    logged[t.uid] = true;
+    logged[hc] = true;
     const frt = t.passenger === false || isFrtHc(hc) || isEcsHc(hc);
     passLog.unshift({
       ms: trainMs(t) || now, hc, op: opInfo(t),

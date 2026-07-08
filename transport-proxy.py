@@ -111,6 +111,17 @@ _calib_offsets_ts = 0
 _CALIB_MIN_N     = 4    # need at least this many logged presses on a line before trusting it
 _airport_names = {}
 
+_ident_lock = threading.Lock()
+_ident_cache = {}   # headcode -> {origin, dest, op_code, op_name, passenger, ts}
+_IDENT_CACHE_TTL = 3600  # RTT's own identity index is rebuilt fresh every poll from
+                          # just that poll's rolling query window, so a working whose
+                          # RTT record ages out mid-corridor-transit (common for fast
+                          # expresses — the window is only ~10 min in the past) loses
+                          # its operator/origin/dest identity the instant TD-synthesis
+                          # needs it. This cache remembers what was learned about a
+                          # headcode for up to an hour so a train doesn't go from
+                          # "identified" to "unmatched grey" just by crossing the house.
+
 def _clean_airport_name(raw):
     for suffix in [' International Airport', ' National Airport', ' Regional Airport',
                    ' Airport', ' International', ' Regional', ' Airfield', ' Aerodrome']:
@@ -1418,6 +1429,21 @@ def _rtt_build_trains():
                 'passenger': sm.get('inPassengerService', True),
             }
 
+    # Merge in the persistent identity cache so a headcode already learned on
+    # an earlier poll (but absent from *this* poll's RTT window — e.g. it's
+    # now past Twyford and RTT's rolling window has moved on) still resolves,
+    # then refresh the cache with everything this poll just saw.
+    with _ident_lock:
+        now_ts = time.time()
+        stale = [hc for hc, e in _ident_cache.items()
+                 if now_ts - e['ts'] > _IDENT_CACHE_TTL]
+        for hc in stale:
+            del _ident_cache[hc]
+        for hc, info in ident.items():
+            _ident_cache[hc] = dict(info, ts=now_ts)
+        for hc, info in _ident_cache.items():
+            ident.setdefault(hc, {k: v for k, v in info.items() if k != 'ts'})
+
     for svc in (twy_svcs or []):
         uid = svc.get('scheduleMetadata', {}).get('uniqueIdentity', '')
         seen.add(uid)
@@ -2150,8 +2176,22 @@ def _td_enrich_trains(trains, now, ident=None):
             direction = info.get('dir') or ''
         if not direction:
             continue
-        if not ((direction == 'down' and -6.3 < d < -0.05)
-                or (direction == 'up' and 0.05 < d < 4.95)):
+        # Cover the WHOLE corridor for both directions, not just the
+        # pre-house half. Originally this only synthesised entries for
+        # trains still approaching the house ('up': d>0 west side, 'down':
+        # d<0 east side) — the ETA-to-house math only makes sense there.
+        # But that silently dropped identity for a train the instant it
+        # crossed the house: an Up train whose RTT record had already aged
+        # out of the rolling query window (common for fast expresses that
+        # transit the corridor in a few minutes) got no /api/trains entry
+        # at all once dist_mi went negative, even though it was still
+        # plainly visible and physically tracked on /api/td-live — showing
+        # as an unmatched grey cell on /lineside instead of its real
+        # operator colour (e.g. GWR green). _berth_eta_to_house_s already
+        # returns a sane negative ETA for past-house positions, so there's
+        # no reason to gate this on direction/side — just exclude the tiny
+        # dead zone right at the house itself.
+        if not (-6.3 < d < 4.95 and abs(d) > 0.05):
             continue          # outside the no-turnback corridor
         who = ident.get(hc) or {}
         ci  = _cif_ident(hc) or _cif_pax_ident(hc)
@@ -2181,7 +2221,12 @@ def _td_enrich_trains(trains, now, ident=None):
         # where reversing services actually sit) even when direction reads as
         # measured; trust measured direction everywhere else in the corridor,
         # where a train has real running room and reversal isn't in play.
-        in_outer_throat = (direction == 'up' and d >= 4.0) or (direction == 'down' and d <= -5.3)
+        # Checked regardless of direction now that the corridor gate above
+        # covers the whole span for both 'up' and 'down' — a reversing
+        # service can produce a one-step "measured" direction reading
+        # pointing either way at either throat, not just the throat that
+        # matches its nominal direction.
+        in_outer_throat = d >= 4.0 or d <= -5.3
         trust_measured = direction_measured and not in_outer_throat
         if (not trust_measured and who.get('origin') and who.get('dest')
                 and not _passes_twyford(direction, who['origin'], who['dest'])):
