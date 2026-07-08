@@ -3329,6 +3329,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._static('/trains.html')
         elif parsed.path == '/lineside':
             self._static('/lineside.html')
+        elif parsed.path == '/now':
+            self._static('/now.html')
         elif parsed.path == '/api/trains':
             self._trains(qs)
         elif parsed.path == '/api/nrcc':

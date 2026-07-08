@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Now — Twyford</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   NOW — kitchen ambient display. One glance: nearest plane overhead,
+   nearest train on the line. Sky (cool blue) on the left, rail (warm
+   amber) on the right, meeting at a glowing seam down the middle —
+   two domains, one board, read-across-the-room scale throughout.
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+  --bg:        #05070a;
+  --rule:      #161c26;
+  --text:      #edf1f6;
+  --text-dim:  #8b99ab;
+  --text-faint:#3d4a5c;
+  --air:       #6fc3f0;
+  --air-dim:   #2f5b78;
+  --air-glow:  rgba(111,195,240,0.16);
+  --rail:      #ffb000;
+  --rail-dim:  #8a6a2a;
+  --rail-glow: rgba(255,176,0,0.14);
+  --ontime:    #46c97e;
+  --late:      #ff9f43;
+  --cancel:    #ff5f56;
+  --live:      #35d07f;
+  --relief:    #3fb7c4;
+  --main-ln:   #6f9fd8;
+  --cond: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --body: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'IBM Plex Mono', 'Menlo', 'Consolas', monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+  overflow: hidden;
+}
+@media (hover: hover) and (pointer: fine) { body.hidecursor * { cursor: none; } }
+body {
+  display: flex; flex-direction: column;
+  background-image:
+    radial-gradient(1100px 480px at 22% -12%, var(--air-glow), transparent 60%),
+    radial-gradient(1100px 480px at 78% -12%, var(--rail-glow), transparent 60%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.006) 0 1px, transparent 1px 7px);
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+header {
+  flex: 0 0 auto;
+  display: flex; align-items: baseline; justify-content: center;
+  gap: 1.4vw; position: relative;
+  padding: 1.1vh 0 0.9vh;
+  border-bottom: 1px solid var(--rule);
+}
+#back {
+  position: absolute; left: 1.6vw; top: 50%; transform: translateY(-50%);
+  font-family: var(--cond); font-weight: 600;
+  font-size: clamp(13px, 2vh, 22px);
+  color: var(--text-faint); text-decoration: none; letter-spacing: 0.04em;
+}
+#back:active, #back:hover { color: var(--text-dim); }
+#title {
+  font-family: var(--cond); font-weight: 700;
+  font-size: clamp(15px, 2.4vh, 26px);
+  letter-spacing: 0.3em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+#clock {
+  font-family: var(--mono); font-weight: 500;
+  font-size: clamp(22px, 4vh, 42px);
+  font-variant-numeric: tabular-nums;
+  color: var(--text); line-height: 1;
+}
+#clock .sec { color: var(--text-faint); font-size: 0.6em; }
+#date {
+  font-family: var(--body); font-weight: 500;
+  font-size: clamp(12px, 1.8vh, 20px);
+  color: var(--text-dim); letter-spacing: 0.03em;
+}
+
+/* ── Split ──────────────────────────────────────────────── */
+#split { flex: 1 1 auto; min-height: 0; display: flex; position: relative; }
+#seam {
+  position: absolute; left: 50%; top: 6%; bottom: 6%; width: 1px;
+  background: linear-gradient(180deg, transparent, var(--rule) 20%, var(--rule) 80%, transparent);
+  transform: translateX(-0.5px);
+}
+#seam::before {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 46px; height: 46px; border-radius: 50%; transform: translate(-50%,-50%);
+  background: radial-gradient(circle, rgba(200,210,225,0.10), transparent 70%);
+}
+.pane {
+  flex: 1 1 50%; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  padding: 1.4vh 2vw;
+  opacity: 0; transform: translateY(10px);
+  animation: rise 0.7s cubic-bezier(.2,.8,.3,1) forwards;
+}
+#air-pane { animation-delay: 0.05s; }
+#rail-pane { animation-delay: 0.18s; }
+@keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+.pane-label {
+  flex: 0 0 auto;
+  font-family: var(--cond); font-weight: 600;
+  font-size: clamp(12px, 1.9vh, 20px);
+  letter-spacing: 0.24em; text-transform: uppercase;
+  margin-bottom: 1.2vh;
+  display: flex; align-items: center; gap: 0.6em;
+}
+.pane-label::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+#air-pane .pane-label { color: var(--air); }
+#air-pane .pane-label::before { background: var(--air); box-shadow: 0 0 10px var(--air); }
+#rail-pane .pane-label { color: var(--rail); }
+#rail-pane .pane-label::before { background: var(--rail); box-shadow: 0 0 10px var(--rail); }
+
+/* ═══ Aircraft pane ═══ */
+#air-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ac-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1vh; color: var(--text-faint); text-align: center;
+}
+.ac-empty .glyph { font-size: clamp(32px, 7vh, 72px); opacity: 0.5; }
+.ac-empty .msg {
+  font-family: var(--cond); font-weight: 500; letter-spacing: 0.1em;
+  font-size: clamp(15px, 2.6vh, 28px); text-transform: uppercase;
+}
+
+.ac-header {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 1.2vw;
+  padding: 1.2vh 1.4vw; border-radius: 10px; margin-bottom: 1.4vh;
+}
+.ac-logo { height: clamp(30px, 6vh, 56px); max-width: 26%; object-fit: contain; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4)); }
+.ac-flight-num { font-family: var(--cond); font-weight: 700; font-size: clamp(30px, 6.4vh, 74px); line-height: 0.95; letter-spacing: 0.01em; }
+.ac-airline-name { font-family: var(--body); font-size: clamp(13px, 2.2vh, 24px); opacity: 0.85; margin-top: 0.3vh; }
+.ac-type-right { text-align: right; font-family: var(--body); font-size: clamp(11px, 1.7vh, 18px); line-height: 1.5; opacity: 0.9; }
+
+.ac-route { flex: 0 0 auto; padding: 0.6vh 1.4vw 1.4vh; display: flex; gap: 1.6vw; align-items: stretch; }
+.ac-route-main { flex: 1; min-width: 0; }
+.ac-airport {
+  font-family: var(--cond); font-weight: 700;
+  font-size: clamp(20px, 4.2vh, 46px); line-height: 1.14;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ac-iata { font-size: 0.55em; opacity: 0.5; font-weight: 500; }
+.ac-route-arrow { font-family: var(--mono); font-size: clamp(12px, 2vh, 22px); color: var(--air-dim); padding: 0.3vh 0; }
+.ac-times { font-family: var(--mono); font-size: clamp(11px, 1.9vh, 20px); color: var(--air); margin-top: 0.3vh; }
+.ac-times .early { color: var(--relief); } .ac-times .late { color: var(--late); } .ac-times .ontime { color: var(--ontime); }
+.ac-route-loading { font-size: clamp(12px, 1.9vh, 20px); color: var(--text-faint); font-style: italic; align-self: center; }
+.ac-flight-info { text-align: right; font-family: var(--mono); font-size: clamp(11px, 1.8vh, 20px); color: var(--text-dim); align-self: center; white-space: nowrap; }
+.ac-flight-info div + div { margin-top: 0.6vh; }
+
+.ac-stats {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9vw;
+}
+.ac-stat-card {
+  background: rgba(111,195,240,0.05); border: 1px solid rgba(111,195,240,0.14);
+  border-radius: 10px; padding: 1.2vh 0.6vw;
+  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.5vh;
+  text-align: center;
+}
+.ac-stat-label { font-family: var(--cond); font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; font-size: clamp(9px, 1.3vh, 15px); color: var(--air-dim); }
+.ac-stat-value { font-family: var(--mono); font-weight: 500; font-size: clamp(22px, 4.6vh, 54px); line-height: 1; color: var(--text); display: flex; align-items: center; gap: 0.2em; }
+.ac-stat-unit { font-family: var(--body); font-size: clamp(9px, 1.4vh, 16px); color: var(--text-faint); }
+.ac-heading-arrow { display: inline-block; font-size: 0.7em; transition: transform 0.4s; }
+
+/* ═══ Trains pane ═══ */
+#rail-content { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: repeat(4, 1fr); gap: 0.6vh; }
+.track {
+  position: relative; min-height: 0;
+  display: grid; grid-template-columns: clamp(52px, 6.2vw, 96px) 1fr auto;
+  align-items: stretch; gap: 0 1vw;
+  padding: 0.6vh 0.4vw 0.6vh 0;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+.track::before {
+  content: ''; position: absolute; left: 0; top: 6%; bottom: 6%;
+  width: 4px; border-radius: 2px;
+  background: var(--spine, var(--text-faint)); opacity: 0.95; transition: background .6s;
+}
+@keyframes sweep {
+  0%   { transform: translateX(-100%); opacity: 0.5; }
+  100% { transform: translateX(120%);  opacity: 0; }
+}
+.track.passing::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255,176,0,0.14) 48%, transparent 76%);
+  animation: sweep 2.4s linear infinite; pointer-events: none;
+}
+.t-id { display: flex; flex-direction: column; justify-content: center; padding-left: clamp(8px, 1.1vw, 16px); gap: 0.2vh; }
+.t-id .arrow { font-family: var(--cond); font-weight: 700; line-height: 0.8; font-size: clamp(13px, 2.6vh, 26px); color: var(--ln-color); }
+.t-id .name { font-family: var(--cond); font-weight: 600; font-size: clamp(9px, 1.7vh, 17px); line-height: 1; letter-spacing: 0.07em; color: var(--ln-color); }
+.track[data-ln="relief"] { --ln-color: var(--relief); }
+.track[data-ln="main"]   { --ln-color: var(--main-ln); }
+.t-main { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.2vh; }
+.t-dest {
+  font-family: var(--cond); font-weight: 700; font-size: clamp(17px, 4.6vh, 46px); line-height: 0.98;
+  text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.t-dest .cancelled { text-decoration: line-through; color: var(--cancel); }
+.t-sub { display: flex; align-items: baseline; gap: 0.8vw; font-size: clamp(9px, 1.7vh, 17px); color: var(--text-dim); white-space: nowrap; overflow: hidden; }
+.t-sub .op { font-family: var(--cond); font-weight: 600; letter-spacing: 0.04em; padding: 0.06em 0.45em; border-radius: 0.25em; font-size: 0.8em; }
+.t-sub .hc { font-family: var(--mono); font-size: 0.76em; color: var(--text-faint); }
+.t-sub .livepos { color: var(--live); }
+.t-sub .livepos::before { content: '● '; font-size: 0.7em; }
+.t-eta { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 0.1vh; min-width: clamp(70px, 9vw, 150px); padding-right: 0.6vw; }
+.t-count { font-family: var(--cond); font-weight: 700; font-size: clamp(20px, 5.8vh, 62px); line-height: 0.85; font-variant-numeric: tabular-nums; color: var(--text); display: flex; align-items: baseline; gap: 0.1em; }
+.t-count .unit { font-size: 0.32em; font-weight: 600; color: var(--text-dim); letter-spacing: 0.05em; }
+.t-count.now  { color: var(--rail); }
+.t-count.stn, .t-count.held { color: var(--late); font-size: clamp(15px, 3.6vh, 36px); }
+.t-count.gone { color: var(--text-faint); font-size: clamp(13px, 2.8vh, 30px); }
+@keyframes pulse { 50% { opacity: 0.55; } }
+.t-count.now { animation: pulse 1.2s ease-in-out infinite; }
+.t-status { font-size: clamp(9px, 1.5vh, 15px); font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.t-status .ontime { color: var(--ontime); } .t-status .late { color: var(--late); } .t-status .cancel { color: var(--cancel); } .t-status .est { color: var(--text-faint); }
+.t-empty { grid-column: 2 / 4; display: flex; align-items: center; font-family: var(--cond); font-weight: 500; font-size: clamp(13px, 2.4vh, 24px); letter-spacing: 0.1em; color: var(--text-faint); }
+
+/* ── Alert strip ────────────────────────────────────────── */
+#alert {
+  flex: 0 0 auto; display: none; align-items: center; gap: 1vw;
+  padding: 0.8vh 2vw; background: rgba(255,159,67,0.09);
+  border-top: 1px solid rgba(255,159,67,0.3);
+  font-size: clamp(11px, 1.8vh, 18px); color: var(--late);
+}
+#alert.show { display: flex; }
+#alert .tag { font-family: var(--cond); font-weight: 700; letter-spacing: 0.08em; flex: 0 0 auto; }
+#alert .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Narrow / portrait: stack instead of split ─────────────── */
+@media (max-aspect-ratio: 95/100) {
+  #split { flex-direction: column; }
+  #seam { left: 6%; right: 6%; top: 50%; bottom: auto; width: auto; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--rule) 20%, var(--rule) 80%, transparent); }
+  .pane { flex-basis: 50%; padding: 1vh 2.4vw; }
+  .ac-stats { grid-template-columns: repeat(4, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <a id="back" href="/" onmousedown="window.location.href='/'">←</a>
+  <span id="title">Now</span>
+  <span id="clock">--:--<span class="sec">--</span></span>
+  <span id="date">—</span>
+</header>
+
+<div id="split">
+  <div id="seam"></div>
+  <section id="air-pane" class="pane">
+    <div class="pane-label">Nearest Aircraft</div>
+    <div id="air-content"><div class="ac-empty"><div class="glyph">✈</div><div class="msg">Loading…</div></div></div>
+  </section>
+  <section id="rail-pane" class="pane">
+    <div class="pane-label">Nearest Trains</div>
+    <div id="rail-content"></div>
+  </section>
+</div>
+
+<div id="alert"><span class="tag">⚠ DISRUPTION</span><span class="msg" id="alert-msg"></span></div>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════════════════════
+   Shared
+   ═══════════════════════════════════════════════════════════════ */
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+document.body.classList.add('hidecursor');
+
+function tick() {
+  const d = new Date();
+  document.getElementById('clock').innerHTML =
+    d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) +
+    '<span class="sec">' + String(d.getSeconds()).padStart(2, '0') + '</span>';
+  document.getElementById('date').textContent =
+    d.toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'});
+  renderTrains();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AIRCRAFT — nearest commercial aircraft, focus-mode style
+   ═══════════════════════════════════════════════════════════════ */
+const CFG_LAT = 51.4741, CFG_LON = -0.8647, CFG_NAME = 'Twyford', CFG_DIST = 100;
+
+const AIRLINES = {
+  'BAW':{iata:'BA', name:'British Airways',      bg:'#002157',fg:'#ffffff'},
+  'SHT':{iata:'BA', name:'BA Shuttle',           bg:'#002157',fg:'#ffffff'},
+  'CFE':{iata:'BA', name:'BA CityFlyer',         bg:'#002157',fg:'#ffffff'},
+  'EFW':{iata:'A0', name:'BA Euroflyer',         bg:'#002157',fg:'#ffffff'},
+  'EZY':{iata:'U2', name:'easyJet',              bg:'#f37029',fg:'#ffffff'},
+  'EJU':{iata:'U2', name:'easyJet Europe',       bg:'#f37029',fg:'#ffffff'},
+  'EZS':{iata:'DS', name:'easyJet Switzerland',  bg:'#f37029',fg:'#ffffff'},
+  'EIN':{iata:'EI', name:'Aer Lingus',           bg:'#00693e',fg:'#ffffff'},
+  'EAI':{iata:'EI', name:'Emerald Airlines',     bg:'#00693e',fg:'#ffffff'},
+  'RYR':{iata:'FR', name:'Ryanair',              bg:'#073da4',fg:'#ffffff'},
+  'VIR':{iata:'VS', name:'Virgin Atlantic',      bg:'#e20026',fg:'#ffffff'},
+  'TOM':{iata:'BY', name:'TUI Airways',          bg:'#e20026',fg:'#ffffff'},
+  'TFL':{iata:'OR', name:'TUI fly Netherlands',  bg:'#e20026',fg:'#ffffff'},
+  'EXS':{iata:'LS', name:'Jet2',                 bg:'#00418b',fg:'#ffffff'},
+  'DLH':{iata:'LH', name:'Lufthansa',            bg:'#05164d',fg:'#f9c901'},
+  'LHX':{iata:'VL', name:'Lufthansa City',       bg:'#05164d',fg:'#f9c901'},
+  'AFR':{iata:'AF', name:'Air France',           bg:'#002395',fg:'#ffffff'},
+  'KLM':{iata:'KL', name:'KLM',                  bg:'#00a1de',fg:'#ffffff'},
+  'SWR':{iata:'LX', name:'Swiss',                bg:'#e30613',fg:'#ffffff'},
+  'IBE':{iata:'IB', name:'Iberia',               bg:'#c8102e',fg:'#ffffff'},
+  'VLG':{iata:'VY', name:'Vueling',              bg:'#fccc0a',fg:'#333333'},
+  'UAE':{iata:'EK', name:'Emirates',             bg:'#d71921',fg:'#c6a84e'},
+  'QTR':{iata:'QR', name:'Qatar Airways',        bg:'#5c0632',fg:'#c6a84e'},
+  'ETD':{iata:'EY', name:'Etihad Airways',       bg:'#bd8b13',fg:'#ffffff'},
+  'ETH':{iata:'ET', name:'Ethiopian Airlines',   bg:'#009a44',fg:'#ffffff'},
+  'THY':{iata:'TK', name:'Turkish Airlines',     bg:'#e30a17',fg:'#ffffff'},
+  'DAL':{iata:'DL', name:'Delta Air Lines',      bg:'#003366',fg:'#c8002d'},
+  'UAL':{iata:'UA', name:'United Airlines',      bg:'#002244',fg:'#ffffff'},
+  'AAL':{iata:'AA', name:'American Airlines',    bg:'#0078d2',fg:'#ffffff'},
+  'ACA':{iata:'AC', name:'Air Canada',           bg:'#d71920',fg:'#ffffff'},
+  'SAS':{iata:'SK', name:'SAS',                  bg:'#003399',fg:'#ffffff'},
+  'FIN':{iata:'AY', name:'Finnair',              bg:'#003580',fg:'#ffffff'},
+  'NOR':{iata:'DY', name:'Norwegian',            bg:'#d40e14',fg:'#ffffff'},
+  'WZZ':{iata:'W6', name:'Wizz Air',             bg:'#c6007e',fg:'#ffffff'},
+  'WMT':{iata:'W4', name:'Wizz Air Malta',       bg:'#c6007e',fg:'#ffffff'},
+  'HYS':{iata:'H4', name:'HiSky Europe',         bg:'#6e1e78',fg:'#ffffff'},
+  'TAP':{iata:'TP', name:'TAP Air Portugal',     bg:'#004d40',fg:'#ffffff'},
+  'CPA':{iata:'CX', name:'Cathay Pacific',       bg:'#003f5c',fg:'#7ab2a2'},
+  'SIA':{iata:'SQ', name:'Singapore Airlines',   bg:'#1c3a6b',fg:'#f0c040'},
+  'JAL':{iata:'JL', name:'Japan Airlines',       bg:'#0a0a0a',fg:'#e60012'},
+  'ANA':{iata:'NH', name:'All Nippon Airways',   bg:'#003876',fg:'#ffffff'},
+  'SVA':{iata:'SV', name:'Saudia',               bg:'#006633',fg:'#ffffff'},
+  'MSR':{iata:'MS', name:'EgyptAir',             bg:'#002366',fg:'#ffffff'},
+  'RAM':{iata:'AT', name:'Royal Air Maroc',      bg:'#006233',fg:'#c8102e'},
+  'ELY':{iata:'LY', name:'El Al',                bg:'#003082',fg:'#ffffff'},
+  'GFA':{iata:'GF', name:'Gulf Air',             bg:'#8a1538',fg:'#c6a84e'},
+  'AUA':{iata:'OS', name:'Austrian',             bg:'#e30613',fg:'#ffffff'},
+  'KQA':{iata:'KQ', name:'Kenya Airways',        bg:'#c8102e',fg:'#000000'},
+  'AMX':{iata:'AM', name:'Aeromexico',           bg:'#006cb7',fg:'#ffffff'},
+  'EWG':{iata:'EW', name:'Eurowings',            bg:'#9b0082',fg:'#ffffff'},
+  'BEL':{iata:'SN', name:'Brussels Airlines',    bg:'#002f6c',fg:'#ffffff'},
+  'BTI':{iata:'BT', name:'Air Baltic',           bg:'#006341',fg:'#ffffff'},
+  'ICE':{iata:'FI', name:'Icelandair',           bg:'#003f87',fg:'#ffffff'},
+  'ITY':{iata:'AZ', name:'ITA Airways',          bg:'#002f87',fg:'#ffffff'},
+  'LOT':{iata:'LO', name:'LOT Polish Airlines',  bg:'#0a2240',fg:'#ffffff'},
+  'LZB':{iata:'FB', name:'Bulgaria Air',         bg:'#cc2025',fg:'#ffffff'},
+  'ASL':{iata:'JU', name:'Air Serbia',           bg:'#c8102e',fg:'#ffffff'},
+  'TVF':{iata:'TO', name:'Transavia France',     bg:'#007a4d',fg:'#ffffff'},
+  'TRA':{iata:'HV', name:'Transavia',            bg:'#007a4d',fg:'#ffffff'},
+  'CFG':{iata:'DE', name:'Condor',               bg:'#e31837',fg:'#f5c600'},
+  'PGT':{iata:'PC', name:'Pegasus Airlines',     bg:'#f7007d',fg:'#ffffff'},
+  'SXS':{iata:'XQ', name:'SunExpress',           bg:'#ff6600',fg:'#ffffff'},
+  'WUK':{iata:'W9', name:'Wizz Air UK',          bg:'#c6007e',fg:'#ffffff'},
+  'RYS':{iata:'FR', name:'Ryanair Sun',          bg:'#073da4',fg:'#ffffff'},
+  'RUK':{iata:'FR', name:'Ryanair UK',           bg:'#073da4',fg:'#ffffff'},
+  'IBK':{iata:'D8', name:'Norwegian Air Intl',   bg:'#d40e14',fg:'#ffffff'},
+  'ROT':{iata:'RO', name:'TAROM',                bg:'#003087',fg:'#ffffff'},
+  'AEE':{iata:'A3', name:'Aegean Airlines',      bg:'#003087',fg:'#ffffff'},
+  'RJA':{iata:'RJ', name:'Royal Jordanian',      bg:'#4a0e2f',fg:'#ffffff'},
+  'LOG':{iata:'LM', name:'Loganair',             bg:'#003087',fg:'#ffffff'},
+  'EZE':{iata:'T3', name:'Eastern Airways',      bg:'#e8251f',fg:'#ffffff'},
+  'IBS':{iata:'I2', name:'Iberia Express',       bg:'#c8102e',fg:'#ffffff'},
+  'VOE':{iata:'V7', name:'Volotea',              bg:'#3a0068',fg:'#ffffff'},
+  'ASA':{iata:'AS', name:'Alaska Airlines',      bg:'#002f6c',fg:'#ffffff'},
+  'XAX':{iata:'D7', name:'AirAsia X',            bg:'#cc0000',fg:'#ffffff'},
+  'ABY':{iata:'G9', name:'Air Arabia',           bg:'#cc0033',fg:'#ffffff'},
+  'OMA':{iata:'WY', name:'Oman Air',             bg:'#8b0000',fg:'#ffffff'},
+  'KAC':{iata:'KU', name:'Kuwait Airways',       bg:'#002d79',fg:'#ffffff'},
+  'FDB':{iata:'FZ', name:'flydubai',             bg:'#cc0000',fg:'#ffffff'},
+  'DAH':{iata:'AH', name:'Air Algérie',          bg:'#00673b',fg:'#ffffff'},
+  'TAR':{iata:'TU', name:'Tunisair',             bg:'#cc0000',fg:'#ffffff'},
+  'RWD':{iata:'WB', name:'RwandAir',             bg:'#002f6c',fg:'#ffffff'},
+  'PEA':{iata:'P4', name:'Air Peace',            bg:'#006400',fg:'#ffffff'},
+  'THA':{iata:'TG', name:'Thai Airways',         bg:'#6a0572',fg:'#c8a84b'},
+  'MAS':{iata:'MH', name:'Malaysia Airlines',    bg:'#cc0000',fg:'#ffffff'},
+  'KAL':{iata:'KE', name:'Korean Air',           bg:'#002664',fg:'#ffffff'},
+  'AAR':{iata:'OZ', name:'Asiana Airlines',      bg:'#c8a84b',fg:'#002664'},
+  'HVN':{iata:'VN', name:'Vietnam Airlines',     bg:'#003153',fg:'#d4af37'},
+  'CCA':{iata:'CA', name:'Air China',            bg:'#e60026',fg:'#ffd700'},
+  'CSN':{iata:'CZ', name:'China Southern',       bg:'#0a3a80',fg:'#ffffff'},
+  'CES':{iata:'MU', name:'China Eastern',        bg:'#cc0000',fg:'#ffffff'},
+  'CHH':{iata:'HU', name:'Hainan Airlines',      bg:'#c8102e',fg:'#ffd700'},
+  'CAL':{iata:'CI', name:'China Airlines',       bg:'#003187',fg:'#ffffff'},
+  'CBJ':{iata:'JD', name:'Beijing Capital',      bg:'#003187',fg:'#ffffff'},
+  'RBA':{iata:'BI', name:'Royal Brunei',         bg:'#f0c832',fg:'#2d2d2d'},
+  'IGO':{iata:'6E', name:'IndiGo',               bg:'#170066',fg:'#ffffff'},
+  'AIC':{iata:'AI', name:'Air India',            bg:'#e31837',fg:'#ffffff'},
+  'PIA':{iata:'PK', name:'Pakistan Intl',        bg:'#01411c',fg:'#ffffff'},
+  'BBC':{iata:'BG', name:'Biman Bangladesh',     bg:'#006234',fg:'#ffffff'},
+  'KZR':{iata:'KC', name:'Air Astana',           bg:'#003f87',fg:'#c0a040'},
+  'UZB':{iata:'HY', name:'Uzbekistan Airways',   bg:'#1b6b30',fg:'#ffffff'},
+  'AHY':{iata:'J2', name:'Azerbaijan Airlines',  bg:'#003087',fg:'#e20026'},
+  'ALK':{iata:'UL', name:'SriLankan Airlines',   bg:'#cc0000',fg:'#ffffff'},
+  'QFA':{iata:'QF', name:'Qantas',               bg:'#e8111a',fg:'#ffffff'},
+  'ANZ':{iata:'NZ', name:'Air New Zealand',      bg:'#001c2d',fg:'#ffffff'},
+  'JBU':{iata:'B6', name:'JetBlue',              bg:'#003876',fg:'#ffffff'},
+  'WJA':{iata:'WS', name:'WestJet',              bg:'#00385d',fg:'#ffffff'},
+  'TSC':{iata:'TS', name:'Air Transat',          bg:'#003580',fg:'#ffffff'},
+  'NBT':{iata:'N0', name:'Norse Atlantic',       bg:'#001933',fg:'#f97316'},
+  'AVA':{iata:'AV', name:'Avianca',              bg:'#bc0029',fg:'#ffffff'},
+  'LAN':{iata:'LA', name:'LATAM Airlines',       bg:'#e5001b',fg:'#ffffff'},
+  'TAM':{iata:'JJ', name:'LATAM Brasil',         bg:'#e5001b',fg:'#ffffff'},
+  'UPS':{iata:'5X', name:'UPS Airlines',         bg:'#351c15',fg:'#ffb500', cargo:true},
+  'GTI':{iata:'5Y', name:'Atlas Air',            bg:'#002d6e',fg:'#ffffff', cargo:true},
+  'DHK':{iata:'D0', name:'DHL Air UK',           bg:'#ffcc00',fg:'#cc0000', cargo:true},
+  'BCS':{iata:'QY', name:'EAT Leipzig',          bg:'#ffcc00',fg:'#cc0000', cargo:true},
+  'BOX':{iata:'3S', name:'AeroLogic',            bg:'#003366',fg:'#ffffff', cargo:true},
+  'SRR':{iata:'DJ', name:'Maersk Air Cargo',     bg:'#42b0d5',fg:'#ffffff', cargo:true},
+  'FDX':{iata:'FX', name:'FedEx Express',        bg:'#4d148c',fg:'#ff6600', cargo:true},
+  'ABV':{iata:'ABV',name:'ASL Airlines UK',      bg:'#0a1f3c',fg:'#ffffff', cargo:true},
+  'NPT':{iata:'NPT',name:'West Atlantic UK',     bg:'#003366',fg:'#ffffff', cargo:true},
+  'TAY':{iata:'3V', name:'ASL Airlines Belgium', bg:'#0a1f3c',fg:'#ffffff', cargo:true},
+  'FPO':{iata:'5O', name:'ASL Airlines France',  bg:'#0a1f3c',fg:'#ffffff', cargo:true},
+  'RCH':{iata:'MC', name:'USAF Air Mobility',    bg:'#003087',fg:'#ffffff', cargo:true},
+  'HLE':{iata:'HLE',name:'UK HEMS',              bg:'#cc0000',fg:'#ffffff', cargo:true},
+  'SRG':{iata:'SRG',name:'RAF Search & Rescue',  bg:'#003380',fg:'#ffffff', cargo:true},
+};
+const AC_TYPES = {
+  'A19N':'Airbus A319neo','A20N':'Airbus A320neo','A21N':'Airbus A321neo',
+  'A318':'Airbus A318','A319':'Airbus A319','A320':'Airbus A320','A321':'Airbus A321',
+  'A332':'Airbus A330-200','A333':'Airbus A330-300',
+  'A338':'Airbus A330-800neo','A339':'Airbus A330-900neo',
+  'A342':'Airbus A340-200','A343':'Airbus A340-300','A346':'Airbus A340-600',
+  'A359':'Airbus A350-900','A35K':'Airbus A350-1000',
+  'A380':'Airbus A380','A388':'Airbus A380-800',
+  'B734':'Boeing 737-400','B737':'Boeing 737-700',
+  'B738':'Boeing 737-800','B739':'Boeing 737-900',
+  'B37M':'Boeing 737 MAX 7','B38M':'Boeing 737 MAX 8','B39M':'Boeing 737 MAX 9',
+  'B752':'Boeing 757-200','B753':'Boeing 757-300',
+  'B762':'Boeing 767-200','B763':'Boeing 767-300','B764':'Boeing 767-400',
+  'B772':'Boeing 777-200','B77L':'Boeing 777-200LR',
+  'B773':'Boeing 777-300','B77W':'Boeing 777-300ER',
+  'B788':'Boeing 787-8','B789':'Boeing 787-9','B78X':'Boeing 787-10',
+  'E170':'Embraer 170','E175':'Embraer 175','E190':'Embraer 190','E195':'Embraer 195',
+  'AT72':'ATR 72','AT76':'ATR 72-600','DH8D':'Bombardier Q400',
+  'CRJ2':'CRJ-200','CRJ7':'CRJ-700','CRJ9':'CRJ-900',
+  'C17':'Boeing C-17','C130':'C-130 Hercules',
+  'GLF5':'Gulfstream G500','GLF6':'Gulfstream G650',
+  'C172':'Cessna 172','PC12':'Pilatus PC-12','SR22':'Cirrus SR22',
+};
+const AIRPORTS = {
+  'LHR':'Heathrow','LGW':'Gatwick','LTN':'Luton',
+  'STN':'Stansted','LCY':'London City','SEN':'Southend',
+  'MAN':'Manchester','BHX':'Birmingham','EDI':'Edinburgh','GLA':'Glasgow',
+  'BRS':'Bristol','NCL':'Newcastle','LBA':'Leeds Bradford','LPL':'Liverpool',
+  'EMA':'East Midlands','ABZ':'Aberdeen','BFS':'Belfast','CWL':'Cardiff',
+  'SOU':'Southampton','EXT':'Exeter','NQY':'Newquay','INV':'Inverness',
+  'JER':'Jersey','GCI':'Guernsey',
+  'CDG':'Paris CDG','ORY':'Paris Orly','AMS':'Amsterdam',
+  'FRA':'Frankfurt','MUC':'Munich','DUS':'Dusseldorf','BER':'Berlin','HAM':'Hamburg','STR':'Stuttgart','CGN':'Cologne','HAJ':'Hannover','NUE':'Nuremberg',
+  'VIE':'Vienna','ZRH':'Zurich','GVA':'Geneva','BSL':'Basel','INN':'Innsbruck','GRZ':'Graz','SZG':'Salzburg',
+  'MAD':'Madrid','BCN':'Barcelona','LIS':'Lisbon','OPO':'Porto',
+  'FCO':'Rome','MXP':'Milan','VCE':'Venice','NAP':'Naples','BLQ':'Bologna','PMO':'Palermo',
+  'CTA':'Catania','FLR':'Florence','LIN':'Milan Linate','PSA':'Pisa','TRN':'Turin','VRN':'Verona','BRI':'Bari','CAG':'Cagliari','OLB':'Olbia',
+  'ATH':'Athens','SKG':'Thessaloniki','HER':'Heraklion','KLX':'Kalamata',
+  'IST':'Istanbul','SAW':'Istanbul Sabiha','ADB':'Izmir','ESB':'Ankara','BJV':'Bodrum','DLM':'Dalaman',
+  'CPH':'Copenhagen','ARN':'Stockholm','GOT':'Gothenburg','BLL':'Billund',
+  'HEL':'Helsinki','OSL':'Oslo','BGO':'Bergen','KEF':'Reykjavik',
+  'DUB':'Dublin','ORK':'Cork',
+  'OTP':'Bucharest','BUD':'Budapest','PRG':'Prague',
+  'WAW':'Warsaw','KRK':'Kraków','WRO':'Wrocław','GDN':'Gdańsk',
+  'SOF':'Sofia','OHD':'Ohrid','SKP':'Skopje',
+  'BEG':'Belgrade','ZAG':'Zagreb','DBV':'Dubrovnik','SPU':'Split','TIV':'Tivat',
+  'LJU':'Ljubljana','SJJ':'Sarajevo',
+  'RIX':'Riga','TLL':'Tallinn','VNO':'Vilnius',
+  'KBP':'Kyiv','LWO':'Lviv',
+  'LCA':'Larnaca','PFO':'Paphos',
+  'BRU':'Brussels','LUX':'Luxembourg','RTM':'Rotterdam','MLA':'Malta',
+  'TIA':'Tirana','ALG':'Algiers','GIB':'Gibraltar','TBS':'Tbilisi',
+  'NCE':'Nice','LYS':'Lyon','MRS':'Marseille','BOD':'Bordeaux','TLS':'Toulouse',
+  'GRO':'Girona','VLC':'Valencia','SVQ':'Seville','BIO':'Bilbao',
+  'RAK':'Marrakech','TNG':'Tangier','AGA':'Agadir','RBA':'Rabat',
+  'AGP':'Malaga','ALC':'Alicante','PMI':'Palma','IBZ':'Ibiza','FUE':'Fuerteventura','MAH':'Menorca',
+  'FAO':'Faro','ACE':'Lanzarote','TFS':'Tenerife','LPA':'Gran Canaria',
+  'RHO':'Rhodes','CFU':'Corfu','EFL':'Kefalonia','ZTH':'Zakynthos','KGS':'Kos','CHQ':'Chania','JMK':'Mykonos','JTR':'Santorini','AYT':'Antalya',
+  'SSH':'Sharm El Sheikh',
+  'JFK':'New York JFK','EWR':'New York Newark','LGA':'New York LGA',
+  'LAX':'Los Angeles','ORD':'Chicago','ATL':'Atlanta',
+  'DFW':'Dallas','DEN':'Denver','SEA':'Seattle',
+  'SFO':'San Francisco','MIA':'Miami','BOS':'Boston',
+  'IAD':'Washington Dulles','DCA':'Washington',
+  'IAH':'Houston','PHX':'Phoenix','MSP':'Minneapolis','DTW':'Detroit',
+  'CLT':'Charlotte','MCO':'Orlando','LAS':'Las Vegas','SAN':'San Diego',
+  'AUS':'Austin','BWI':'Baltimore','PHL':'Philadelphia',
+  'YYZ':'Toronto','YUL':'Montreal','YVR':'Vancouver','YYC':'Calgary',
+  'MEX':'Mexico City','CUN':'Cancun','GRU':'São Paulo','EZE':'Buenos Aires',
+  'GIG':'Rio de Janeiro','SCL':'Santiago',
+  'BGI':'Barbados','ANU':'Antigua','GND':'Grenada','POS':'Port of Spain','UVF':'St Lucia',
+  'KIN':'Kingston','NAS':'Nassau','PUJ':'Punta Cana','GCM':'Cayman Islands','BDA':'Bermuda','GEO':'Georgetown',
+  'DXB':'Dubai','AUH':'Abu Dhabi','DOH':'Doha','KWI':'Kuwait',
+  'BAH':'Bahrain','RUH':'Riyadh','JED':'Jeddah','MCT':'Muscat',
+  'TLV':'Tel Aviv','BEY':'Beirut','AMM':'Amman','CAI':'Cairo',
+  'SIN':'Singapore','HKG':'Hong Kong','NRT':'Tokyo','HND':'Tokyo Haneda',
+  'ICN':'Seoul','PEK':'Beijing','PVG':'Shanghai','CAN':'Guangzhou',
+  'BKK':'Bangkok','KUL':'Kuala Lumpur','DEL':'Delhi','BOM':'Mumbai',
+  'BLR':'Bengaluru','MAA':'Chennai','HYD':'Hyderabad',
+  'ISB':'Islamabad','KHI':'Karachi','LHE':'Lahore','DAC':'Dhaka','CMB':'Colombo','MLE':'Malé',
+  'MNL':'Manila','CGK':'Jakarta','TPE':'Taipei',
+  'JNB':'Johannesburg','CPT':'Cape Town','NBO':'Nairobi','ADD':'Addis Ababa',
+  'CMN':'Casablanca','LOS':'Lagos','ACC':'Accra','ABV':'Abuja',
+  'MRU':'Mauritius','TUN':'Tunis',
+  'SYD':'Sydney','MEL':'Melbourne','BNE':'Brisbane','PER':'Perth','AKL':'Auckland',
+};
+
+let aircraft = [];
+const routeCache = {}, routeInFlight = {}, acInfoCache = {}, extraAirports = {};
+
+function calcDist(lat, lon) {
+  const dLat = (lat - CFG_LAT) * Math.PI / 180;
+  const dLon = (lon - CFG_LON) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(CFG_LAT * Math.PI / 180) * Math.cos(lat * Math.PI / 180) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  return 3440.065 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function iataFlight(route) {
+  if (route.operated_ident) {
+    const pfx = route.operated_ident.substring(0, 3);
+    const al = AIRLINES[pfx];
+    if (al) return al.iata + route.operated_ident.substring(3);
+  }
+  if (route.iata_flight) {
+    const m = route.iata_flight.match(/^[A-Z]{2}\d+/);
+    return m ? m[0] : route.iata_flight;
+  }
+  return '';
+}
+function airportName(iata) {
+  if (!iata) return '';
+  if (AIRPORTS[iata]) return AIRPORTS[iata];
+  const extra = extraAirports[iata];
+  if (extra === undefined) {
+    extraAirports[iata] = null;
+    fetchAirportName(iata);
+  }
+  return extra || iata;
+}
+function fetchAirportName(iata) {
+  fetch('/api/airport-name?iata=' + encodeURIComponent(iata))
+    .then(r => r.json()).then(r => { extraAirports[iata] = r.name || ''; if (r.name) renderAircraft(); })
+    .catch(() => { extraAirports[iata] = null; });
+}
+function fmtTime(ts) {
+  return new Date(ts * 1000).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+function fmtEte(s) {
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+}
+function fmtTimeLine(label, sched, est) {
+  if (!sched && !est) return null;
+  const schedStr = sched ? fmtTime(sched) : '', estStr = est ? fmtTime(est) : '';
+  let deltaHtml = '';
+  if (sched && est) {
+    const deltaMins = Math.round((est - sched) / 60);
+    if (Math.abs(deltaMins) <= 1) deltaHtml = ' <span class="ontime">on time</span>';
+    else if (deltaMins > 0) deltaHtml = ' <span class="late">+' + deltaMins + 'm</span>';
+    else deltaHtml = ' <span class="early">' + (-deltaMins) + 'm early</span>';
+  }
+  if (schedStr && estStr && schedStr !== estStr) return label + ' ' + schedStr + ' → ' + estStr + deltaHtml;
+  return label + ' ' + (schedStr || estStr) + deltaHtml;
+}
+function fetchRoute(cs) {
+  if (routeInFlight[cs] || routeCache[cs]) return;
+  routeInFlight[cs] = true;
+  fetch('/api/flight-route?cs=' + encodeURIComponent(cs)).then(r => r.json()).then(r => {
+    routeInFlight[cs] = false;
+    if (!r.orig || !r.dest) r._notFound = true;
+    routeCache[cs] = r;
+    renderAircraft();
+  }).catch(() => { routeInFlight[cs] = false; });
+}
+function fetchAircraftInfo(hex) {
+  if (acInfoCache[hex] !== undefined) return;
+  acInfoCache[hex] = {};
+  fetch('/api/aircraft-info?hex=' + encodeURIComponent(hex)).then(r => r.json()).then(info => {
+    acInfoCache[hex] = {year: info.built || '', label: info.built_label || 'Built'};
+    renderAircraft();
+  }).catch(() => { delete acInfoCache[hex]; });
+}
+
+function renderAircraft() {
+  const el = document.getElementById('air-content');
+  const commercial = aircraft.filter(ac => {
+    const cs = (ac.flight || '').trim();
+    return cs.length >= 4 && AIRLINES[cs.substring(0, 3)];
+  });
+  commercial.sort((a, b) => a._dist - b._dist);
+  const ac = commercial[0];
+
+  if (!ac) {
+    el.innerHTML = '<div class="ac-empty"><div class="glyph">✈</div><div class="msg">No aircraft nearby</div></div>';
+    return;
+  }
+
+  const cs = (ac.flight || '').trim();
+  const icao = cs.substring(0, 3);
+  const al = AIRLINES[icao];
+  const bg = al ? al.bg : '#0a1520', fg = al ? al.fg : '#e8eaf0';
+  const route = routeCache[cs];
+  const iataFlt = route ? iataFlight(route) : '';
+  const dispFlt = iataFlt || cs;
+  const alName = al ? al.name : icao;
+  const logoHtml = al
+    ? '<img class="ac-logo" src="/api/airline-logo?iata=' + encodeURIComponent(al.iata) + '" onerror="this.style.display=\'none\'">'
+    : '';
+
+  let routeHtml;
+  if (route && route.orig && route.dest) {
+    const origCity = airportName(route.orig_iata) || route.orig;
+    const destCity = airportName(route.dest_iata) || route.dest;
+    const origIata = route.orig_iata ? ' <span class="ac-iata">' + route.orig_iata + '</span>' : '';
+    const destIata = route.dest_iata ? ' <span class="ac-iata">' + route.dest_iata + '</span>' : '';
+    const depLine = fmtTimeLine('Dep', route.depart_sched, route.depart_est);
+    const arrLine = fmtTimeLine('Arr', route.arrive_sched, route.arrive_est);
+    const eteStr = route.ete_s ? fmtEte(route.ete_s) : '';
+    const distStr = route.distance_nm ? route.distance_nm.toLocaleString() + ' nm' : '';
+    const infoParts = [eteStr, distStr].filter(Boolean);
+    const infoHtml = infoParts.length
+      ? '<div class="ac-flight-info">' + infoParts.map(p => '<div>' + p + '</div>').join('') + '</div>' : '';
+    routeHtml =
+      '<div class="ac-route-main">' +
+        '<div class="ac-airport">' + esc(origCity) + origIata + '</div>' +
+        (depLine ? '<div class="ac-times">' + depLine + '</div>' : '') +
+        '<div class="ac-route-arrow">↓</div>' +
+        '<div class="ac-airport">' + esc(destCity) + destIata + '</div>' +
+        (arrLine ? '<div class="ac-times">' + arrLine + '</div>' : '') +
+      '</div>' + infoHtml;
+  } else if (route && route._notFound) {
+    routeHtml = '<div class="ac-route-loading">No route information available</div>';
+  } else {
+    routeHtml = '<div class="ac-route-loading">Route information loading…</div>';
+    if (cs && !routeCache[cs]) fetchRoute(cs);
+  }
+
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  const altFt = typeof ac.alt_baro === 'number' ? ac.alt_baro : null;
+  const altM = altFt != null ? Math.round(altFt * 0.3048) : null;
+  const kph = ac.gs ? Math.round(ac.gs * 1.852) : null;
+  const hdg = ac.track != null ? Math.round(ac.track) : null;
+  const hdgDir = hdg != null ? dirs[Math.round(hdg / 22.5) % 16] : '—';
+  const arrowHtml = hdg != null ? '<span class="ac-heading-arrow" style="transform:rotate(' + hdg + 'deg)">↑</span>' : '';
+  const distKm = Math.round(ac._dist * 1.852);
+
+  const cached = acInfoCache[ac.hex];
+  const acParts = [];
+  const acType = AC_TYPES[ac.t] || ac.t || '';
+  if (acType) acParts.push(esc(acType));
+  if (ac.r) acParts.push(esc(ac.r));
+  if (cached && cached.year) acParts.push(esc((cached.label || 'Built') + ' ' + cached.year));
+
+  el.innerHTML =
+    '<div class="ac-header" style="background:' + bg + ';color:' + fg + '">' +
+      logoHtml +
+      '<div style="flex:1;min-width:0">' +
+        '<div class="ac-flight-num">' + esc(dispFlt) + '</div>' +
+        '<div class="ac-airline-name">' + esc(alName) + '</div>' +
+      '</div>' +
+      (acParts.length ? '<div class="ac-type-right">' + acParts.map(p => '<div>' + p + '</div>').join('') + '</div>' : '') +
+    '</div>' +
+    '<div class="ac-route">' + routeHtml + '</div>' +
+    '<div class="ac-stats">' +
+      '<div class="ac-stat-card"><div class="ac-stat-label">Altitude</div><div class="ac-stat-value">' + (altM != null ? altM.toLocaleString() : '—') + '</div><div class="ac-stat-unit">metres</div></div>' +
+      '<div class="ac-stat-card"><div class="ac-stat-label">Speed</div><div class="ac-stat-value">' + (kph != null ? kph : '—') + '</div><div class="ac-stat-unit">kph</div></div>' +
+      '<div class="ac-stat-card"><div class="ac-stat-label">Heading</div><div class="ac-stat-value">' + hdgDir + ' ' + arrowHtml + '</div><div class="ac-stat-unit">' + (hdg != null ? hdg + '°' : '') + '</div></div>' +
+      '<div class="ac-stat-card"><div class="ac-stat-label">Distance</div><div class="ac-stat-value">' + distKm + '</div><div class="ac-stat-unit">km from ' + CFG_NAME + '</div></div>' +
+    '</div>';
+
+  fetchAircraftInfo(ac.hex);
+}
+
+function fetchAircraft() {
+  const url = '/api/flights?lat=' + CFG_LAT.toFixed(4) + '&lon=' + CFG_LON.toFixed(4) + '&dist=' + CFG_DIST + '&focus=1';
+  fetch(url).then(r => r.json()).then(data => {
+    aircraft = (data.ac || []).filter(ac => ac.lat && ac.lon && typeof ac.alt_baro === 'number' && ac.alt_baro > 500);
+    aircraft.forEach(ac => { ac._dist = calcDist(ac.lat, ac.lon); });
+    renderAircraft();
+  }).catch(() => {});
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TRAINS — Twyford trackboard, 4 running lines
+   ═══════════════════════════════════════════════════════════════ */
+const OPS = {
+  GW: {bg:'#0b9d6c', fg:'#04160f', name:'GWR'},
+  XR: {bg:'#9d7fd8', fg:'#120a20', name:'Elizabeth line'},
+  XC: {bg:'#e05570', fg:'#1d060b', name:'CrossCountry'},
+  HX: {bg:'#8a5fd6', fg:'#12081f', name:'Heathrow Exp'},
+  AW: {bg:'#c05fc0', fg:'#1a061a', name:'TfW'},
+  GB: {bg:'#f0a835', fg:'#1d1403', name:'GBRf'},
+  DW: {bg:'#f04a4a', fg:'#1c0505', name:'DB Cargo'},
+  FL: {bg:'#4fae62', fg:'#07130a', name:'Freightliner'},
+  ZZ: {bg:'#f07b3c', fg:'#1a0a02', name:'Colas'},
+  ZN: {bg:'#e8c34a', fg:'#171102', name:'Network Rail'},
+};
+function opInfo(t) {
+  const o = OPS[t.op_code];
+  if (o) return o;
+  if (t.passenger === false || isFreightHc(t.headcode))
+    return {bg:'#7d8f4a', fg:'#111504', name:'Freight'};
+  return {bg:'#3c4c60', fg:'#dfe7f0', name: t.op_name || t.op_code || ''};
+}
+function isFreightHc(hc) { return hc && '45678'.indexOf(hc[0]) >= 0; }
+function freightClass(hc) {
+  const c = hc ? hc[0] : '';
+  return c === '4' ? 'Freight · intermodal'
+       : c === '6' ? 'Freight · heavy haul'
+       : c === '7' ? 'Freight'
+       : c === '8' ? 'Light engine'
+       : c === '5' ? 'Empty stock' : 'Freight';
+}
+function shortPlace(name) {
+  if (!name) return '';
+  return String(name)
+    .replace('London Paddington', 'Paddington')
+    .replace(' Temple Meads', '').replace(' Foregate Street', '').replace(' Shrub Hill', '')
+    .replace(' St Davids', '')
+    .replace('Heathrow Terminals 1-3', 'Heathrow T2/3').replace('Heathrow Terminal ', 'Heathrow T')
+    .replace('-super-Mare', '').replace(' International', ' Intl');
+}
+const STANME = {
+  MAIDENHED:'Maidenhead', MDNHDMIDS:'Maidenhead', 'MDNHD CS':'Maidenhead',
+  TWYFORD:'Twyford', READNG:'Reading', READGWEST:'Reading West',
+  READWTORJ:'Reading', RDGSPURJN:'Reading', TILEHURST:'Tilehurst',
+  PANGBORNE:'Pangbourne', 'GORING&ST':'Goring', CHOLSEY:'Cholsey',
+  SLOUGH:'Slough', BURNHAM:'Burnham', TAPLOW:'Taplow', LANGLEY:'Langley',
+  IVER:'Iver', 'W DRAYTON':'West Drayton', 'HAYES&HAR':'Hayes',
+  SOUTHALL:'Southall', HANWELL:'Hanwell', AIRPORTJN:'Airport Jn',
+  STOCKLYJN:'Stockley Jn', HENLEYONT:'Henley', 'KEN BG LP':'Kennet Bridge',
+  'KEN BG JN':'Kennet Bridge',
+};
+function placeName(s) {
+  if (!s) return '';
+  if (STANME[s]) return STANME[s];
+  if (s.indexOf('LHR') === 0) return 'Heathrow';
+  return s.charAt(0) + s.slice(1).toLowerCase();
+}
+function trainMs(t) {
+  if (t.house_pass_ts) return t.house_pass_ts * 1000;
+  if (!t.twy_sched) return 0;
+  let ms = new Date(t.twy_sched).getTime();
+  if (!t.twy_actual && t.late_min > 0) ms += t.late_min * 60000;
+  return ms;
+}
+function fmtHM(msOrIso) {
+  const d = new Date(msOrIso);
+  return isNaN(d) ? '—' : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+function trackKey(t) {
+  if (!t.direction || !t.track) return null;
+  return (t.direction === 'up' ? 'u' : 'd') + (t.track === 'Main' ? 'm' : 'r');
+}
+function graceMs(t) {
+  if (t.twy_actual) return t.direction === 'up' ? 45000 : 20000;
+  return 100000;
+}
+
+let trains = [], nrccMsgs = [], lastFetch = 0;
+const KEYS = ['ur', 'dr', 'um', 'dm'];
+const LINE_META = {
+  ur: {arrow:'→', name:'UP RELIEF',   ln:'relief'},
+  dr: {arrow:'←', name:'DOWN RELIEF', ln:'relief'},
+  um: {arrow:'→', name:'UP MAIN',     ln:'main'},
+  dm: {arrow:'←', name:'DOWN MAIN',   ln:'main'},
+};
+
+function fetchTrains() {
+  fetch('/api/trains').then(r => r.json()).then(d => {
+    trains = d.trains || [];
+    lastFetch = Date.now();
+    renderTrains();
+  }).catch(() => {});
+}
+function fetchNrcc() {
+  fetch('/api/nrcc').then(r => r.json()).then(d => {
+    nrccMsgs = d.messages || [];
+    renderAlert();
+  }).catch(() => {});
+}
+function renderAlert() {
+  const el = document.getElementById('alert');
+  if (!nrccMsgs.length) { el.classList.remove('show'); return; }
+  const msg = String(nrccMsgs[0]).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  document.getElementById('alert-msg').textContent = msg;
+  el.classList.add('show');
+}
+
+function renderTrains() {
+  const now = Date.now();
+  const byKey = {ur:[], dr:[], um:[], dm:[]};
+  for (const t of trains) {
+    const k = trackKey(t);
+    if (!k || !byKey[k]) continue;
+    const ms = trainMs(t);
+    if (!ms || ms > now + 65 * 60000) continue;
+    if (ms < now - 150000) continue;
+    byKey[k].push(t);
+  }
+  for (const k of KEYS) {
+    byKey[k].sort((a, b) => trainMs(a) - trainMs(b));
+    renderTrack(k, byKey[k], now);
+  }
+}
+
+function renderTrack(key, list, now) {
+  let row = document.getElementById('row-' + key);
+  if (!row) return;
+  const main = document.getElementById('main-' + key);
+  const eta = document.getElementById('eta-' + key);
+
+  const live = list.filter(t => !t.cancelled);
+  let t = null;
+  for (const c of live) {
+    if (trainMs(c) >= now - graceMs(c)) { t = c; break; }
+  }
+  if (!t) {
+    row.style.setProperty('--spine', 'var(--text-faint)');
+    row.classList.remove('passing');
+    main.innerHTML = '<div class="t-empty">NO TRAIN DUE</div>';
+    eta.innerHTML = '';
+    return;
+  }
+
+  const op = opInfo(t);
+  const ms = trainMs(t);
+  const diff = ms - now;
+  const frt = t.passenger === false || isFreightHc(t.headcode);
+  row.style.setProperty('--spine', op.bg);
+
+  let destTxt, fromTxt;
+  if (frt) {
+    destTxt = t.dest ? shortPlace(t.dest) : freightClass(t.headcode);
+    fromTxt = t.origin ? 'from ' + shortPlace(t.origin) : freightClass(t.headcode);
+  } else {
+    destTxt = t.dest ? shortPlace(t.dest) : (t.headcode || '—');
+    fromTxt = t.origin ? 'from ' + shortPlace(t.origin) : '';
+  }
+  destTxt = t.cancelled ? '<span class="cancelled">' + esc(destTxt) + '</span>' : esc(destTxt);
+
+  let liveHtml = '';
+  if (t.td_dist_mi != null && t.td_berth_age < 150 && !t.twy_actual) {
+    const mi = Math.abs(t.td_dist_mi);
+    const pl = placeName(t.td_place);
+    liveHtml = '<span class="livepos">' + (mi < 0.4 ? 'passing now' : (pl ? esc(pl) + ' · ' : '') + mi.toFixed(1) + ' mi') + '</span>';
+  }
+  const stock = (t.stock_type && !frt) ? t.stock_type : '';
+  const veh = (t.num_veh && !frt) ? t.num_veh + ' coaches' : '';
+
+  main.innerHTML =
+    '<div class="t-dest">' + destTxt + '</div>' +
+    '<div class="t-sub">' +
+      '<span class="op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.name) + '</span>' +
+      (fromTxt ? '<span>' + esc(fromTxt) + '</span>' : '') +
+      (stock ? '<span>' + esc(stock) + '</span>' : '') +
+      (veh ? '<span>' + veh + '</span>' : '') +
+      liveHtml +
+      '<span class="hc">' + esc(t.headcode || '') + '</span>' +
+    '</div>';
+
+  let countHtml, countCls = '', passing = false;
+  if (t.cancelled) { countHtml = 'CANC'; countCls = 'gone'; }
+  else if (t.at_station) { countHtml = 'AT STN'; countCls = 'stn'; }
+  else if (t.held) { countHtml = 'HELD'; countCls = 'held'; }
+  else if (diff <= 25000 && diff > -45000) { countHtml = 'NOW'; countCls = 'now'; passing = true; }
+  else if (diff <= 0) { countHtml = 'PASSED'; countCls = 'gone'; }
+  else if (diff < 90000) { countHtml = Math.max(1, Math.round(diff / 1000)) + '<span class="unit">sec</span>'; }
+  else { countHtml = Math.round(diff / 60000) + '<span class="unit">min</span>'; }
+  row.classList.toggle('passing', passing);
+
+  let statusHtml;
+  if (t.cancelled) statusHtml = '<span class="cancel">cancelled</span>';
+  else {
+    const bits = [fmtHM(ms)];
+    if (!t.twy_actual) {
+      if (t.late_min == null) bits.push('<span class="est">estimated</span>');
+      else if (t.late_min >= 1) bits.push('<span class="late">+' + t.late_min + ' min</span>');
+      else bits.push('<span class="ontime">on time</span>');
+    }
+    statusHtml = bits.join(' · ');
+  }
+  eta.innerHTML = '<div class="t-count ' + countCls + '">' + countHtml + '</div><div class="t-status">' + statusHtml + '</div>';
+}
+
+/* Build the 4 track rows once */
+(function buildTracks() {
+  const wrap = document.getElementById('rail-content');
+  wrap.innerHTML = KEYS.map(k => {
+    const m = LINE_META[k];
+    return '<section class="track" data-ln="' + m.ln + '" id="row-' + k + '">' +
+      '<div class="t-id"><div class="arrow">' + m.arrow + '</div><div class="name">' + m.name + '</div></div>' +
+      '<div class="t-main" id="main-' + k + '"></div>' +
+      '<div class="t-eta" id="eta-' + k + '"></div>' +
+    '</section>';
+  }).join('');
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   Boot
+   ═══════════════════════════════════════════════════════════════ */
+fetchAircraft();
+fetchTrains();
+fetchNrcc();
+setInterval(fetchAircraft, 20000);
+setInterval(fetchTrains, 15000);
+setInterval(fetchNrcc, 300000);
+setInterval(tick, 1000);
+tick();
+</script>
+</body>
+</html>

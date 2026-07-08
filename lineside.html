@@ -321,7 +321,13 @@ const LINES = [
    // east) by Crossrail stabling, then a crossover back to the through line
    // (so stabling can reach either platform), then the Marlow branch (which
    // therefore can ONLY reach Platform 5 — it joins after the crossover).
-   maid:['0574'], maidLoopY:128, maidLoop:['0576'], stub:['0568']},
+   // 0581 is the same physical loop as 0576 (SMART: both resolve to
+   // MAIDENHED platform 5) — a reversing train's CC relabel can land there
+   // instead of 0576 (confirmed: 2B91→2B94, 2026-07-07), and without it
+   // mapped here too the train was correctly tracked (backend supersession
+   // already keys on stanme+platform, not raw berth code) but had nowhere
+   // to render, leaving the platform 5 box looking empty.
+   maid:['0574'], maidLoopY:128, maidLoop:['0576','0581'], stub:['0568']},
   {key:'dr', y:208, main:false, dir:'down', name:'DOWN RELIEF', plat:'3',
    west:['1687','1677','1669','1665','1661','1657'],
    twy:['1637'],
@@ -681,12 +687,20 @@ const MAID_PLACES = {'MAIDENHED':1, 'MDNHDMIDS':1, 'MDNHD CS':1};
 function opInfo(t) {
   const o = t && OPS[t.op_code];
   if (o) return o;
-  // Henley branch (2H headcodes) is 100% GWR-operated in reality, but these
-  // trains are deliberately excluded from every /api/trains path server-side
-  // ("Henley branch — excluded everywhere", out of scope for the Reading↔
-  // Maidenhead corridor ETA logic) — so op_code is never populated and they'd
-  // otherwise fall through to the grey unknown-operator colour below.
-  if (t && t.headcode && t.headcode.startsWith('2H')) return OPS.GW;
+  // Henley (2H) and Marlow (2B) branch shuttles are 100% GWR-operated in
+  // reality, but these trains are deliberately excluded from every
+  // /api/trains path server-side ("Henley branch — excluded everywhere",
+  // out of scope for the Reading↔Maidenhead corridor ETA logic) — so
+  // op_code is never populated and they'd otherwise fall through to the
+  // grey unknown-operator colour below. Confirmed 2B94, 2026-07-07.
+  if (t && t.headcode && (t.headcode.startsWith('2H') || t.headcode.startsWith('2B'))) return OPS.GW;
+  // 2Y-series headcodes seen on this corridor are Elizabeth Line reversal/
+  // positioning moves around Maidenhead (confirmed 2Y95, 2026-07-07 — first
+  // sighting was a CC relabel right at Maidenhead platform 4, the same
+  // pattern as other EL turnback moves). Same lower-confidence-than-2H/2B
+  // caveat as MAID_PLACES below: a headcode-prefix guess, not a real
+  // identity match.
+  if (t && t.headcode && t.headcode.startsWith('2Y')) return OPS.XR;
   if (t && isEcsHc(t.headcode))
     return {bg:'#4a7d9d', fg:'#04121a', ab:'ECS'};
   if (t && (t.passenger === false || isFrtHc(t.headcode)))
@@ -911,7 +925,11 @@ function renderPanel() {
 
 function drawOccupant(layer, cell, p, stackIdx) {
   const t = hcTrain[p.headcode];
-  const op = opInfo(t || {headcode: p.headcode});
+  // place is needed for the MAID_PLACES Elizabeth Line inference below — it
+  // was missing here (present in the Reading-box renderer's equivalent call
+  // but not this one), silently making that inference dead code for every
+  // berth-diagram occupant.
+  const op = opInfo(t || {headcode: p.headcode, place: p.place});
   const dim = p.age_s > 180;
   const held = t && t.held;
   /* extra occupants stack downwards into the inter-row gap; branch cells

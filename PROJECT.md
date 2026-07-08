@@ -195,6 +195,17 @@ startup — it changes the size/timing of this memory spike and could reopen the
 window for the co-hosted service. Not a reason to avoid changes, just worth knowing the Pi
 isn't dedicated to this project alone.
 
+**Pi-only files are backed up outside git — keep the backup current:** the Pi's SD card
+started showing signs of failure on 2026-07-08 (intermittent binary corruption). Everything
+under `/home/gduthie/twyford-dashboard` that isn't tracked in this repo (`.env`,
+`hive-credentials.json`, `hive-tokens.json`, `bus-stops.json`, `bus-route-stops.json`,
+`berth_chain.json`, `logos/`, `aircraft-info/`, `airport-names.json`,
+`calibration_log.jsonl`) plus the `twyford-dashboard.service`/`twyford-cast.service` unit
+files were mirrored to `~/Programming/pi-backups/2026-07-08/joggler/` on the Mac (see the
+`README.md` there for full contents and restore steps). If you add new gitignored files on
+the Pi, change credentials/tokens, or edit either unit file, refresh that backup (or make a
+new dated one) so a card failure doesn't lose them.
+
 ---
 
 ## SSH Access
@@ -1788,6 +1799,8 @@ Everything working as of 2026-07-07.
 - [x] transport-proxy.py: TRUST msg_type 0002 (Cancellation) / 0005 (Reinstatement) now processed for any headcode (not gated by watched STANOX, since cancellation can be declared before a train ever reaches the tracked corridor) — `_nr_cancellations` dict merged onto matching trains in `_rtt_build_trains()`, overriding RTT's own (possibly stale/lagging) `cancelled` flag; previously only msg_type 0003 was handled at all, so live cancellations were silently discarded. 0006 (Change of Origin) / 0007 (Change of Identity) now at least logged (previously also discarded); not yet merged into train records — would need re-keying tracked state across an identity swap
 - [x] lineside.html: NEXT PAST THE HOUSE redesigned from a single cramped 40px row (6 trains, heavy truncation) to a two-line-per-train layout: line 1 = countdown, expected time, direction chip, headcode, destination, stock type + coach count; line 2 = operator, origin/stops, live position (berth · place · distance, unified format — a separate fallback code path previously used a different, inconsistent distance-first/no-place-name format with the berth code in the wrong colour), scheduled time/status. Colour-coded power-type dot (grey/gold/teal for diesel/electric/bimode) mirrors the berth-diagram cap stripe so both views read as one system
 - [x] lineside.html: berth-diagram power-type indicator — thin coloured cap stripe on each occupied berth box (same diesel/electric/bimode colours as the approaching-list dot), topbar legend added
+- [x] lineside.html: Maidenhead Platform 5 loop berth `0581` added alongside `0576` — both resolve to the same physical location (SMART: MAIDENHED platform 5), and a reversing train's CC relabel can land on either; backend supersession already keyed correctly (stanme+platform, not raw berth code) but `0581` had nowhere to render on the frontend, leaving the platform 5 box looking empty even though the train (2B94) was being tracked correctly (Tracksy showed it, we didn't). Also: Marlow branch (2B headcodes) coloured GWR green and 2Y-series Maidenhead reversal moves coloured Elizabeth Line purple, same reasoning/pattern as the earlier Henley-branch (2H) fix — these are deliberately absent from every /api/trains path server-side, so op_code is never populated
+- [x] now.html: new standalone SPA at `/now` — kitchen ambient display combining aircraft.html's closest-aircraft focus mode (left, cool blue) with trains.html's 4-line Twyford trackboard (right, warm amber), split by a glowing vertical seam; stacks vertically instead on portrait/narrow screens (`max-aspect-ratio: 95/100`). Reuses both pages' data tables/helpers (AIRLINES/AC_TYPES/AIRPORTS, OPS, format helpers) verbatim rather than sharing code, matching this project's established one-file-per-page pattern. Polls `/api/flights?focus=1` every 20s, `/api/trains` every 15s, `/api/nrcc` every 5 min; NRCC disruption banner spans the full width at the bottom. Route registered in transport-proxy.py alongside `/aircraft`/`/trains`/`/lineside`
 - [ ] trains.html / lineside.html: run td_correlate.py again during busy morning service to confirm signal address mapping with more trains; update KEY_SIGNALS positions if needed
 - [ ] lineside.html: use SF signal aspects to indicate "clear road" / "signals at caution" for approaching trains once mapping is fully confirmed
 - [ ] transport-proxy.py: per-train cancelReason/delayReason from Darwin SOAP (extracted in _parse but not yet exposed in /api/trains response)
