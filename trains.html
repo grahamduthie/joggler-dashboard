@@ -321,11 +321,14 @@ const OPS = {
 function opInfo(t) {
   const o = OPS[t.op_code];
   if (o) return o;
+  if (isEcsHc(t.headcode))
+    return {bg:'#4a7d9d', fg:'#04121a', name:'ECS'};
   if (t.passenger === false || isFreightHc(t.headcode))
     return {bg:'#7d8f4a', fg:'#111504', name:'Freight'};
   return {bg:'#3c4c60', fg:'#dfe7f0', name: t.op_name || t.op_code || ''};
 }
-function isFreightHc(hc) { return hc && '45678'.indexOf(hc[0]) >= 0; }
+function isFreightHc(hc) { return hc && '4678'.indexOf(hc[0]) >= 0; }
+function isEcsHc(hc) { return hc && hc[0] === '5'; }
 function freightClass(hc) {
   const c = hc ? hc[0] : '';
   return c === '4' ? 'Freight · intermodal'
@@ -458,7 +461,7 @@ function renderTrack(key, list, now) {
   const op   = opInfo(t);
   const ms   = trainMs(t);
   const diff = ms - now;
-  const frt  = t.passenger === false || isFreightHc(t.headcode);
+  const frt  = t.passenger === false || isFreightHc(t.headcode) || isEcsHc(t.headcode);
 
   row.style.setProperty('--spine', op.bg);
 
@@ -493,7 +496,7 @@ function renderTrack(key, list, now) {
   let nextHtml = '';
   if (nexts.length) {
     nextHtml = 'then ' + nexts.map(n => {
-      const nd = n.passenger === false || isFreightHc(n.headcode)
+      const nd = n.passenger === false || isFreightHc(n.headcode) || isEcsHc(n.headcode)
         ? (n.dest ? shortPlace(n.dest) : freightClass(n.headcode))
         : shortPlace(n.dest || n.headcode);
       return '<b>' + fmtHM(trainMs(n)) + '</b>&nbsp;' + esc(nd);

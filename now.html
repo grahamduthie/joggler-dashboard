@@ -89,20 +89,34 @@ header {
 
 /* ── Split ──────────────────────────────────────────────── */
 #split { flex: 1 1 auto; min-height: 0; display: flex; position: relative; }
+/* The seam is two abutting gradients (blue fading in from the left half,
+   amber fading in from the right half) plus a bright core line and a soft
+   blurred glow bar behind it — a real "meeting point" rather than a plain
+   rule, since that's the one visual element that has to read as deliberate
+   from across a kitchen. */
 #seam {
-  position: absolute; left: 50%; top: 6%; bottom: 6%; width: 1px;
-  background: linear-gradient(180deg, transparent, var(--rule) 20%, var(--rule) 80%, transparent);
-  transform: translateX(-0.5px);
+  position: absolute; left: 50%; top: 4%; bottom: 4%; width: 3px;
+  transform: translateX(-1.5px);
+  background: linear-gradient(180deg,
+    transparent, var(--air) 12%, rgba(230,235,240,0.9) 50%, var(--rail) 88%, transparent);
+  border-radius: 2px;
+  box-shadow: 0 0 14px 1px rgba(230,235,240,0.18);
 }
 #seam::before {
+  content: ''; position: absolute; inset: -6px -14px;
+  background: linear-gradient(90deg, var(--air-glow), transparent 45%, transparent 55%, var(--rail-glow));
+  filter: blur(6px);
+  z-index: -1;
+}
+#seam::after {
   content: ''; position: absolute; left: 50%; top: 50%;
-  width: 46px; height: 46px; border-radius: 50%; transform: translate(-50%,-50%);
-  background: radial-gradient(circle, rgba(200,210,225,0.10), transparent 70%);
+  width: 64px; height: 64px; border-radius: 50%; transform: translate(-50%,-50%);
+  background: radial-gradient(circle, rgba(235,240,245,0.16), transparent 70%);
 }
 .pane {
-  flex: 1 1 50%; min-width: 0; min-height: 0;
+  flex: 1 1 50%; min-width: 0; min-height: 0; overflow: hidden;
   display: flex; flex-direction: column;
-  padding: 1.4vh 2vw;
+  padding: 1.2vh 2.2vw;
   opacity: 0; transform: translateY(10px);
   animation: rise 0.7s cubic-bezier(.2,.8,.3,1) forwards;
 }
@@ -112,17 +126,17 @@ header {
 
 .pane-label {
   flex: 0 0 auto;
-  font-family: var(--cond); font-weight: 600;
-  font-size: clamp(12px, 1.9vh, 20px);
-  letter-spacing: 0.24em; text-transform: uppercase;
+  font-family: var(--cond); font-weight: 700;
+  font-size: clamp(14px, 2.6vh, 27px);
+  letter-spacing: 0.2em; text-transform: uppercase;
   margin-bottom: 1.2vh;
-  display: flex; align-items: center; gap: 0.6em;
+  display: flex; align-items: center; gap: 0.5em;
 }
-.pane-label::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+.pane-label svg { width: 1.15em; height: 1.15em; flex: 0 0 auto; }
 #air-pane .pane-label { color: var(--air); }
-#air-pane .pane-label::before { background: var(--air); box-shadow: 0 0 10px var(--air); }
+#air-pane .pane-label svg { filter: drop-shadow(0 0 6px rgba(111,195,240,0.5)); }
 #rail-pane .pane-label { color: var(--rail); }
-#rail-pane .pane-label::before { background: var(--rail); box-shadow: 0 0 10px var(--rail); }
+#rail-pane .pane-label svg { filter: drop-shadow(0 0 6px rgba(255,176,0,0.45)); }
 
 /* ═══ Aircraft pane ═══ */
 #air-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -130,65 +144,74 @@ header {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 1vh; color: var(--text-faint); text-align: center;
 }
-.ac-empty .glyph { font-size: clamp(32px, 7vh, 72px); opacity: 0.5; }
+.ac-empty .glyph { font-size: clamp(40px, 10vh, 120px); opacity: 0.5; }
 .ac-empty .msg {
   font-family: var(--cond); font-weight: 500; letter-spacing: 0.1em;
-  font-size: clamp(15px, 2.6vh, 28px); text-transform: uppercase;
+  font-size: clamp(17px, 3.4vh, 38px); text-transform: uppercase;
 }
 
 .ac-header {
   flex: 0 0 auto; display: flex; align-items: center; gap: 1.2vw;
-  padding: 1.2vh 1.4vw; border-radius: 10px; margin-bottom: 1.4vh;
+  padding: 1.6vh 1.6vw; border-radius: 12px; margin-bottom: 2vh;
 }
-.ac-logo { height: clamp(30px, 6vh, 56px); max-width: 26%; object-fit: contain; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4)); }
-.ac-flight-num { font-family: var(--cond); font-weight: 700; font-size: clamp(30px, 6.4vh, 74px); line-height: 0.95; letter-spacing: 0.01em; }
-.ac-airline-name { font-family: var(--body); font-size: clamp(13px, 2.2vh, 24px); opacity: 0.85; margin-top: 0.3vh; }
-.ac-type-right { text-align: right; font-family: var(--body); font-size: clamp(11px, 1.7vh, 18px); line-height: 1.5; opacity: 0.9; }
+.ac-logo {
+  height: clamp(34px, 8vh, 84px); max-width: 26%; object-fit: contain;
+  background: #ffffff; border-radius: 8px; padding: 0.6em 1em;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+}
+.ac-flight-num { font-family: var(--cond); font-weight: 700; font-size: clamp(38px, 10vh, 150px); line-height: 0.95; letter-spacing: 0.01em; }
+.ac-airline-name { font-family: var(--body); font-size: clamp(15px, 3vh, 38px); opacity: 0.85; margin-top: 0.3vh; }
+.ac-type-right { text-align: right; font-family: var(--body); font-size: clamp(13px, 2.3vh, 26px); line-height: 1.55; opacity: 0.9; }
 
-.ac-route { flex: 0 0 auto; padding: 0.6vh 1.4vw 1.4vh; display: flex; gap: 1.6vw; align-items: stretch; }
-.ac-route-main { flex: 1; min-width: 0; }
+.ac-route { flex: 1 1 auto; min-height: 0; padding: 1vh 1.6vw 2vh; display: flex; gap: 1.8vw; align-items: center; overflow: hidden; }
+.ac-route-main { flex: 1; min-width: 0; overflow: hidden; }
 .ac-airport {
   font-family: var(--cond); font-weight: 700;
-  font-size: clamp(20px, 4.2vh, 46px); line-height: 1.14;
+  font-size: clamp(26px, 7vh, 96px); line-height: 1.14;
   color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .ac-iata { font-size: 0.55em; opacity: 0.5; font-weight: 500; }
-.ac-route-arrow { font-family: var(--mono); font-size: clamp(12px, 2vh, 22px); color: var(--air-dim); padding: 0.3vh 0; }
-.ac-times { font-family: var(--mono); font-size: clamp(11px, 1.9vh, 20px); color: var(--air); margin-top: 0.3vh; }
+.ac-route-arrow { font-family: var(--mono); font-size: clamp(14px, 2.8vh, 32px); color: var(--air-dim); padding: 0.4vh 0; }
+.ac-times { font-family: var(--mono); font-size: clamp(14px, 2.7vh, 32px); color: var(--air); margin-top: 0.4vh; }
 .ac-times .early { color: var(--relief); } .ac-times .late { color: var(--late); } .ac-times .ontime { color: var(--ontime); }
-.ac-route-loading { font-size: clamp(12px, 1.9vh, 20px); color: var(--text-faint); font-style: italic; align-self: center; }
-.ac-flight-info { text-align: right; font-family: var(--mono); font-size: clamp(11px, 1.8vh, 20px); color: var(--text-dim); align-self: center; white-space: nowrap; }
-.ac-flight-info div + div { margin-top: 0.6vh; }
+.ac-route-loading { font-size: clamp(14px, 2.4vh, 26px); color: var(--text-faint); font-style: italic; align-self: center; }
+.ac-flight-info { text-align: right; font-family: var(--mono); font-size: clamp(13px, 2.4vh, 28px); color: var(--text-dim); align-self: center; white-space: nowrap; }
+.ac-flight-info div + div { margin-top: 0.8vh; }
 
 .ac-stats {
-  flex: 1 1 auto; min-height: 0;
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9vw;
+  flex: 0 0 auto;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1vw;
 }
 .ac-stat-card {
+  min-width: 0;
   background: rgba(111,195,240,0.05); border: 1px solid rgba(111,195,240,0.14);
-  border-radius: 10px; padding: 1.2vh 0.6vw;
-  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.5vh;
+  border-radius: 12px; padding: 2vh 0.6vw;
+  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.8vh;
   text-align: center;
 }
-.ac-stat-label { font-family: var(--cond); font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; font-size: clamp(9px, 1.3vh, 15px); color: var(--air-dim); }
-.ac-stat-value { font-family: var(--mono); font-weight: 500; font-size: clamp(22px, 4.6vh, 54px); line-height: 1; color: var(--text); display: flex; align-items: center; gap: 0.2em; }
-.ac-stat-unit { font-family: var(--body); font-size: clamp(9px, 1.4vh, 16px); color: var(--text-faint); }
+.ac-stat-label { font-family: var(--cond); font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; font-size: clamp(10px, 1.5vh, 17px); color: var(--air-dim); }
+.ac-stat-value {
+  font-family: var(--mono); font-weight: 500; font-size: clamp(26px, 6vh, 80px); line-height: 1;
+  color: var(--text); display: flex; align-items: center; gap: 0.2em;
+  max-width: 100%; overflow: hidden; white-space: nowrap;
+}
+.ac-stat-unit { font-family: var(--body); font-size: clamp(10px, 1.6vh, 18px); color: var(--text-faint); }
 .ac-heading-arrow { display: inline-block; font-size: 0.7em; transition: transform 0.4s; }
 
 /* ═══ Trains pane ═══ */
-#rail-content { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: repeat(4, 1fr); gap: 0.6vh; }
+#rail-content { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: repeat(4, 1fr); gap: 0.9vh; }
 .track {
   position: relative; min-height: 0;
-  display: grid; grid-template-columns: clamp(52px, 6.2vw, 96px) 1fr auto;
-  align-items: stretch; gap: 0 1vw;
-  padding: 0.6vh 0.4vw 0.6vh 0;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.02);
+  display: grid; grid-template-columns: clamp(60px, 7.2vw, 120px) 1fr auto;
+  align-items: stretch; gap: 0 1.1vw;
+  padding: 0.8vh 0.6vw 0.8vh 0;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.025);
   overflow: hidden;
 }
 .track::before {
   content: ''; position: absolute; left: 0; top: 6%; bottom: 6%;
-  width: 4px; border-radius: 2px;
+  width: 5px; border-radius: 3px;
   background: var(--spine, var(--text-faint)); opacity: 0.95; transition: background .6s;
 }
 @keyframes sweep {
@@ -200,33 +223,38 @@ header {
   background: linear-gradient(100deg, transparent 20%, rgba(255,176,0,0.14) 48%, transparent 76%);
   animation: sweep 2.4s linear infinite; pointer-events: none;
 }
-.t-id { display: flex; flex-direction: column; justify-content: center; padding-left: clamp(8px, 1.1vw, 16px); gap: 0.2vh; }
-.t-id .arrow { font-family: var(--cond); font-weight: 700; line-height: 0.8; font-size: clamp(13px, 2.6vh, 26px); color: var(--ln-color); }
-.t-id .name { font-family: var(--cond); font-weight: 600; font-size: clamp(9px, 1.7vh, 17px); line-height: 1; letter-spacing: 0.07em; color: var(--ln-color); }
+.t-id { display: flex; flex-direction: column; justify-content: center; padding-left: clamp(10px, 1.3vw, 20px); gap: 0.3vh; }
+.t-id .arrow { font-family: var(--cond); font-weight: 700; line-height: 0.8; font-size: clamp(17px, 3.8vh, 40px); color: var(--ln-color); }
+.t-id .name { font-family: var(--cond); font-weight: 600; font-size: clamp(10px, 2.1vh, 21px); line-height: 1.05; letter-spacing: 0.06em; color: var(--ln-color); }
 .track[data-ln="relief"] { --ln-color: var(--relief); }
 .track[data-ln="main"]   { --ln-color: var(--main-ln); }
-.t-main { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.2vh; }
+.t-main { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.4vh; }
 .t-dest {
-  font-family: var(--cond); font-weight: 700; font-size: clamp(17px, 4.6vh, 46px); line-height: 0.98;
+  font-family: var(--cond); font-weight: 700; font-size: clamp(24px, 7vh, 92px); line-height: 0.98;
   text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .t-dest .cancelled { text-decoration: line-through; color: var(--cancel); }
-.t-sub { display: flex; align-items: baseline; gap: 0.8vw; font-size: clamp(9px, 1.7vh, 17px); color: var(--text-dim); white-space: nowrap; overflow: hidden; }
-.t-sub .op { font-family: var(--cond); font-weight: 600; letter-spacing: 0.04em; padding: 0.06em 0.45em; border-radius: 0.25em; font-size: 0.8em; }
-.t-sub .hc { font-family: var(--mono); font-size: 0.76em; color: var(--text-faint); }
+.t-sub {
+  display: flex; align-items: baseline; gap: 0.7vw; font-size: clamp(10px, 1.8vh, 19px);
+  color: var(--text-dim); white-space: nowrap; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
+          mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
+}
+.t-sub .op { font-family: var(--cond); font-weight: 600; letter-spacing: 0.04em; padding: 0.06em 0.5em; border-radius: 0.25em; font-size: 0.8em; }
+.t-sub .hc { font-family: var(--mono); font-size: 0.74em; color: var(--text-faint); }
 .t-sub .livepos { color: var(--live); }
 .t-sub .livepos::before { content: '● '; font-size: 0.7em; }
-.t-eta { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 0.1vh; min-width: clamp(70px, 9vw, 150px); padding-right: 0.6vw; }
-.t-count { font-family: var(--cond); font-weight: 700; font-size: clamp(20px, 5.8vh, 62px); line-height: 0.85; font-variant-numeric: tabular-nums; color: var(--text); display: flex; align-items: baseline; gap: 0.1em; }
+.t-eta { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 0.2vh; min-width: clamp(90px, 11vw, 190px); padding-right: 0.8vw; }
+.t-count { font-family: var(--cond); font-weight: 700; font-size: clamp(28px, 8.8vh, 118px); line-height: 0.85; font-variant-numeric: tabular-nums; color: var(--text); display: flex; align-items: baseline; gap: 0.1em; }
 .t-count .unit { font-size: 0.32em; font-weight: 600; color: var(--text-dim); letter-spacing: 0.05em; }
 .t-count.now  { color: var(--rail); }
-.t-count.stn, .t-count.held { color: var(--late); font-size: clamp(15px, 3.6vh, 36px); }
-.t-count.gone { color: var(--text-faint); font-size: clamp(13px, 2.8vh, 30px); }
+.t-count.stn, .t-count.held { color: var(--late); font-size: clamp(19px, 5.2vh, 54px); }
+.t-count.gone { color: var(--text-faint); font-size: clamp(16px, 4vh, 42px); }
 @keyframes pulse { 50% { opacity: 0.55; } }
 .t-count.now { animation: pulse 1.2s ease-in-out infinite; }
-.t-status { font-size: clamp(9px, 1.5vh, 15px); font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.t-status { font-size: clamp(11px, 2vh, 20px); font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .t-status .ontime { color: var(--ontime); } .t-status .late { color: var(--late); } .t-status .cancel { color: var(--cancel); } .t-status .est { color: var(--text-faint); }
-.t-empty { grid-column: 2 / 4; display: flex; align-items: center; font-family: var(--cond); font-weight: 500; font-size: clamp(13px, 2.4vh, 24px); letter-spacing: 0.1em; color: var(--text-faint); }
+.t-empty { grid-column: 2 / 4; display: flex; align-items: center; font-family: var(--cond); font-weight: 500; font-size: clamp(16px, 3.2vh, 32px); letter-spacing: 0.1em; color: var(--text-faint); }
 
 /* ── Alert strip ────────────────────────────────────────── */
 #alert {
@@ -242,10 +270,51 @@ header {
 /* ── Narrow / portrait: stack instead of split ─────────────── */
 @media (max-aspect-ratio: 95/100) {
   #split { flex-direction: column; }
-  #seam { left: 6%; right: 6%; top: 50%; bottom: auto; width: auto; height: 1px;
-    background: linear-gradient(90deg, transparent, var(--rule) 20%, var(--rule) 80%, transparent); }
-  .pane { flex-basis: 50%; padding: 1vh 2.4vw; }
-  .ac-stats { grid-template-columns: repeat(4, 1fr); }
+  #seam {
+    left: 5%; right: 5%; top: 50%; bottom: auto; width: auto; height: 3px;
+    transform: translateY(-1.5px);
+    background: linear-gradient(90deg,
+      transparent, var(--air) 12%, rgba(230,235,240,0.9) 50%, var(--rail) 88%, transparent);
+    box-shadow: 0 0 14px 1px rgba(230,235,240,0.18);
+  }
+  #seam::before { inset: -14px -6px; background: linear-gradient(180deg, var(--air-glow), transparent 45%, transparent 55%, var(--rail-glow)); }
+  /* Each pane gets a hard-capped share of the real (dynamic, chrome-shrunk)
+     viewport height, and clips anything that still doesn't fit (see .pane
+     overflow:hidden above) rather than spilling into the other pane —
+     confirmed bug on iPhone Safari, whose address bar eats into 100vh. */
+  .pane { flex: 0 1 50%; padding: 0.8vh 3.2vw; }
+  .pane-label { margin-bottom: 0.6vh; font-size: clamp(12px, 2vh, 18px); }
+
+  /* Portrait squeezes both header+route+stats into ~half a (chrome-shrunk)
+     phone viewport, so aircraft text can't scale off the same generous vh
+     ratios as the wide-screen layout — it's sized in absolute terms here to
+     actually fit, rather than relying on .ac-route's overflow:hidden to
+     paper over content that's simply too tall for the box (confirmed bug:
+     route text bleeding into the header and stat cards on iPhone). */
+  .ac-header { gap: 2.4vw; padding: 0.8vh 3.2vw; margin-bottom: 0.6vh; border-radius: 8px; }
+  .ac-logo { height: clamp(22px, 4vh, 34px); }
+  .ac-flight-num { font-size: clamp(20px, 3.6vh, 36px); }
+  .ac-airline-name { font-size: clamp(10px, 1.6vh, 15px); margin-top: 0.1vh; }
+  .ac-type-right { font-size: clamp(8px, 1.3vh, 12px); line-height: 1.4; }
+
+  .ac-route { padding: 0.4vh 3.2vw; gap: 2.4vw; }
+  .ac-airport { font-size: clamp(14px, 2.6vh, 24px); line-height: 1.05; }
+  .ac-route-arrow { font-size: clamp(9px, 1.3vh, 13px); padding: 0.1vh 0; }
+  .ac-times { font-size: clamp(9px, 1.5vh, 14px); margin-top: 0.1vh; }
+  .ac-route-loading { font-size: clamp(10px, 1.5vh, 14px); }
+  .ac-flight-info { font-size: clamp(8px, 1.3vh, 12px); }
+  .ac-flight-info div + div { margin-top: 0.3vh; }
+
+  .ac-stats { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 0.8vh 3vw; }
+  .ac-stat-card { padding: 0.6vh 1vw; border-radius: 8px; gap: 0.2vh; }
+  .ac-stat-label { font-size: clamp(8px, 1.1vh, 11px); }
+  .ac-stat-value { font-size: clamp(16px, 3vh, 30px); }
+  .ac-stat-unit { font-size: clamp(8px, 1.1vh, 11px); }
+
+  #rail-content { gap: 0.8vh; }
+  .t-dest { font-size: clamp(18px, 4.6vh, 44px); }
+  .t-count { font-size: clamp(20px, 5vh, 48px); }
+  .t-sub { font-size: clamp(9px, 1.5vh, 14px); }
 }
 </style>
 </head>
@@ -261,11 +330,17 @@ header {
 <div id="split">
   <div id="seam"></div>
   <section id="air-pane" class="pane">
-    <div class="pane-label">Nearest Aircraft</div>
+    <div class="pane-label">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2.5 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
+      Nearest Aircraft
+    </div>
     <div id="air-content"><div class="ac-empty"><div class="glyph">✈</div><div class="msg">Loading…</div></div></div>
   </section>
   <section id="rail-pane" class="pane">
-    <div class="pane-label">Nearest Trains</div>
+    <div class="pane-label">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h2.23l2-2H14l2 2h2v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4zM7.5 17A1.5 1.5 0 1 1 7.5 14a1.5 1.5 0 0 1 0 3zm4.5-7H6V6h6v4zm2 0V6h6v4h-6zm4.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
+      Nearest Trains
+    </div>
     <div id="rail-content"></div>
   </section>
 </div>
@@ -708,11 +783,14 @@ const OPS = {
 function opInfo(t) {
   const o = OPS[t.op_code];
   if (o) return o;
+  if (isEcsHc(t.headcode))
+    return {bg:'#4a7d9d', fg:'#04121a', name:'ECS'};
   if (t.passenger === false || isFreightHc(t.headcode))
     return {bg:'#7d8f4a', fg:'#111504', name:'Freight'};
   return {bg:'#3c4c60', fg:'#dfe7f0', name: t.op_name || t.op_code || ''};
 }
-function isFreightHc(hc) { return hc && '45678'.indexOf(hc[0]) >= 0; }
+function isFreightHc(hc) { return hc && '4678'.indexOf(hc[0]) >= 0; }
+function isEcsHc(hc) { return hc && hc[0] === '5'; }
 function freightClass(hc) {
   const c = hc ? hc[0] : '';
   return c === '4' ? 'Freight · intermodal'
@@ -836,7 +914,7 @@ function renderTrack(key, list, now) {
   const op = opInfo(t);
   const ms = trainMs(t);
   const diff = ms - now;
-  const frt = t.passenger === false || isFreightHc(t.headcode);
+  const frt = t.passenger === false || isFreightHc(t.headcode) || isEcsHc(t.headcode);
   row.style.setProperty('--spine', op.bg);
 
   let destTxt, fromTxt;
