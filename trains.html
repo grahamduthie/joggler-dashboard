@@ -413,6 +413,7 @@ function trackKey(t) {
 }
 /* grace: how long a train stays "current" after its pass moment */
 function graceMs(t) {
+  if (t.at_station) return 600000; // dwelling at the platform — stay current until it actually departs
   if (t.twy_actual) return t.direction === 'up' ? 45000 : 20000;
   return 100000;
 }

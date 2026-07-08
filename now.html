@@ -179,7 +179,7 @@ header {
 .ac-flight-info div + div { margin-top: 0.8vh; }
 
 .ac-stats {
-  flex: 0 0 auto;
+  flex: 0 0 auto; width: 100%; box-sizing: border-box; overflow: hidden;
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 1vw;
 }
 .ac-stat-card {
@@ -235,10 +235,9 @@ header {
 }
 .t-dest .cancelled { text-decoration: line-through; color: var(--cancel); }
 .t-sub {
-  display: flex; align-items: baseline; gap: 0.7vw; font-size: clamp(10px, 1.8vh, 19px);
-  color: var(--text-dim); white-space: nowrap; overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
-          mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
+  display: flex; flex-wrap: wrap; align-items: baseline; row-gap: 0.15em; column-gap: 0.7vw;
+  font-size: clamp(10px, 1.8vh, 19px); color: var(--text-dim);
+  max-height: 2.6em; overflow: hidden;
 }
 .t-sub .op { font-family: var(--cond); font-weight: 600; letter-spacing: 0.04em; padding: 0.06em 0.5em; border-radius: 0.25em; font-size: 0.8em; }
 .t-sub .hc { font-family: var(--mono); font-size: 0.74em; color: var(--text-faint); }
@@ -753,6 +752,10 @@ function renderAircraft() {
       '<div class="ac-stat-card"><div class="ac-stat-label">Distance</div><div class="ac-stat-value">' + distKm + '</div><div class="ac-stat-unit">km from ' + CFG_NAME + '</div></div>' +
     '</div>';
 
+  el.querySelectorAll('.ac-stat-value').forEach(v => fitText(v, 14));
+  el.querySelectorAll('.ac-airport').forEach(v => fitText(v, 16));
+  fitText(el.querySelector('.ac-flight-num'), 18);
+
   fetchAircraftInfo(ac.hex);
 }
 
@@ -832,6 +835,23 @@ function trainMs(t) {
   if (!t.twy_actual && t.late_min > 0) ms += t.late_min * 60000;
   return ms;
 }
+/* Shrink-to-fit for destination text — this page's huge base font size
+   (tuned for short place names like "Reading") would otherwise hard-clip
+   longer ones ("Cheltenham Spa" → "CHELTENHAM S…") with no way to read the
+   rest. Starts from the CSS clamp()-resolved size and steps down until the
+   text actually fits its box, rather than fighting the layout with a fixed
+   smaller size that wastes space on every short name. */
+function fitText(el, minPx) {
+  if (!el) return;
+  minPx = minPx || 15;
+  el.style.fontSize = '';
+  let size = parseFloat(getComputedStyle(el).fontSize);
+  let guard = 24;
+  while (el.scrollWidth > el.clientWidth + 1 && size > minPx && guard-- > 0) {
+    size -= 2;
+    el.style.fontSize = size + 'px';
+  }
+}
 function fmtHM(msOrIso) {
   const d = new Date(msOrIso);
   return isNaN(d) ? '—' : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
@@ -841,6 +861,7 @@ function trackKey(t) {
   return (t.direction === 'up' ? 'u' : 'd') + (t.track === 'Main' ? 'm' : 'r');
 }
 function graceMs(t) {
+  if (t.at_station) return 600000; // dwelling at the platform — stay current until it actually departs
   if (t.twy_actual) return t.direction === 'up' ? 45000 : 20000;
   return 100000;
 }
@@ -936,16 +957,22 @@ function renderTrack(key, list, now) {
   const stock = (t.stock_type && !frt) ? t.stock_type : '';
   const veh = (t.num_veh && !frt) ? t.num_veh + ' coaches' : '';
 
+  // Live position goes right after the operator badge, not at the end — on
+  // this page's narrower columns the sub-line routinely doesn't have room
+  // for everything, and "where it actually is right now" is the one piece
+  // of dynamic information worth protecting from being clipped off first.
+  // Headcode goes last: least useful for an at-a-glance kitchen display.
   main.innerHTML =
     '<div class="t-dest">' + destTxt + '</div>' +
     '<div class="t-sub">' +
       '<span class="op" style="background:' + op.bg + ';color:' + op.fg + '">' + esc(op.name) + '</span>' +
+      liveHtml +
       (fromTxt ? '<span>' + esc(fromTxt) + '</span>' : '') +
       (stock ? '<span>' + esc(stock) + '</span>' : '') +
       (veh ? '<span>' + veh + '</span>' : '') +
-      liveHtml +
       '<span class="hc">' + esc(t.headcode || '') + '</span>' +
     '</div>';
+  fitText(main.querySelector('.t-dest'));
 
   let countHtml, countCls = '', passing = false;
   if (t.cancelled) { countHtml = 'CANC'; countCls = 'gone'; }

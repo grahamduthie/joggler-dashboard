@@ -1262,6 +1262,22 @@ def _rtt_normalise(svc, confirmed):
     twy_arr_actual = (arr.get('realtimeActual', '') or arr.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else ''
     twy_dep_actual = (dep.get('realtimeActual', '') or dep.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else ''
 
+    # General "dwelling at the Twyford platform" detection for ANY stopping
+    # service (RTT's own arrival/departure times), not just the narrow
+    # up-direction/Maidenhead-reversal berth check further down in
+    # _td_enrich_trains. Without this a down-direction stop (e.g. 2N20) was
+    # only ever seen via its house-crossing timestamp, which fires at
+    # arrival; graceMs()'s short down-direction grace window then dropped it
+    # from the frontend within ~20s of arriving even though it was still
+    # sitting at the platform for its full dwell.
+    at_station = False
+    if confirmed and call_type == 'STOP':
+        arr_ts = _iso_to_ts(twy_arr_actual or twy_arr_sched)
+        dep_ts = _iso_to_ts(twy_dep_actual or twy_dep_sched)
+        now_ts = time.time()
+        if arr_ts and dep_ts and arr_ts <= now_ts < dep_ts + 20:
+            at_station = True
+
     return {
         'uid':       sm.get('uniqueIdentity', ''),
         'headcode':  sm.get('trainReportingIdentity', ''),
@@ -1288,6 +1304,7 @@ def _rtt_normalise(svc, confirmed):
         'platform':  platform,
         'confirmed': confirmed,
         'num_veh':   num_veh,
+        'at_station': at_station,
     }
 
 
@@ -2037,9 +2054,16 @@ def _td_enrich_trains(trains, now, ident=None):
                         t['twy_actual']    = datetime.datetime.fromtimestamp(
                             h['ts'], tz=datetime.timezone.utc).isoformat()
                         t['house_pass_ts'] = int(h['ts'])
-                    t['at_station'] = False
+                    # For a genuine through-PASS, crossing the house means it's
+                    # moving away — clear at_station. For a STOP, the house is
+                    # crossed right at arrival, immediately before the platform
+                    # dwell (see _rtt_normalise's at_station computation), so
+                    # don't stomp on that here.
+                    if t.get('call_type') != 'STOP':
+                        t['at_station'] = False
                 elif evt == 'approaching':
-                    t['at_station'] = False
+                    if t.get('call_type') != 'STOP':
+                        t['at_station'] = False
         pos = td_pos.get(hc)
         if pos:
             t['confirmed']    = True
