@@ -752,7 +752,7 @@ function renderAircraft() {
       '<div class="ac-stat-card"><div class="ac-stat-label">Distance</div><div class="ac-stat-value">' + distKm + '</div><div class="ac-stat-unit">km from ' + CFG_NAME + '</div></div>' +
     '</div>';
 
-  el.querySelectorAll('.ac-stat-value').forEach(v => fitText(v, 14));
+  fitTextGroup(Array.from(el.querySelectorAll('.ac-stat-value')), 14);
   el.querySelectorAll('.ac-airport').forEach(v => fitText(v, 16));
   fitText(el.querySelector('.ac-flight-num'), 18);
 
@@ -850,6 +850,23 @@ function fitText(el, minPx) {
   while (el.scrollWidth > el.clientWidth + 1 && size > minPx && guard-- > 0) {
     size -= 2;
     el.style.fontSize = size + 'px';
+  }
+}
+/* Same idea, but for a row of visually-matched elements (the four stat
+   cards) that must all end up the SAME size — shrinking each independently
+   left "Heading" (letters + a rotated arrow glyph, e.g. "WSW ↖") visibly
+   smaller than its plain-number neighbours just because that particular
+   string happened to be wider. Finds the one size that fits all of them. */
+function fitTextGroup(els, minPx) {
+  els = els.filter(Boolean);
+  if (!els.length) return;
+  minPx = minPx || 15;
+  els.forEach(el => el.style.fontSize = '');
+  let size = Math.max.apply(null, els.map(el => parseFloat(getComputedStyle(el).fontSize)));
+  let guard = 24;
+  while (els.some(el => el.scrollWidth > el.clientWidth + 1) && size > minPx && guard-- > 0) {
+    size -= 2;
+    els.forEach(el => el.style.fontSize = size + 'px');
   }
 }
 function fmtHM(msOrIso) {
