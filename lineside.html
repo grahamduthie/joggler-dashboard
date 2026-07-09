@@ -264,6 +264,7 @@ body {
     <g id="static-layer"></g>
     <g id="cells-layer"></g>
     <g id="trains-layer"></g>
+    <g id="signals-layer"></g>
   </svg>
   <div id="calib-panel">
     <div class="cal-hdr">CALIBRATE
@@ -780,6 +781,7 @@ const fmtHMS = v => {
 let trains = [];
 let hcTrain = {};      // headcode → train (schedule/identity join)
 let tdPos = {};        // headcode → live berth fix
+let sigByBerth = {};    // berth id → signal_states entry (see renderSignals)
 let nrccMsgs = [];
 let lastTd = 0;
 const passLog = [];    // {ms, hc, op, dest, key} newest first
@@ -820,12 +822,18 @@ function fetchTd() {
       const maxAge = (cell && (cell.key === 'br' || cell.key === 'st')) ? 1800 : 420;
       if (p.age_s < maxAge) tdPos[p.headcode] = p;
     }
+    sigByBerth = {};
+    for (const s of (d.signal_states || [])) {
+      if (!sigByBerth[s.berth]) sigByBerth[s.berth] = {};
+      sigByBerth[s.berth][s.direction || 'any'] = s;
+    }
     lastTd = Date.now();
     const dot = document.getElementById('feed-dot');
     dot.classList.remove('stale');
     dot.classList.add('on');
     setTimeout(() => dot.classList.remove('on'), 450);
     renderPanel();
+    renderSignals();
   }).catch(() => {});
 }
 function fetchNrcc() {
@@ -923,6 +931,69 @@ function renderPanel() {
   if (star) {
     star.setAttribute('fill', houseGlow ? '#ffe27a' : C_AMBER);
     star.setAttribute('font-size', houseGlow ? 23 : 16);
+  }
+}
+
+/* ── Signal dots ──
+   A berth's exit signal is a single physical signal at its downstream end,
+   independent of which route/next-berth a train actually takes off it (see
+   SIGNALS-PLAN.md). Most berths only ever get exited one way, so every
+   direction-resolvable cell gets one dot on the side its line runs toward:
+   right edge for 'up' (west→east), left edge for 'down'. Cells with no
+   direction (Henley's bidirectional single line, Crossrail stabling) are
+   skipped — there's no one signal to show.
+
+   Some berths are genuinely bidirectional (a train can continue through OR
+   reverse back out — e.g. Maidenhead Platform 5, Twyford Platform 4), and
+   those have TWO physical signals, one facing each way. The backend now
+   tags each candidate with the direction it was actually observed in
+   ('east'/'west'/none — see _sig_observe_step), so rather than guessing
+   which berths are special, a second dot simply appears on the OPPOSITE
+   edge the first time the backend has real evidence of a reverse-direction
+   departure from that berth. Ordinary one-way berths never accumulate that
+   opposite-direction evidence, so they only ever show their one default
+   dot, same as before.
+
+   Starts grey/hollow for every such cell the moment the page loads; turns
+   red/green only once the backend has learned (even tentatively) which bit
+   belongs to it — no code change needed here when that happens, just
+   re-reads `sigByBerth` each poll. */
+function dotAttrs(cx, cy, r, sig) {
+  let fill = '#0d1420', stroke = '#4a6690', opacity = 0.8, dash = null;
+  if (sig && (sig.state === 'red' || sig.state === 'off')) {
+    fill = sig.state === 'red' ? '#e6453f' : '#3ecf5f';
+    stroke = fill;
+    opacity = 0.95;
+  }
+  if (sig && sig.tier === 'tentative') { dash = '1.5,1.3'; opacity = Math.min(opacity, 0.7); }
+  const attrs = {cx, cy, r, fill, stroke, 'stroke-width':1, opacity};
+  if (dash) attrs['stroke-dasharray'] = dash;
+  return attrs;
+}
+function renderSignals() {
+  const layer = document.getElementById('signals-layer');
+  while (layer.firstChild) layer.removeChild(layer.firstChild);
+  const r = 3.5;
+  for (const cell of CELLS) {
+    const dir = cell.dir || (LINE_OF[cell.key] && LINE_OF[cell.key].dir);
+    if (!dir) continue;
+    let byDir = null;
+    for (const b of cell.berths) { if (sigByBerth[b]) { byDir = sigByBerth[b]; break; } }
+    const nominalKey = dir === 'up' ? 'east' : 'west';
+    const oppositeKey = dir === 'up' ? 'west' : 'east';
+    const primary = (byDir && (byDir[nominalKey] || byDir.any)) || null;
+    const secondary = byDir ? byDir[oppositeKey] : null;
+    const rightX = cell.x + cell.w + 2, leftX = cell.x - 2;
+    const primaryCx = dir === 'up' ? rightX : leftX;
+    layer.appendChild(el('circle', dotAttrs(primaryCx, cell.y, r, primary)));
+    if (secondary) {
+      // A bidirectional berth's reverse-direction dot sits at the same
+      // boundary as the neighbouring cell's own primary dot (two real
+      // signals, facing opposite ways, at ~the same physical point) — nudge
+      // it off the track centreline so the two don't visually merge.
+      const secondaryCx = dir === 'up' ? leftX : rightX;
+      layer.appendChild(el('circle', dotAttrs(secondaryCx, cell.y - 6, r, secondary)));
+    }
   }
 }
 

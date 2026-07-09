@@ -1,9 +1,59 @@
 # Plan: Railway signal status on /lineside
 
-Status: **PLANNED — not started** (plan agreed 2026-07-08). Update this line as phases complete.
+Status: **Shipped and learning live (2026-07-08).** Phases 2-3 are folded into
+Phase 1 (see "Revised design" below) rather than separate offline steps.
+Phase 4 (frontend dots) is done and deployed, including bidirectional-berth
+handling (below). Update this line as anything further changes.
 
 Goal: show live signal aspects (red/green heads) on the /lineside diagram for the four
-running lines Reading↔Maidenhead, like Tracksy does.
+running lines Reading↔Maidenhead, like Traksy (traksy.uk) does.
+
+## Revised design (2026-07-08) — fully automatic, no offline batch, no human oracle
+
+The original plan below (kept for the background/data-source detail, which is
+all still accurate) called for: collect a raw JSONL corpus for 2-3 days →
+pull it back → analyse offline → have Graham watch Traksy's live map
+alongside a debug page to confirm ~6 signals by eye → bake a static
+`signals.json`. That was reconsidered:
+
+- **Traksy isn't independent ground truth** — it's a third-party map at
+  traksy.uk built from the *same* Network Rail open-data feed this proxy
+  already consumes directly. Scraping it (it's subscription-gated for the
+  live map anyway) would just be re-deriving our own data through someone
+  else's UI. Dropped entirely.
+- **The statistical test in the old Phase 2 (steps 1-4: co-fire rate,
+  uniqueness, headcode diversity, polarity/occupancy check) is already a
+  self-contained proof** — it doesn't need an external oracle or a human to
+  eyeball anything. A bit that goes 1→0 within seconds of a train passing a
+  berth, consistently, for many different trains, and *only* for that berth
+  step, and stays 0 until the train reaches the next berth — that's already
+  as certain as a human glancing at Traksy would be. So the human-confirm
+  step (old Phase 2 step 6) is simply removed; candidates auto-promote once
+  they clear the statistical bar.
+- **No separate collection window or offline analysis pass.** Correlation now
+  runs incrementally, inline, inside `transport-proxy.py` itself — every CA
+  step and SF bit transition updates the model as it arrives (same pattern as
+  the existing CA berth-chain learner in the same file). There's no
+  `SCLASS_COLLECT` mode, no JSONL corpus, no `td_correlate.py` offline
+  rewrite. State persists to `signals_learned.json` next to the proxy and
+  reloads on restart, exactly like `berth_chain.json` does.
+- **Confidence tiers instead of a binary promote/don't**: every candidate the
+  proxy has ever seen is exposed via `/api/td-live`'s new `signal_states`
+  list, tagged `tier: "tentative"` (< the promotion bar) or `"confirmed"`
+  (cleared it). Phase 4 renders both — hollow/dashed for tentative, solid for
+  confirmed — so the display fills in almost immediately and firms up over
+  hours/days as more trains pass, with no manual step in between. A
+  confirmed signal can also be demoted automatically if later polarity
+  evidence turns against it (self-correcting, not a one-shot verdict).
+- Busy signals (Up/Down Main through Twyford) should clear the promotion bar
+  (≥5 occurrences, ≥3 distinct headcodes, ≥80% uniqueness, polarity check)
+  within hours of normal peak traffic. Rarely-used ones (crossovers, Henley
+  branch) just sit at "tentative" longer — no different in kind, just slower.
+
+This means **old Phases 2 and 3 are gone as separate steps** — their content
+(the correlation algorithm and the decode-at-startup behaviour) is now part
+of Phase 1's implementation, done and running. What's left is Phase 4
+(frontend).
 
 ## Background — where the data comes from
 
@@ -15,8 +65,6 @@ via **S-class messages** interleaved with the C-class (CA/CC) berth steps:
 - `SG_MSG` — refresh: `data` is 8 hex chars = **4 consecutive bytes** starting at `address`.
   A burst of SG messages after (re)connect snapshots the whole area.
 - `SH_MSG` — refresh finished (same shape as SG; carries the final bytes).
-- (Verify field details against https://wiki.openraildata.com/index.php/S_Class_Messages
-  before implementing.)
 
 Key facts (from https://wiki.openraildata.com/index.php/Decoding_S-Class_Data):
 
@@ -31,36 +79,79 @@ Key facts (from https://wiki.openraildata.com/index.php/Decoding_S-Class_Data):
 - Only trust the **1→0 (going red)** direction for correlation. 0→1 (clearing) happens for
   many unrelated reasons (signaller sets a route, overlap clears, etc.).
 - Other bits are NOT signals: route settings, TRTS, points. These fire ahead of the train
-  or inconsistently — filter them out by requiring the "goes red exactly as the train
-  passes, every time" signature.
+  or inconsistently — filtered out by requiring the "goes red exactly as the train passes,
+  every time, and only then" signature (see uniqueness check below).
 - **Nobody has published a decode for TVSC areas D1/D6** (checked 2026-07-08; only ~7 of 61
-  TD areas ever decoded publicly). We must derive the bit→signal mapping ourselves.
+  TD areas ever decoded publicly). We derive the bit→signal mapping ourselves, live.
 
-## What already exists in this repo
+## What exists now (2026-07-08, shipped)
 
-- `transport-proxy.py` `_handle_td()` (~line 2990): already parses CA/CC and **SF** messages
-  for `_TD_AREAS`, stores SF into `_sf_state[(area, addr)] = (data_hex, ts)` under
-  `_sf_lock`. Does NOT handle SG/SH → no state seeding at startup.
-- `transport-proxy.py` `_td_live()` (~line 4000): `/api/td-live` already serves raw
-  `signals: {"area:addr": {data, ts}}`. Nothing consumes it client-side yet.
-- `td_correlate.py`: standalone STOMP watcher + correlation analyser. **Reuse the analysis
-  entry point, rewrite the analysis**: it correlates at byte-address level (must be bit
-  level), its `decode_aspect()` invents a multi-bit aspect encoding (wrong — 1 bit/signal),
-  and its `HOUSE_ZONE` (D6 540–600 ≈ house) predates the corrected geography (those berths
-  are MAIDENHEAD). Its earlier findings were discarded for these reasons — the method is
-  sound. Byte-level leads from those old runs (active addresses D6:12, 19, 15, 1C, 1B;
-  D6:14 fires constantly — likely not a plain signal) are still useful starting points,
-  but every geographic interpretation attached to them was wrong. Re-derive from scratch.
-- **Verified corridor berth topology per line** — the answer key for correlation — is in
-  memory `reference-smart-bplan.md` (west→east berth sequences for Up/Down Main/Relief,
-  Twyford platform berths, Henley branch) and `berth_chain.json` (learned adjacency +
-  per-berth `dist_mi`, lives on the Pi). `_berth_info(area, berth)` in transport-proxy.py
-  returns line/place/dist_mi for a berth.
+`transport-proxy.py`:
+
+- `_handle_td()`: parses CA/CC, **SF** (single-byte update), and **SG/SH** (4-byte
+  refresh burst) into `_sf_state[(area, addr)] = {'data', 'ts', 'src'}`. SG/SH seed state
+  without being treated as real transitions.
+- `_sig_note_bit_transitions()`: diffs each SF update against its prior byte, records every
+  1→0 bit flip into a short rolling buffer (`_sig_recent_bits`, 30 s) and a running per-bit
+  total (`_sig_bit_total`) used for the uniqueness check.
+- `_sig_observe_step()` / `_sig_evaluate_pending()`: on each CA step, schedules a scoring
+  pass ~6 s later (after the match window closes) against `_sig_recent_bits`; also resolves
+  the *previous* step's polarity check for that headcode (was the matched bit still red
+  when the train reached the next berth?). Runs inline from `_handle_td`, so scoring keeps
+  up in real time — no batch job.
+- **Keyed by berth + direction of travel**, not berth alone: `area|from_berth|direction`
+  (`direction` ∈ `east`/`west`, derived by comparing the from/to berths' `dist_mi` via
+  `_berth_info` — more negative = eastbound/"up", more positive = westbound/"down"; falls
+  back to a directionless `area|from_berth` bucket when dist_mi isn't known for one side).
+  Most berths only ever get exited one way, so this just adds a redundant direction tag
+  most of the time — but a genuinely bidirectional berth (a train can continue through OR
+  reverse back out, e.g. Maidenhead Platform 5, Twyford Platform 4) has TWO different
+  physical signals guarding it, one per direction, and pooling them by berth alone (the
+  first version of this) would corrupt both candidates by mixing two different bits'
+  evidence together. Splitting by direction keeps them as two independent candidate pools
+  that can each confirm (or not) on their own.
+- `_sig_rebuild_confirmed()`: recomputes, per step key, whether the best candidate
+  `(addr, bit)` clears the bar — ≥5 occurrences, ≥3 distinct headcodes, ≥80% uniqueness
+  (occurrences / that bit's total 1→0 count anywhere), and (once ≥3 polarity samples exist)
+  ≥70% polarity-pass rate. Runs every 60 s from `_sig_refresh_loop`, which also persists
+  state to `signals_learned.json` (loaded on startup, mirrors `berth_chain.json`).
+- `_sig_decode_states()`: feeds `/api/td-live`'s `signal_states` list — one entry per known
+  step key (confirmed candidates always included; otherwise the best tentative candidate if
+  it has ≥2 occurrences), each with `berth`, `direction` (`east`/`west`/`null`), `tier`
+  (`confirmed`/`tentative`), live `state` (`red`/`off`/`unknown`). No position/line data —
+  the frontend already has every berth's cell position and each line's direction hardcoded,
+  so it just needs the berth code.
+- Existing raw `signals` dict in `/api/td-live` unchanged (now also carries `src`).
+
+Deployed to the Pi (2026-07-08); learning happens automatically whenever the NR STOMP
+connection is up — i.e. whenever /trains or /lineside is being viewed, same as the existing
+on-demand connection behaviour. No permanent-connection flag needed since there's no
+fixed corpus-collection window to satisfy.
+
+- **Scope**: the learner watches every berth in all of `_TD_AREAS` (D1/D4/D6 —
+  Reading/Hayes/Maidenhead), not just the ones `/lineside` renders — left this way
+  deliberately, see [[project-lineside-signals]] memory for why (possible future use:
+  detecting a Reading departure signal clearing as an earlier ETA fix for Twyford).
+- **Verified corridor berth topology per line** — used for the direction-bucketing dist_mi
+  comparison above — is in memory `reference-smart-bplan.md` and `berth_chain.json`
+  (learned adjacency + `dist_mi`, lives on the Pi). `_berth_info(area, berth)` in
+  transport-proxy.py returns line/place/dist_mi for a berth.
 - History note: /lineside once had 9 speculative signal dots; removed 2026-07-06 because
   their positions used the discredited berth-574=house calibration. Don't resurrect that
-  code (`renderSignals`/`KEY_SIGNALS`/`decodeAspect` are gone from lineside.html).
+  old code (`renderSignals`/`KEY_SIGNALS`/`decodeAspect` from before 2026-07-06 are gone) —
+  the current `renderSignals`/`sigByBerth` in lineside.html is a fresh implementation driven
+  by `signal_states`, not a revival of that code.
+- `td_correlate.py` is superseded/unused for this feature — its correlation logic lives in
+  `transport-proxy.py` instead, at bit level, running continuously. Can be deleted (kept as
+  historical reference for now).
+- **Not yet attempted**: distinguishing a signal's main aspect bit from a "feather"/route
+  indicator bit at junctions (Ruscombe Jn, Kennet Br Jn, Henley Br Jn). Likely hard with the
+  current timing-signature method alone — a feather probably lights/clears in sync with the
+  main aspect, not on a distinguishable schedule — would need keeping multiple confirmed
+  bits per berth/direction (currently only the single best one survives) plus using known
+  junction locations as a hint. Discussed 2026-07-08, not started.
 
-## Operational constraints (read before Phase 1)
+## Operational constraints
 
 - **Deployment**: transport-proxy.py runs on the Raspberry Pi (172.16.10.136, user
   `gduthie`) at `/home/gduthie/twyford-dashboard/`, as systemd service
@@ -68,133 +159,55 @@ Key facts (from https://wiki.openraildata.com/index.php/Decoding_S-Class_Data):
   then `ssh gduthie@172.16.10.136 'sudo systemctl restart twyford-dashboard'`. Logs in
   `dashboard.log` there. See `project-joggler-status` memory for full procedure.
 - **NR STOMP is ON-DEMAND**: the proxy connects only while /trains or /lineside pages are
-  polling, and disconnects after 90 s idle (`_nr_touch()`). **Passive multi-day logging
-  will silently not happen** unless Phase 1 adds a way to hold the connection open — see
-  the collect-mode flag below.
-- **Do NOT run td_correlate.py's own STOMP connection while the proxy is connected.** Both
-  use the same NR account with `client-id = NR_USERNAME`; ActiveMQ rejects/kicks duplicate
-  client-ids. All collection must happen inside the proxy's single connection;
-  td_correlate.py survives only as the offline `--analyse` harness (or a new script).
-- One TD area's S-class traffic is a few messages/sec at peak. A bit-transition JSONL for
-  D1+D6 should be well under ~50 MB for 3 days, but cap/rotate anyway — the Pi's SD card
-  is not infinite.
+  polling, and disconnects after 90 s idle (`_nr_touch()`). This is fine under the revised
+  design — learning just happens whenever the feed is up; there's no fixed window it must
+  span, unlike the old plan's 2-3 day requirement.
+- `signals_learned.json` persists on the Pi next to `berth_chain.json`; small (one entry per
+  step key/candidate bit), no rotation needed.
 
-## Phase 1 — Harden collection (transport-proxy.py)
+## Phase 4 — Display on /lineside (shipped 2026-07-08)
 
-1. **SG/SH handling** in `_handle_td`: for `msg_key[:2] in ('SG','SH')`, split the 8-hex-char
-   `data` into 4 bytes and write each to `_sf_state[(area, addr+i)]` (address arithmetic in
-   hex: `f'{int(addr,16)+i:02x}'`). Gives full state shortly after connect instead of
-   "unknown until it changes". Tag these entries as refresh-sourced.
-2. **Bit-transition log**: keep previous byte per `(area, addr)`; on change, XOR old vs new
-   and append one JSONL line per flipped bit, plus every CA step, to
-   `/home/gduthie/twyford-dashboard/sclass_log.jsonl`:
-   ```
-   {"t":"bit","ts":1751970000,"a":"D1","addr":"0a","bit":3,"v":0,"src":"SF"}
-   {"t":"ca","ts":1751970001,"a":"D1","from":"1626","to":"1618","descr":"1K22"}
-   ```
-   `src:"SG"` marks refresh-snapshot writes so the correlator can exclude them (a refresh
-   after reconnect "changes" every byte at once — that's state sync, not a real transition).
-   Size-cap or daily-rotate the file.
-3. **Collect mode**: env var `SCLASS_COLLECT=1` (read at startup, set in the systemd unit
-   or `.env`) that (a) keeps the NR STOMP connection up permanently instead of on-demand,
-   and (b) enables the JSONL logging. Without the flag, behaviour is unchanged (on-demand
-   connect, no log growth). **Remember to remove the flag after the corpus is collected.**
-4. Deploy, verify in dashboard.log that SG bursts arrive on connect and the JSONL is
-   growing, then leave it for **2–3 days** (must span a weekday morning + evening peak;
-   the corridor is busy enough that this captures every regularly-used signal many times).
+`lineside.html` renders from the same `/api/td-live` fetch the page already does every 5 s
+(`fetchTd`) — no new polling, no new coordinate system. It reuses the berth panel's
+existing cell layout (`CELLS`/`BERTH_CELL`/`LINE_OF`) instead of computing signal positions:
 
-Acceptance: after restart, `/api/td-live` `signals` dict is populated within ~1 min without
-any train movement (SG seeding works); `sclass_log.jsonl` contains interleaved `bit` and
-`ca` lines with sensible timestamps; proxy memory/CPU unchanged.
-
-## Phase 2 — Derive the bit→signal mapping
-
-Pull the corpus back (`scp gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/sclass_log.jsonl .`)
-and analyse offline (new script or rewritten `td_correlate.py --analyse`):
-
-1. Index all CA steps by `(area, from, to)`. Restrict to steps where `from` is a berth in
-   the verified corridor topology (known line + dist_mi).
-2. For each step occurrence, collect `bit` events with `v==0`, `src=="SF"`, and
-   `0 ≤ bit_ts − ca_ts ≤ 5 s` (also try −2..+5 s; TD timestamps are true UTC ms but the
-   two message classes may not be perfectly ordered).
-3. Score each candidate `(area, addr, bit)` per step key:
-   - co-fire rate ≥ ~80% of that step's occurrences (require ≥ 5 occurrences,
-     ≥ 3 distinct headcodes);
-   - **uniqueness**: the bit's total 1→0 count over the corpus ≈ its matched-step count
-     (a bit that also fires for unrelated steps is a route/TRTS/track-circuit bit, not
-     this signal — like old D6:14);
-   - **exclusivity per step**: ideally exactly one bit survives per step key. If two do,
-     one is probably the signal and one a track-circuit/overlap bit — prefer the one whose
-     polarity check (below) passes.
-4. **Polarity/occupancy check**: for each surviving bit, verify it sits at 0 for the whole
-   interval a train occupies the berth beyond the signal (between the `A→B` step and the
-   subsequent `B→C` step), and returns to 1 some time after `B→C`.
-5. Emit `signals-candidates.json`: one entry per step key with the winning bit, evidence
-   counts, and the derived identity/position — signal id ≈ the `from` berth number
-   (confirm the actual TVSC prefix by reading signal numbers off Tracksy), line from
-   `_berth_info`, `dist_mi` = boundary between `from` and `to` berths (midpoint of their
-   dist_mi values is fine at this scale).
-6. **Ground truth vs Tracksy**: add a temporary debug endpoint/page (e.g. `/signals-debug`
-   served by the proxy: table of candidate signals with live decoded state, auto-refresh).
-   Graham watches Tracksy's Twyford diagram alongside and confirms ~6 signals by number
-   and by watching them flick red as trains pass. Only candidates that pass get promoted.
-
-Watch for: TVSC possibly using extra bits per signal head (route/aspect bits) — the
-correlation output will reveal rather than break; rarely-used signals (crossovers, Henley
-branch) may take weeks of corpus — ship what's confirmed, keep `SCLASS_COLLECT` running
-longer if coverage is thin.
-
-## Phase 3 — Bake the mapping
-
-`signals.json` committed to the repo (and deployed next to the proxy):
-
-```json
-{
-  "T1626": {"area": "D1", "address": "0a", "bit": 3,
-             "line": "UM", "dist_mi": -0.4, "dir": "up"}
-}
-```
-
-Proxy loads it at startup, decodes state server-side in `_td_live()`, and adds a clean
-list to the `/api/td-live` response:
-
-```json
-"signal_states": [{"id": "T1626", "line": "UM", "dist_mi": -0.4, "dir": "up",
-                    "state": "off", "age_s": 12}]
-```
-
-`state` ∈ `red` (bit 0) / `off` (bit 1) / `unknown` (byte never seen since connect).
-Keep the existing raw `signals` dict for debugging. Client never touches raw bits.
-
-## Phase 4 — Display on /lineside
-
-In lineside.html, render from the same `/api/td-live` fetch the page already does every
-5 s (`fetchTd`) — no new polling:
-
-- Coordinate system: `distToX(mi) = 400 − mi*51.1`, house at x=400, WEST=+=LEFT,
-  window ±6.75 mi. Skip signals outside it.
-- One glyph per signal on its line's row: short stem + small circle, red fill for `red`,
-  green for `off`, grey/hollow outline for `unknown` or stale (`age_s` > ~600 — though
-  note S-class only sends on *change*, so a healthy connection with a quiet signal has
-  large age; prefer "unknown = no state since connect" over pure age for greying, or track
-  last-refresh time).
-- Place the glyph on the approach side per direction of travel (up trains run left→right,
-  down right→left) so it reads like a signalbox diagram.
-- Joggler constraints: plain SVG shapes only, no CSS filters (`--disable-gpu`, Atom CPU);
-  if any signal becomes tappable later, use `onmousedown` not `onclick`. Test on
-  Chromium 148 and ideally the Chromium 53 backup (see `joggler-compatibility` memory).
+- New `signals-layer` SVG group, drawn on top of everything (trains, occupancy) so a dot is
+  never hidden by an occupying train.
+- `fetchTd()` builds `sigByBerth[berth] = {east: entry?, west: entry?, any: entry?}` from
+  `signal_states`.
+- `renderSignals()`: every cell with a resolvable direction (`cell.dir` or its line's `dir`
+  via `LINE_OF`) gets one **primary** dot on the downstream edge (right for 'up', left for
+  'down'), coloured from whichever of `east`/`west`/`any` matches that cell's own direction.
+  Grey/hollow with no backend entry, solid red/green once `state` is known, dashed while
+  `tier=='tentative'`.
+- **Bidirectional berths**: if the backend also has an entry for the *opposite* direction
+  for that berth (real evidence of a reverse-direction departure — e.g. a reversal at
+  Maidenhead P5 or Twyford P4), a **secondary** dot renders on the opposite edge too, nudged
+  off the track centreline (`cy - 6`) since it sits at the same physical boundary as the
+  neighbouring cell's own primary dot (two real signals, facing opposite ways, at ~the same
+  point) and would otherwise visually merge with it. No hardcoded list of "special" berths —
+  the second dot just appears organically once the backend has real evidence, same
+  grey→tentative→confirmed progression as the primary one.
+- Joggler constraints: plain SVG shapes only, no CSS filters (`--disable-gpu`, Atom CPU).
+  Verified with a headless-Chrome screenshot against the live Pi.
 - Deploy is scp of lineside.html only, no service restart (static file).
 
 Acceptance: with a train visibly approaching on /lineside, the signal behind it flicks
-red within ~5 s of the train symbol passing it, and clears back green shortly after —
-matching what Tracksy shows for the same signal.
+red within ~5 s of the train symbol passing it, and clears back green shortly after.
+Signals with little evidence so far show as dashed/hollow rather than not rendering at all.
+A bidirectional berth shows two dots, one per direction, once both have evidence.
 
 ## Limitations (accepted)
 
-- Red vs "off" only — no yellow/double-yellow distinction (Tracksy shares this limitation
-  in most areas).
-- Coverage grows over time; unconfirmed signals simply don't render.
+- Red vs "off" only — no yellow/double-yellow distinction.
+- Coverage grows over time; low-evidence signals render as tentative until enough trains
+  have passed them, rather than not rendering at all.
 
 ## Optional follow-up
 
-Publish the validated D1/D6 decode on the Open Rail Data wiki (they ask decoders to share).
+- Once a step key has been `confirmed` for a long stable period, optionally snapshot it into
+  a committed `signals.json` as a seed/fallback (not required — `signals_learned.json` on the
+  Pi already survives restarts — but useful if the Pi's disk is ever wiped, or to publish the
+  decode).
+- Publish the validated D1/D6 decode on the Open Rail Data wiki (they ask decoders to share).
+- Delete `td_correlate.py` once Phase 4 is confirmed working end-to-end.

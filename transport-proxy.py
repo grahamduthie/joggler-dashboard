@@ -20,6 +20,7 @@ import html as _html
 import gzip
 import io
 import base64
+import collections
 from urllib.parse import urlparse, parse_qs, quote
 from zoneinfo import ZoneInfo
 
@@ -2392,7 +2393,287 @@ def _ca_observe(area, frm, to, hc, ts):
         _ca_last_pos[hc] = (area, to, ts)
 
 _sf_lock      = threading.Lock()
-_sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds}
+_sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds, 'src': 'SF'|'SG'|'SH'}
+
+# ── Signal aspect learning (S-class bit → signal-behind-berth correlation) ──
+# TD S-class messages carry one bit per lineside signal element: 0 = on/red,
+# 1 = off/proceed (see SIGNALS-PLAN.md). There is no published bit→signal map
+# for D1/D6, so we derive it ourselves, continuously and automatically: a
+# berth sits on the approach side of its like-numbered signal, so a CA step's
+# destination signal should flip 1→0 within a few seconds of the train
+# passing it. This watches every CA step, correlates it against bits that
+# went 1→0 in the same window, and promotes a candidate to "confirmed" once
+# it clears a statistical bar — occurrence count, headcode diversity,
+# uniqueness (this bit doesn't also fire for unrelated steps), and a
+# same-train polarity check at the following step (did it stay red until the
+# train reached the next berth?). No external ground truth or human
+# check-in needed; state persists across restarts and keeps improving as
+# more trains pass, so /lineside can show low-confidence candidates
+# immediately and firm them up over time rather than waiting on a batch run.
+_sig_lock          = threading.Lock()
+_sig_bit_total     = {}   # (area, addr, bit) → count of 1→0 transitions ever seen (any reason)
+_sig_step_stats    = {}   # "area|from|to" → {"addr:bit": {'occ','hcs':[...],'pol_ok','pol_bad','last_ts'}}
+_sig_confirmed     = {}   # "area|from|to" → {'addr','bit','occ','hcs','uniqueness','last_ts'}
+_sig_recent_bits   = collections.deque()   # (area, addr, bit, ts) recent 1→0 transitions, pruned
+_sig_pending_steps = collections.deque()   # (eval_ts, step_key, area, hc, step_ts) awaiting scoring
+_sig_pending_hc    = {}    # headcode → {'step_key','area','addr','bit'} awaiting polarity check
+_SIG_FILE          = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_learned.json')
+_SIG_MIN_OCC       = 5     # min matched occurrences before a candidate can confirm
+_SIG_MIN_HC        = 3     # min distinct headcodes
+_SIG_MIN_UNIQ      = 0.8   # matched occurrences / that bit's total 1→0 count, anywhere
+_SIG_EVAL_DELAY    = 6     # seconds after a CA step before scoring its bit matches
+_SIG_MATCH_BEFORE  = 2     # bit may go 1→0 up to this many seconds before the CA step
+_SIG_MATCH_AFTER   = 5     # ...or up to this many seconds after
+_SIG_BITS_MAX_AGE  = 30    # prune recent-bit buffer past this age (> eval delay + match window)
+
+
+def _sig_note_bit_transitions(area, addr, old_hex, new_hex, ts):
+    """Diff one SF update's byte against its prior value and record any 1→0
+    transitions — the only direction trustworthy for correlation (0→1
+    happens for many unrelated reasons: route setting, overlap clearing,
+    etc. — see SIGNALS-PLAN.md)."""
+    if not old_hex:
+        return
+    try:
+        old_b = int(old_hex, 16)
+        new_b = int(new_hex, 16)
+    except ValueError:
+        return
+    changed = old_b ^ new_b
+    if not changed:
+        return
+    with _sig_lock:
+        for bit in range(8):
+            if not (changed >> bit) & 1:
+                continue
+            if (new_b >> bit) & 1:
+                continue   # 0→1 (clearing) — not trustworthy, ignore
+            _sig_recent_bits.append((area, addr, bit, ts))
+            key = (area, addr, bit)
+            _sig_bit_total[key] = _sig_bit_total.get(key, 0) + 1
+        cutoff = ts - _SIG_BITS_MAX_AGE
+        while _sig_recent_bits and _sig_recent_bits[0][3] < cutoff:
+            _sig_recent_bits.popleft()
+
+
+def _sig_observe_step(area, frm, to, hc, ts):
+    """Feed one CA berth step into the correlator: resolve the previous
+    step's polarity check for this headcode (was the matched bit still red
+    when the train reached this berth?), then schedule this step for bit-
+    match scoring once its window has closed.
+
+    Keyed by the FROM berth AND direction of travel, not the (from, to) pair
+    and not the berth alone. Most berths only ever get exited one way, so
+    pooling by berth alone (as this used to) is fine and converges fastest.
+    But some berths are genuinely bidirectional — a train can either
+    continue through or reverse back out the way it came (e.g. Maidenhead
+    Platform 5, Twyford Platform 4) — and those have TWO different physical
+    signals guarding them, one for each direction. Pooling those together
+    would corrupt both candidates' occurrence/uniqueness counts by mixing
+    two different bits. Direction is derived from comparing the from/to
+    berths' dist_mi (already available via _berth_info): moving to a more
+    negative dist_mi is eastbound ("up"/toward Maidenhead-London), more
+    positive is westbound ("down"/toward Reading) — same convention
+    lineside.html already uses. Falls back to an undirected bucket when
+    dist_mi isn't known for one side, so berths lacking full chain coverage
+    don't lose the ability to learn at all."""
+    with _sig_lock:
+        pending = _sig_pending_hc.pop(hc, None)
+    if pending and pending['area'] == area:
+        with _sf_lock:
+            entry = _sf_state.get((pending['area'], pending['addr']))
+            data = entry['data'] if entry else None
+        if data:
+            try:
+                still_red = not ((int(data, 16) >> pending['bit']) & 1)
+            except ValueError:
+                still_red = None
+            if still_red is not None:
+                with _sig_lock:
+                    stats = _sig_step_stats.get(pending['step_key'], {}).get(
+                        f"{pending['addr']}:{pending['bit']}")
+                    if stats:
+                        stats['pol_ok' if still_red else 'pol_bad'] += 1
+    if not frm or not to:
+        return
+    fi, ti = _berth_info(area, frm), _berth_info(area, to)
+    fd = fi.get('dist_mi') if fi else None
+    td = ti.get('dist_mi') if ti else None
+    if fd is not None and td is not None and fd != td:
+        direction = 'east' if td < fd else 'west'
+        step_key = f'{area}|{frm}|{direction}'
+    else:
+        step_key = f'{area}|{frm}'
+    with _sig_lock:
+        _sig_pending_steps.append((ts + _SIG_EVAL_DELAY, step_key, area, hc, ts))
+
+
+def _sig_evaluate_pending():
+    """Score any CA steps whose bit-match window has closed against recent
+    1→0 transitions. Cheap; safe to call on every TD message batch so
+    matching happens within seconds rather than waiting on a slow loop
+    (important — the recent-bits buffer only holds _SIG_BITS_MAX_AGE s)."""
+    now_ts = time.time()
+    with _sig_lock:
+        due = []
+        while _sig_pending_steps and _sig_pending_steps[0][0] <= now_ts:
+            due.append(_sig_pending_steps.popleft())
+        if not due:
+            return
+        for _eval_ts, step_key, area, hc, step_ts in due:
+            lo, hi = step_ts - _SIG_MATCH_BEFORE, step_ts + _SIG_MATCH_AFTER
+            matches = [(addr, bit) for (a, addr, bit, bts) in _sig_recent_bits
+                       if a == area and lo <= bts <= hi]
+            if not matches:
+                continue
+            step_stats = _sig_step_stats.setdefault(step_key, {})
+            for addr, bit in matches:
+                s = step_stats.setdefault(f'{addr}:{bit}',
+                                           {'occ': 0, 'hcs': [], 'pol_ok': 0, 'pol_bad': 0, 'last_ts': 0})
+                s['occ'] += 1
+                if hc not in s['hcs']:
+                    s['hcs'].append(hc)
+                s['last_ts'] = step_ts
+            if len(matches) == 1:
+                addr, bit = matches[0]
+                _sig_pending_hc[hc] = {'step_key': step_key, 'area': area, 'addr': addr, 'bit': bit}
+
+
+def _sig_rebuild_confirmed():
+    """Recompute which step_key→addr:bit candidates clear the promotion bar.
+    Self-correcting: a previously confirmed signal is demoted if later
+    polarity evidence turns against it, rather than being a one-shot
+    decision — matches "firm up over time" rather than a batch verdict."""
+    confirmed = {}
+    with _sig_lock:
+        bit_total = dict(_sig_bit_total)
+        step_stats = {k: dict(v) for k, v in _sig_step_stats.items()}
+    for step_key, candidates in step_stats.items():
+        if not candidates:
+            continue
+        area = step_key.split('|', 1)[0]
+        best = None
+        for k, s in candidates.items():
+            addr, bit_s = k.split(':')
+            bit = int(bit_s)
+            total = bit_total.get((area, addr, bit), s['occ'])
+            uniqueness = (s['occ'] / total) if total else 0
+            score = (s['occ'], uniqueness)
+            if best is None or score > best[0]:
+                best = (score, addr, bit, s, uniqueness)
+        _, addr, bit, s, uniqueness = best
+        pol_n = s['pol_ok'] + s['pol_bad']
+        pol_ratio = (s['pol_ok'] / pol_n) if pol_n else None
+        ok = (s['occ'] >= _SIG_MIN_OCC and len(s['hcs']) >= _SIG_MIN_HC
+              and uniqueness >= _SIG_MIN_UNIQ
+              and (pol_n < 3 or pol_ratio >= 0.7))
+        if ok:
+            confirmed[step_key] = {
+                'addr': addr, 'bit': bit, 'occ': s['occ'],
+                'hcs': len(s['hcs']), 'uniqueness': round(uniqueness, 2),
+                'last_ts': s['last_ts'],
+            }
+    with _sig_lock:
+        _sig_confirmed.clear()
+        _sig_confirmed.update(confirmed)
+    return len(confirmed)
+
+
+def _sig_entry(step_key, addr, bit, tier, occ, hcs, last_ts, now_ts):
+    """/lineside already has a hardcoded cell per berth and knows each
+    line's direction of travel, so the backend doesn't need to compute a
+    position — just identify the berth (+ direction, for the bidirectional-
+    berth case — see _sig_observe_step) and decode its live state."""
+    parts = step_key.split('|')
+    area, berth = parts[0], parts[1]
+    direction = parts[2] if len(parts) > 2 else None
+    with _sf_lock:
+        sf = _sf_state.get((area, addr))
+    state, age_s = 'unknown', None
+    if sf:
+        try:
+            state = 'red' if not ((int(sf['data'], 16) >> bit) & 1) else 'off'
+        except ValueError:
+            pass
+        age_s = int(now_ts - sf['ts'])
+    return {
+        'area': area, 'berth': berth, 'direction': direction, 'addr': addr, 'bit': bit,
+        'tier': tier, 'occ': occ, 'hcs': hcs, 'state': state, 'age_s': age_s,
+    }
+
+
+def _sig_decode_states(now_ts):
+    """Every learned signal candidate, decoded against live SF state, one
+    per berth. Includes unconfirmed candidates (tier='tentative') so the
+    frontend can render them faintly and have them firm up automatically —
+    see SIGNALS-PLAN.md."""
+    out = []
+    with _sig_lock:
+        confirmed = dict(_sig_confirmed)
+        step_stats = {k: dict(v) for k, v in _sig_step_stats.items()}
+    for step_key, c in confirmed.items():
+        out.append(_sig_entry(step_key, c['addr'], c['bit'], 'confirmed',
+                               c['occ'], c['hcs'], c['last_ts'], now_ts))
+    for step_key, candidates in step_stats.items():
+        if step_key in confirmed or not candidates:
+            continue
+        addr_bit, s = max(candidates.items(), key=lambda kv: kv[1]['occ'])
+        if s['occ'] < 2:
+            continue   # too little evidence to show even as tentative
+        addr, bit_s = addr_bit.split(':')
+        out.append(_sig_entry(step_key, addr, int(bit_s), 'tentative',
+                               s['occ'], len(s['hcs']), s['last_ts'], now_ts))
+    return out
+
+
+def _save_sig_learned():
+    try:
+        with _sig_lock:
+            data = {
+                'bit_total': {f'{a}|{addr}|{bit}': v for (a, addr, bit), v in _sig_bit_total.items()},
+                'step_stats': _sig_step_stats,
+                'confirmed': _sig_confirmed,
+            }
+        with open(_SIG_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f'signal-learner save failed: {e}')
+
+
+def _load_sig_learned():
+    global _sig_bit_total, _sig_step_stats, _sig_confirmed
+    try:
+        with open(_SIG_FILE) as f:
+            data = json.load(f)
+        with _sig_lock:
+            bit_total = {}
+            for k, v in data.get('bit_total', {}).items():
+                a, addr, bit = k.split('|')
+                bit_total[(a, addr, int(bit))] = v
+            _sig_bit_total = bit_total
+            _sig_step_stats = data.get('step_stats', {})
+            _sig_confirmed = data.get('confirmed', {})
+        print(f'signal-learner: loaded {len(_sig_step_stats)} step keys, '
+              f'{len(_sig_confirmed)} confirmed signals')
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f'signal-learner load failed: {e}')
+
+
+def _sig_refresh_loop():
+    """Periodically recompute confirmations and persist learned state.
+    Bit-match scoring itself happens inline in _handle_td (see
+    _sig_evaluate_pending), not here — this loop only handles the slower
+    promotion/demotion pass and disk persistence."""
+    _load_sig_learned()
+    while True:
+        time.sleep(60)
+        try:
+            _sig_rebuild_confirmed()
+            _save_sig_learned()
+        except Exception as e:
+            print(f'signal-learner refresh: {e}')
 
 # D6 berth transitions that indicate a train passing or approaching the house.
 # House is ~200 m east of Twyford station, at the Up/Down Relief crossover.
@@ -2991,7 +3272,7 @@ class _NRListener:
         interposes (in-place describer/headcode changes), and SF signal flags."""
         global _td_buffer, _rtt_trains_ts
         new_ca = []
-        sf_updates = {}   # (area, addr) → (data, ts) — deduplicated to last value
+        sf_updates = {}   # (area, addr) → {'data','ts','src'} — deduplicated to last value
         for item in msgs:
             for msg_key, body in item.items():
                 if not isinstance(body, dict):
@@ -3042,8 +3323,38 @@ class _NRListener:
                 elif mtype == 'SF':
                     addr = body.get('address', '')
                     data = body.get('data', '')
-                    if addr:
-                        sf_updates[(area, addr)] = (data, ts)
+                    if addr and len(data) == 2:
+                        prior = sf_updates.get((area, addr))
+                        if prior is not None:
+                            old = prior['data']
+                        else:
+                            with _sf_lock:
+                                entry = _sf_state.get((area, addr))
+                            old = entry['data'] if entry else None
+                        _sig_note_bit_transitions(area, addr, old, data, ts)
+                        sf_updates[(area, addr)] = {'data': data, 'ts': ts, 'src': 'SF'}
+                elif mtype in ('SG', 'SH'):
+                    # Refresh snapshot: 4 consecutive bytes from `address`, sent as a
+                    # burst after (re)connect. Seeds/re-syncs state without being
+                    # treated as a real transition (a refresh "changes" every byte at
+                    # once — that's state sync, not a signal event; the correlator
+                    # only reads _sig_recent_bits, which this never touches).
+                    addr = body.get('address', '')
+                    data = body.get('data', '')
+                    if addr and len(data) == 8:
+                        try:
+                            base = int(addr, 16)
+                        except ValueError:
+                            continue
+                        for i in range(4):
+                            a2 = f'{base + i:02x}'
+                            sf_updates[(area, a2)] = {
+                                'data': data[i * 2:i * 2 + 2], 'ts': ts, 'src': mtype}
+        if sf_updates:
+            # Merged before CA/signal-correlation processing below so a same-batch
+            # SF update is already visible to _sig_observe_step's polarity check.
+            with _sf_lock:
+                _sf_state.update(sf_updates)
         if new_ca:
             # Occupancy is tracked by PHYSICAL LOCATION (STANME + platform), not raw
             # berth code — some sidings use two different describer codes for the same
@@ -3084,9 +3395,10 @@ class _NRListener:
                     del _td_superseded[hc]
             for evt in new_ca:
                 _ca_observe(evt['area'], evt['from'], evt['to'], evt['descr'], evt['ts'])
-        if sf_updates:
-            with _sf_lock:
-                _sf_state.update(sf_updates)
+                if evt['mtype'] == 'CA':
+                    _sig_observe_step(evt['area'], evt['from'], evt['to'], evt['descr'], evt['ts'])
+        if new_ca or sf_updates:
+            _sig_evaluate_pending()
         for evt in new_ca:
             res = _detect_house_event(evt['area'], evt['from'], evt['to'])
             if not res:
@@ -4033,10 +4345,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     'platform':   (info.get('platform') or '') if info else '',
                 }
         with _sf_lock:
-            signals = {f"{a}:{addr}": {'data': d, 'ts': t}
-                       for (a, addr), (d, t) in _sf_state.items()}
+            signals = {f"{a}:{addr}": {'data': e['data'], 'ts': e['ts'], 'src': e.get('src', '')}
+                       for (a, addr), e in _sf_state.items()}
         self._json({'positions': list(positions.values()),
-                    'signals': signals, 'ts': int(now_ts)})
+                    'signals': signals, 'signal_states': _sig_decode_states(now_ts),
+                    'ts': int(now_ts)})
 
     def _calibrate(self, qs):
         """Log a lineside 'heard it pass' button press for ETA calibration.
@@ -4149,4 +4462,5 @@ if __name__ == '__main__':
     threading.Thread(target=_nr_idle_watcher, daemon=True).start()
     threading.Thread(target=_cif_refresh_loop, daemon=True).start()
     threading.Thread(target=_chain_refresh_loop, daemon=True).start()
+    threading.Thread(target=_sig_refresh_loop, daemon=True).start()
     ThreadedServer(('0.0.0.0', 5001), Handler).serve_forever()
