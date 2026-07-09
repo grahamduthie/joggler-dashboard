@@ -941,14 +941,14 @@ function fetchTd() {
     tdPos = {};
     for (const p of (d.positions || [])) {
       if (p.area !== 'D1' && p.area !== 'D6') continue;
-      // Siding/branch cells (turnback, Crossrail stabling, Henley/Marlow) hold
-      // trains stationary for a long time with no new berth step — a running
-      // line berth this old is genuinely stale, but a siding this old is
-      // probably still just sitting there. Give those cells a much longer
-      // leash so they don't wrongly go "empty" mid-dwell.
-      const cell = BERTH_CELL[p.berth];
-      const maxAge = (cell && (cell.key === 'br' || cell.key === 'st')) ? 1800 : 420;
-      if (p.age_s < maxAge) tdPos[p.headcode] = p;
+      // Used to give running-line berths a much tighter leash than sidings (420s vs
+      // 1800s) on the theory that a running-line position that old must be stale.
+      // Wrong (2026-07-09, seen live): a real queue of trains held on the Up Main
+      // approaching Reading — 1A12/1A73/1K09/1L66/1D15, ages 554-870s — is
+      // genuinely still there, held at signals, not stale. A TD berth position
+      // doesn't go wrong just because time passed; it only changes on a fresh CA
+      // step. Same generous window everywhere now.
+      if (p.age_s < 1800) tdPos[p.headcode] = p;
     }
     sigByBerth = {};
     for (const s of (d.signal_states || [])) {
