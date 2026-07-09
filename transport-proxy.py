@@ -2151,8 +2151,17 @@ def _td_enrich_trains(trains, now, ident=None):
             continue
         if hc.startswith('2H') or hc[:1] == '0':
             continue          # Henley branch shuttle / light-loco-bus moves
+        # 600s, not the old 180s: a train held at a red signal for several minutes —
+        # e.g. approach control near a busy station, a real and unremarkable
+        # occurrence on this corridor (see SIGNALS-PLAN.md's signalling research) —
+        # is still genuinely there, not stale. 180s was dropping identity out from
+        # under a train that hadn't gone anywhere, turning it grey on /lineside
+        # mid-hold and back to its real colour once it moved again (reported
+        # 2026-07-09, seen live: 2P31 held >300s in berth 1640 approaching Twyford
+        # on the Up Main). Roughly matches lineside.html's own running-line
+        # staleness window (420s) rather than the tighter value this used to use.
         age = now - pos['ts']
-        if age > 180:
+        if age > 600:
             continue          # stale fix — may have stopped or left the area
         info = _berth_info(pos['area'], pos['to'])
         if not info or info.get('dist_mi') is None:
