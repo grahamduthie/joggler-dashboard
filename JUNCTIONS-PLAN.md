@@ -1,7 +1,8 @@
 # Plan: fix junction geometry + show route-through on /lineside
 
-Status: **PLANNED — not started** (plan agreed 2026-07-09). Update this line as phases
-complete.
+Status: **Phases A-C done and deployed (2026-07-09).** Backward-jump bug fixed, junction
+artwork + captions added, Reading throat extended one ring per line. Phase D (cheap
+route-taken highlight) and Phase E (advance route-set decode) not started.
 
 Goal: make Ruscombe Jn and Twyford West Jn read correctly when a train crosses between
 lines (never appears to move backwards), draw them as real junctions instead of unexplained

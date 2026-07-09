@@ -313,7 +313,12 @@ const HOUSE_X = 676;
 
 const LINES = [
   {key:'ur', y:152, main:false, dir:'up',   name:'UP RELIEF',  plat:'4',
-   west:['1676','1668','1664','1660','1652','1648','1644','1642'],
+   // 1694/1698/1696 (2026-07-09, Phase C): Reading throat berths just west of the old
+   // edge — berth_chain.json shows they're what actually feeds 1676 (233/228/91 occurrences),
+   // and they're never shared with UM's own throat berths, so a train appearing here has
+   // already committed to Up Relief vs Up Main before it even reaches 1676. Placeholder
+   // distances (west of 1676's 5.1) — logical order only, not surveyed, per Graham's ask.
+   west:['1694','1698','1696','1676','1668','1664','1660','1652','1648','1644','1642'],
    twy:['1630'],
    east:['1628','1624','1622','1620','1616','1612','1608','1604','0598','0594'],
    // Platform 5 (0576) is the Up Relief LOOP, drawn ABOVE Platform 4 (0574,
@@ -330,17 +335,24 @@ const LINES = [
    // to render, leaving the platform 5 box looking empty.
    maid:['0574'], maidLoopY:128, maidLoop:['0576','0581'], stub:['0568']},
   {key:'dr', y:208, main:false, dir:'down', name:'DOWN RELIEF', plat:'3',
-   west:['1687','1677','1669','1665','1661','1657'],
+   // 1695/1693/1697 (Phase C): the Reading throat for Down Relief — berth_chain.json
+   // shows 1687 (down-direction, i.e. arriving FROM these) steps on to them 154/167/189
+   // times respectively, no single dominant path (unlike UR/UM's throats).
+   west:['1695','1693','1697','1687','1677','1669','1665','1661','1657'],
    twy:['1637'],
    east:['1635','1631','1627','1623','1611','1607','1603','0595'],
    maid:['0577'], stub:['0571']},
   {key:'um', y:264, main:true,  dir:'up',   name:'UP MAIN',     plat:'2',
-   west:['1672','1666','1662','1658','1650','1646','1640'],
+   // 1690/1688 (Phase C): Up Main's Reading throat (feeds 1672, 365/384 occurrences;
+   // a third code, 1686, was seen only once — too rare to bother modelling).
+   west:['1690','1688','1672','1666','1662','1658','1650','1646','1640'],
    twy:['1626'],
    east:['1618','1614','1610','1606','1602','0596','0592'],
    maid:['0570'], stub:['0566']},
   {key:'dm', y:320, main:true,  dir:'down', name:'DOWN MAIN',   plat:'1',
-   west:['1675','1667','1663','1659'],
+   // 1685 (Phase C): Down Main's Reading throat — overwhelmingly dominant path out of
+   // 1675 (801 occurrences; a rare 5x path to 1689 wasn't worth a cell for).
+   west:['1685','1675','1667','1663','1659'],
    twy:['1655'],
    east:['1633','1629','1625','1621','1609','1605','1601','0593'],
    maid:['0573'], stub:['0569']},
@@ -397,8 +409,12 @@ const BRANCH_CELLS = [
 const STAB_CELL = {berths:['0580','0582','0584','0586','0588','0590','6296'],
                    x:[860,950], y:104, cap:'CROSSRAIL STABLING', capAbove:true};
 
-/* Trains inside Reading station show as chips in the Reading box */
-const READ_BERTHS = ['1684','1685','1686','1688','1694','1697','1698','1702','1706',
+/* Trains inside Reading station show as chips in the Reading box. 1685/1686/1688/1694/
+   1697/1698 moved OUT (2026-07-09, JUNCTIONS-PLAN.md Phase C) — these are the Reading
+   throat berths just outside the old diagram edge where a train already commits to a
+   specific running line (see LINES west arrays below), so they now render as real cells
+   instead of anonymous chips. */
+const READ_BERTHS = ['1684','1702','1706',
   '1708','1709','1711','1716','1718','1721','1724','1727','1730','1731','1732','1733',
   '1740','SSTE','A701','B701','C701','A703','B703','C703','A705','B705','C705','R701'];
 
@@ -432,26 +448,50 @@ function addCell(cell) {
    Relief lines line up by real position: near-house berths cluster at the house,
    far berths spread out, instead of each line spacing its berths evenly (which
    made the sparse Main line read as "off"). */
+// Junction recalibration (2026-07-09, JUNCTIONS-PLAN.md Phase A): berth_chain.json's
+// learned adjacency shows real cross-line steps at Twyford West Jn (um:1646<->ur:1642,
+// x9) and Ruscombe Jn (ur:1622<->um:1618 x4; dm:1625<->dr:1631 x23) — each pair is the
+// SAME physical junction, so both sides should sit at (near) the same dist_mi. Before
+// this fix they didn't (each line's BERTH_MI was calibrated independently), and
+// 1622<->1618 specifically had them far enough apart in the WRONG order that an Up train
+// crossing there would visibly move backwards (x DECREASING) instead of forward. Fixed by
+// moving each pair to its shared midpoint. Reading-throat mismatches (1676<->1666,
+// 1672<->1668) are deliberately left for Phase C, which extends that whole area westward
+// with better-resolved berths anyway — no point reconciling the old anchors twice.
+// Reading throat (2026-07-09, Phase C): placeholder distances west of each line's old
+// 5.1 edge, ordered only by relative frequency in berth_chain.json — not surveyed, since
+// (per Graham) logical west→east order matters here, not physical accuracy.
 const BERTH_MI = {
   // Up Main (house crossing observed live at 1640→1626, so those straddle 0)
-  '1672':5.1,'1666':4.4,'1662':3.6,'1658':3.0,'1650':2.1,'1646':1.2,'1640':0.25,
-  '1626':-0.15,'1618':-0.6,'1614':-1.1,'1610':-1.8,'1606':-2.6,'1602':-3.5,
+  '1690':5.7,'1688':5.4,
+  '1672':5.1,'1666':4.4,'1662':3.6,'1658':3.0,'1650':2.1,'1646':0.85,'1640':0.25,
+  '1626':-0.15,'1618':-0.95,'1614':-1.1,'1610':-1.8,'1606':-2.6,'1602':-3.5,
   '0596':-4.6,'0592':-5.6,'0570':-6.7,'0566':-7.5,
   // Up Relief
+  '1694':6.6,'1698':6.0,'1696':5.4,
   '1676':5.1,'1668':3.34,'1664':3.0,'1660':2.6,'1652':2.0,'1648':1.5,'1644':1.0,
-  '1642':0.5,'1630':0.1,'1628':-0.3,'1624':-0.8,'1622':-1.3,'1620':-1.8,
+  '1642':0.85,'1630':0.1,'1628':-0.3,'1624':-0.8,'1622':-0.95,'1620':-1.8,
   '1616':-2.4,'1612':-3.1,'1608':-3.9,'1604':-4.8,'0598':-5.7,'0594':-6.3,
   '0574':-6.7,'0576':-6.7,'0568':-7.5,
   // Down Relief
+  '1695':6.6,'1693':6.0,'1697':5.4,
   '1687':5.1,'1677':4.0,'1669':3.34,'1665':2.5,'1661':1.5,'1657':0.6,'1637':0.1,
-  '1635':-0.3,'1631':-0.8,'1627':-1.4,'1623':-2.1,'1611':-3.0,'1607':-4.0,
+  '1635':-0.3,'1631':-1.25,'1627':-1.4,'1623':-2.1,'1611':-3.0,'1607':-4.0,
   '1603':-5.2,'0595':-6.2,'0577':-6.7,'0571':-7.5,
   // Down Main
+  '1685':5.4,
   '1675':5.1,'1667':3.5,'1663':2.0,'1659':0.6,'1655':0.1,'1633':-0.4,'1629':-1.0,
-  '1625':-1.7,'1621':-2.5,'1609':-3.6,'1605':-4.6,'1601':-5.6,'0593':-6.3,
+  '1625':-1.25,'1621':-2.5,'1609':-3.6,'1605':-4.6,'1601':-5.6,'0593':-6.3,
   '0573':-6.7,'0569':-7.5,
 };
-const WEST_MAX = 5.1, WEST_MIN = 0.05, EAST_MIN = -0.05, EAST_MAX = -6.7;
+// WEST_MAX raised from 5.1 (Phase C, 2026-07-09): the new Reading-throat berths sit out
+// to 6.6 — segCenter clamps t to [0,1], so anything past the old 5.1 would have collapsed
+// onto the same x as the old edge instead of spreading out. 6.0 (not 6.6) was tried first
+// and looked right on paper, but simulating layoutSeg's cell widths showed UR/DR's 3-wide
+// throat cluster was too cramped and its cells would overlap after hitting the 24px
+// minimum-width floor — widened the throat berths' own spacing to fix it (below), which
+// pushed the furthest one out to 6.6.
+const WEST_MAX = 6.6, WEST_MIN = 0.05, EAST_MIN = -0.05, EAST_MAX = -6.7;
 function segCenter(dist, xr, seg) {
   const t = seg === 'west' ? (WEST_MAX - dist) / (WEST_MAX - WEST_MIN)
                            : (EAST_MIN - dist) / (EAST_MIN - EAST_MAX);
@@ -639,11 +679,34 @@ function drawStatic() {
   g.appendChild(el('text', Object.assign({x:HOUSE_X+5, y:362, fill:'#b8901c',
     'font-size':10}, capFont), 'HOUSE'));
 
+  /* Twyford West Jn (UR<->UM crossover — berth_chain.json: um:1646<->ur:1642, 9x) and
+     Ruscombe Jn (UR<->UM: ur:1622<->um:1618, 4x; DR<->DM: dm:1625<->dr:1631, 23x) — see
+     JUNCTIONS-PLAN.md Phase B. Positioned from BERTH_MI via segCenter (not hardcoded
+     pixels, unlike the old caption positions below they replace) so the artwork tracks
+     any future recalibration automatically. */
+  const twyWestX    = segCenter(0.85,  X_WEST, 'west');
+  const ruscombeUpX = segCenter(-0.95, X_EAST, 'east');
+  const ruscombeDnX = segCenter(-1.25, X_EAST, 'east');
+  for (const [cx, yA, yB] of [
+      [twyWestX,    152, 264],   // Twyford West: UR <-> UM
+      [ruscombeUpX, 152, 264],   // Ruscombe: UR <-> UM
+      [ruscombeDnX, 208, 320],   // Ruscombe: DR <-> DM
+    ]) {
+    g.appendChild(el('line', {x1:cx-20, y1:yA, x2:cx+20, y2:yB,
+      stroke:'#0c2226', 'stroke-width':7}));
+    g.appendChild(el('line', {x1:cx-20, y1:yA, x2:cx+20, y2:yB,
+      stroke:C_RELIEF, 'stroke-width':1, opacity:0.4}));
+  }
+
   /* junction captions */
   g.appendChild(el('text', Object.assign({x:150, y:362, fill:'#4a5f82', 'font-size':9},
     capFont), 'KENNET BR JN'));
-  g.appendChild(el('text', Object.assign({x:790, y:362, fill:'#4a5f82', 'font-size':9,
-    'text-anchor':'middle'}, capFont), 'RUSCOMBE JN'));
+  g.appendChild(el('text', Object.assign({x:twyWestX, y:362, fill:'#4a5f82', 'font-size':9,
+    'text-anchor':'middle'}, capFont), 'TWYFORD WEST JN'));
+  // y offset (vs the other junction captions' shared y:362) avoids colliding with the
+  // 'HOUSE' label — the recalibrated Ruscombe crossover x sits right next to it.
+  g.appendChild(el('text', Object.assign({x:(ruscombeUpX+ruscombeDnX)/2, y:374,
+    fill:'#4a5f82', 'font-size':9, 'text-anchor':'middle'}, capFont), 'RUSCOMBE JN'));
   g.appendChild(el('text', Object.assign({x:492, y:110, fill:'#4a5f82', 'font-size':9,
     'text-anchor':'middle'}, capFont), 'HENLEY BR JN'));
 
