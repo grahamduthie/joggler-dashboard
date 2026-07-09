@@ -497,41 +497,57 @@ function segCenter(dist, xr, seg) {
                            : (EAST_MIN - dist) / (EAST_MIN - EAST_MAX);
   return xr[0] + Math.max(0, Math.min(1, t)) * (xr[1] - xr[0]);
 }
+// Uniform cell width (2026-07-09, was variable 24-58px via Voronoi tiling — see below).
+// Small deliberately: once route-set highlighting (JUNCTIONS-PLAN.md Phase D/E) can
+// colour the track segment between two berths, that segment needs to actually be visible,
+// not squeezed to nothing by a wide cell.
+const CELL_W = 22;
 function layoutSeg(berths, xr, y, key, seg) {
-  if (berths.length === 1) {   // single-berth segment (e.g. the far stub) fills its slot
-    addCell({berths:[berths[0]], x: xr[0], y, w: xr[1] - xr[0], key});
-    return;
-  }
-  // centre each berth at its true distance; cell width follows the gap to its
-  // neighbours (dense near the house, wide out toward Reading/Maidenhead).
+  // Position each berth at its true relative distance, same as before — but width is now
+  // fixed, not derived from the gap to its neighbours. Real distance can still put two
+  // berths closer together than CELL_W (confirmed: some near-house berths sit under 10px
+  // apart at this scale) — the old Voronoi tiling handled that by shrinking width down to
+  // a 24px floor, which is exactly what we're moving away from (uniform size was the
+  // point). Instead, walk left→right and nudge a cell rightward just enough to keep a
+  // minimum gap from its already-placed neighbour, preserving relative order and uniform
+  // width at the cost of position accuracy in the very densest clusters.
   const n = berths.length;
   const cx = berths.map((b, i) => {
     const d = BERTH_MI[b];
     return d != null ? segCenter(d, xr, seg)
                      : xr[0] + (i + 0.5) / n * (xr[1] - xr[0]);
   });
+  let prevRight = -Infinity;
   berths.forEach((b, i) => {
-    // each cell fills the span between the midpoints to its neighbours (Voronoi):
-    // cells tile without overlapping.  Edge cells run to the segment boundary.
-    const lb = i > 0     ? (cx[i-1] + cx[i]) / 2 : xr[0];
-    const rb = i < n - 1 ? (cx[i] + cx[i+1]) / 2 : xr[1];
-    let w = rb - lb - 3, x = lb + 1.5;
-    if (w < 24) { w = 24; x = (lb + rb) / 2 - 12; }   // keep headcodes legible
-    w = Math.min(w, 58);
-    addCell({berths:[b], x, y, w, key});
+    let x = cx[i] - CELL_W / 2;
+    if (x < prevRight + 3) x = prevRight + 3;
+    addCell({berths:[b], x, y, w: CELL_W, key});
+    prevRight = x + CELL_W;
   });
 }
 for (const ln of LINES) {
   layoutSeg(ln.west, X_WEST, ln.y, ln.key, 'west');
-  addCell({berths: ln.twy,  x: X_TWY[0],  y: ln.y, w: X_TWY[1]  - X_TWY[0],  key: ln.key, plat: true});
+  // Main line platforms (2, 1) at Twyford are NOT in line with the Relief platforms
+  // (4, 3) — confirmed against Traksy_TwyfordJn.png (2026-07-09), which shows the Main
+  // berths reached by a jog east of the Relief platforms' position, not a flat 4-in-a-row
+  // block. Approximate offset (not surveyed — logical layout, per Graham); Down Main
+  // shifted further than Up Main to loosely match the screenshot's staggering. Revisit if
+  // it still doesn't read right once seen next to Traksy live.
+  const twyDx = ln.key === 'um' ? 14 : ln.key === 'dm' ? 22 : 0;
+  // Platform cells are also CELL_W now (were: fill the whole station-band column) —
+  // centred within the column (+ twyDx offset above) rather than filling it, matching
+  // every other berth on the diagram.
+  const twyCx = X_TWY[0] + twyDx + (X_TWY[1] - X_TWY[0] - CELL_W) / 2;
+  addCell({berths: ln.twy,  x: twyCx,  y: ln.y, w: CELL_W,  key: ln.key, plat: true});
   layoutSeg(ln.east, X_EAST, ln.y, ln.key, 'east');
-  addCell({berths: ln.maid, x: X_MAID[0], y: ln.y, w: X_MAID[1] - X_MAID[0], key: ln.key, plat: true});
+  const maidCx = X_MAID[0] + (X_MAID[1] - X_MAID[0] - CELL_W) / 2;
+  addCell({berths: ln.maid, x: maidCx, y: ln.y, w: CELL_W, key: ln.key, plat: true});
   // Platform 5 loop (Up Relief only): its own row, island platform between it
   // and Platform 4's row (see the LINES entry + drawStatic for the diverge/
   // reconverge track and the island bar).
   if (ln.maidLoop) {
-    addCell({berths: ln.maidLoop, x: X_MAID[0], y: ln.maidLoopY,
-             w: X_MAID[1] - X_MAID[0], key: ln.key, plat: true});
+    addCell({berths: ln.maidLoop, x: maidCx, y: ln.maidLoopY,
+             w: CELL_W, key: ln.key, plat: true});
   }
   layoutSeg(ln.stub, X_STUB, ln.y, ln.key, 'east');
 }
@@ -679,24 +695,50 @@ function drawStatic() {
   g.appendChild(el('text', Object.assign({x:HOUSE_X+5, y:362, fill:'#b8901c',
     'font-size':10}, capFont), 'HOUSE'));
 
-  /* Twyford West Jn (UR<->UM crossover — berth_chain.json: um:1646<->ur:1642, 9x) and
-     Ruscombe Jn (UR<->UM: ur:1622<->um:1618, 4x; DR<->DM: dm:1625<->dr:1631, 23x) — see
-     JUNCTIONS-PLAN.md Phase B. Positioned from BERTH_MI via segCenter (not hardcoded
-     pixels, unlike the old caption positions below they replace) so the artwork tracks
-     any future recalibration automatically. */
+  /* Twyford West Jn (UR<->UM crossover — berth_chain.json: um:1646<->ur:1642, 9x; also a
+     UM<->DM connection per Graham's read of Traksy_TwyfordJn.png, not yet confirmed in our
+     own data — see below) and Ruscombe Jn (UR<->UM: ur:1622<->um:1618, 4x; DR<->DM:
+     dm:1625<->dr:1631, 23x) — see JUNCTIONS-PLAN.md Phase B.
+
+     Connectors run cell-BOUNDARY to cell-boundary (using BERTH_CELL, already built above),
+     not a symmetric offset around one shared centre point as the first version of this did
+     — that made it ambiguous whether the junction was before or after the berth it cut
+     through the middle of. exitX/entryX below are the same "downstream edge" / "upstream
+     edge" convention renderSignals() already uses for signal dots, so a connector always
+     touches the side of a cell a train actually crosses through, not its middle. */
+  function exitX(berth, dir) {
+    const c = BERTH_CELL[berth];
+    return dir === 'up' ? c.x + c.w : c.x;
+  }
+  function entryX(berth, dir) {
+    const c = BERTH_CELL[berth];
+    return dir === 'up' ? c.x : c.x + c.w;
+  }
+  function connector(x1, y1, x2, y2) {
+    g.appendChild(el('line', {x1, y1, x2, y2, stroke:'#0c2226', 'stroke-width':7}));
+    g.appendChild(el('line', {x1, y1, x2, y2, stroke:C_RELIEF, 'stroke-width':1, opacity:0.4}));
+  }
+  // Twyford West UM<->UR: verified against Traksy_TwyfordJn.png (2026-07-09) to slope
+  // bottom-left to top-right — i.e. UM's (bottom row) end is LEFT of UR's (top row) end,
+  // the opposite pairing (entry/exit swapped) from the "logical" exit-of-source ->
+  // entry-of-destination convention used below for Ruscombe, which sloped the wrong way
+  // here specifically.
+  connector(entryX('1646', 'up'), 264, exitX('1642', 'up'), 152);
+  // Twyford West UM<->DM: not yet seen in berth_chain.json (may be a rare reversing move),
+  // added on Graham's identification from the screenshot. No confirmed berth pair to anchor
+  // to, so this is a straight vertical placeholder at the same x as the UM<->UR crossover
+  // above (same junction cluster) rather than a derived boundary — revisit once a real
+  // move through it is observed.
+  { const tw = exitX('1646', 'up');
+    connector(tw, 264, tw, 320); }
+  // Ruscombe UR<->UM (exit of source -> entry of destination, the "logical" direction —
+  // not flagged as wrong, unlike Twyford West above).
+  connector(exitX('1622', 'up'), 152, entryX('1618', 'up'), 264);
+  // Ruscombe DM<->DR.
+  connector(exitX('1625', 'down'), 320, entryX('1631', 'down'), 208);
   const twyWestX    = segCenter(0.85,  X_WEST, 'west');
   const ruscombeUpX = segCenter(-0.95, X_EAST, 'east');
   const ruscombeDnX = segCenter(-1.25, X_EAST, 'east');
-  for (const [cx, yA, yB] of [
-      [twyWestX,    152, 264],   // Twyford West: UR <-> UM
-      [ruscombeUpX, 152, 264],   // Ruscombe: UR <-> UM
-      [ruscombeDnX, 208, 320],   // Ruscombe: DR <-> DM
-    ]) {
-    g.appendChild(el('line', {x1:cx-20, y1:yA, x2:cx+20, y2:yB,
-      stroke:'#0c2226', 'stroke-width':7}));
-    g.appendChild(el('line', {x1:cx-20, y1:yA, x2:cx+20, y2:yB,
-      stroke:C_RELIEF, 'stroke-width':1, opacity:0.4}));
-  }
 
   /* junction captions */
   g.appendChild(el('text', Object.assign({x:150, y:362, fill:'#4a5f82', 'font-size':9},

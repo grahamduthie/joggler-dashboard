@@ -1,8 +1,12 @@
 # Plan: fix junction geometry + show route-through on /lineside
 
-Status: **Phases A-C done and deployed (2026-07-09).** Backward-jump bug fixed, junction
-artwork + captions added, Reading throat extended one ring per line. Phase D (cheap
-route-taken highlight) and Phase E (advance route-set decode) not started.
+Status: **Phases A-C done and deployed (2026-07-09), plus post-review refinements same
+day** — connectors now run cell-boundary to cell-boundary instead of through a berth's
+middle, Twyford West's slope direction corrected against Traksy, an UM<->DM connector
+added there, Twyford's Main-line platforms offset from Relief per Traksy, and all berth
+cells resized to a small uniform width (`CELL_W`, was variable 24-58px) so the connecting
+track between cells is always visible — a prerequisite for Phase D/E's route highlighting.
+Phase D (cheap route-taken highlight) and Phase E (advance route-set decode) not started.
 
 Goal: make Ruscombe Jn and Twyford West Jn read correctly when a train crosses between
 lines (never appears to move backwards), draw them as real junctions instead of unexplained
