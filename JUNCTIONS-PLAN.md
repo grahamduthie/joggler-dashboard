@@ -1,12 +1,21 @@
 # Plan: fix junction geometry + show route-through on /lineside
 
-Status: **Phases A-C done and deployed (2026-07-09), plus post-review refinements same
-day** — connectors now run cell-boundary to cell-boundary instead of through a berth's
-middle, Twyford West's slope direction corrected against Traksy, an UM<->DM connector
-added there, Twyford's Main-line platforms offset from Relief per Traksy, and all berth
-cells resized to a small uniform width (`CELL_W`, was variable 24-58px) so the connecting
-track between cells is always visible — a prerequisite for Phase D/E's route highlighting.
-Phase D (cheap route-taken highlight) and Phase E (advance route-set decode) not started.
+Status: **Phases A-C done and deployed (2026-07-09), plus two rounds of post-review
+refinement same day.** Round 1: connectors now run cell-boundary to cell-boundary instead
+of through a berth's middle, Twyford West's slope corrected against Traksy, a UM<->DM
+connector added there, Twyford's Main-line platforms offset from Relief, all berth cells
+resized to a small uniform width. Round 2 (bigger): **cell layout is no longer a shared
+distance scale (`segCenter`/`BERTH_MI`-proportional) at all** — Up Relief (the densest
+line) is now laid out with pure even spacing per segment as the reference grid, and Down
+Relief/Up Main/Down Main each snap their own berths to whichever UR berth is closest by
+real distance, rather than computing an independent position. This is what actually gets
+all four tracks into Traksy-style vertical alignment, and as a side effect made the
+Ruscombe Jn connectors much shorter/cleaner (the crossover berths now land in the exact
+same column across lines) and resolved a "phantom line through Down Relief" artifact that
+turned out to be the UR<->UM diagonal's flight path crossing an unrelated DR cell.
+`segCenter`/`WEST_MAX`/`WEST_MIN`/`EAST_MIN`/`EAST_MAX` are gone — no longer used by
+anything. Phase D (cheap route-taken highlight) and Phase E (advance route-set decode)
+not started.
 
 Goal: make Ruscombe Jn and Twyford West Jn read correctly when a train crosses between
 lines (never appears to move backwards), draw them as real junctions instead of unexplained

@@ -484,62 +484,64 @@ const BERTH_MI = {
   '1625':-1.25,'1621':-2.5,'1609':-3.6,'1605':-4.6,'1601':-5.6,'0593':-6.3,
   '0573':-6.7,'0569':-7.5,
 };
-// WEST_MAX raised from 5.1 (Phase C, 2026-07-09): the new Reading-throat berths sit out
-// to 6.6 — segCenter clamps t to [0,1], so anything past the old 5.1 would have collapsed
-// onto the same x as the old edge instead of spreading out. 6.0 (not 6.6) was tried first
-// and looked right on paper, but simulating layoutSeg's cell widths showed UR/DR's 3-wide
-// throat cluster was too cramped and its cells would overlap after hitting the 24px
-// minimum-width floor — widened the throat berths' own spacing to fix it (below), which
-// pushed the furthest one out to 6.6.
-const WEST_MAX = 6.6, WEST_MIN = 0.05, EAST_MIN = -0.05, EAST_MAX = -6.7;
-function segCenter(dist, xr, seg) {
-  const t = seg === 'west' ? (WEST_MAX - dist) / (WEST_MAX - WEST_MIN)
-                           : (EAST_MIN - dist) / (EAST_MIN - EAST_MAX);
-  return xr[0] + Math.max(0, Math.min(1, t)) * (xr[1] - xr[0]);
-}
-// Uniform cell width (2026-07-09, was variable 24-58px via Voronoi tiling — see below).
+// Uniform cell width (2026-07-09, was variable 24-58px via Voronoi tiling).
 // Small deliberately: once route-set highlighting (JUNCTIONS-PLAN.md Phase D/E) can
 // colour the track segment between two berths, that segment needs to actually be visible,
 // not squeezed to nothing by a wide cell.
 const CELL_W = 22;
-function layoutSeg(berths, xr, y, key, seg) {
-  // Position each berth at its true relative distance, same as before — but width is now
-  // fixed, not derived from the gap to its neighbours. Real distance can still put two
-  // berths closer together than CELL_W (confirmed: some near-house berths sit under 10px
-  // apart at this scale) — the old Voronoi tiling handled that by shrinking width down to
-  // a 24px floor, which is exactly what we're moving away from (uniform size was the
-  // point). Instead, walk left→right and nudge a cell rightward just enough to keep a
-  // minimum gap from its already-placed neighbour, preserving relative order and uniform
-  // width at the cost of position accuracy in the very densest clusters.
+// Up Relief has the most berths of any line, so (2026-07-09) it's laid out as the
+// reference grid — pure even spacing across each segment, ignoring real distance
+// entirely — and the other three lines each snap their own berths to whichever UR berth
+// is closest by real distance (BERTH_MI), rather than computing an independent position.
+// This is what actually gets the four tracks to line up vertically like Traksy's own
+// diagram; the previous shared-distance-scale approach (segCenter) kept each line
+// internally proportional but never guaranteed cross-line alignment.
+function layoutEven(berths, xr, y, key) {
   const n = berths.length;
-  const cx = berths.map((b, i) => {
-    const d = BERTH_MI[b];
-    return d != null ? segCenter(d, xr, seg)
-                     : xr[0] + (i + 0.5) / n * (xr[1] - xr[0]);
-  });
-  let prevRight = -Infinity;
   berths.forEach((b, i) => {
-    let x = cx[i] - CELL_W / 2;
+    const cx = n === 1 ? (xr[0] + xr[1]) / 2 : xr[0] + (i + 0.5) / n * (xr[1] - xr[0]);
+    addCell({berths:[b], x: cx - CELL_W / 2, y, w: CELL_W, key});
+  });
+}
+// refX: [{dist, x}] from the reference line's (UR's) already-placed cells in this same
+// segment. A forward-pass nudges away any collision that results from two of this line's
+// (sparser) berths snapping to the same UR slot, or from BERTH_MI orderings not quite
+// agreeing between lines — this also happens to guarantee no backward jumps, same
+// safeguard as JUNCTIONS-PLAN.md Phase A relied on.
+function layoutAligned(berths, refX, y, key) {
+  let prevRight = -Infinity;
+  berths.forEach((b) => {
+    const d = BERTH_MI[b];
+    let cx = refX.length ? refX[0].x : 0, bestDiff = Infinity;
+    if (d != null) {
+      for (const r of refX) {
+        const diff = Math.abs(r.dist - d);
+        if (diff < bestDiff) { bestDiff = diff; cx = r.x; }
+      }
+    }
+    let x = cx - CELL_W / 2;
     if (x < prevRight + 3) x = prevRight + 3;
     addCell({berths:[b], x, y, w: CELL_W, key});
     prevRight = x + CELL_W;
   });
 }
+let urWestRef, urEastRef, urStubRef;
 for (const ln of LINES) {
-  layoutSeg(ln.west, X_WEST, ln.y, ln.key, 'west');
+  const isUr = ln.key === 'ur';
+  if (isUr) layoutEven(ln.west, X_WEST, ln.y, ln.key);
+  else      layoutAligned(ln.west, urWestRef, ln.y, ln.key);
   // Main line platforms (2, 1) at Twyford are NOT in line with the Relief platforms
   // (4, 3) — confirmed against Traksy_TwyfordJn.png (2026-07-09), which shows the Main
   // berths reached by a jog east of the Relief platforms' position, not a flat 4-in-a-row
   // block. Approximate offset (not surveyed — logical layout, per Graham); Down Main
-  // shifted further than Up Main to loosely match the screenshot's staggering. Revisit if
-  // it still doesn't read right once seen next to Traksy live.
+  // shifted further than Up Main to loosely match the screenshot's staggering. Platform
+  // cells are exempt from the UR-alignment above for this reason — deliberately NOT
+  // aligned, unlike the running-line berths either side of them.
   const twyDx = ln.key === 'um' ? 14 : ln.key === 'dm' ? 22 : 0;
-  // Platform cells are also CELL_W now (were: fill the whole station-band column) —
-  // centred within the column (+ twyDx offset above) rather than filling it, matching
-  // every other berth on the diagram.
   const twyCx = X_TWY[0] + twyDx + (X_TWY[1] - X_TWY[0] - CELL_W) / 2;
   addCell({berths: ln.twy,  x: twyCx,  y: ln.y, w: CELL_W,  key: ln.key, plat: true});
-  layoutSeg(ln.east, X_EAST, ln.y, ln.key, 'east');
+  if (isUr) layoutEven(ln.east, X_EAST, ln.y, ln.key);
+  else      layoutAligned(ln.east, urEastRef, ln.y, ln.key);
   const maidCx = X_MAID[0] + (X_MAID[1] - X_MAID[0] - CELL_W) / 2;
   addCell({berths: ln.maid, x: maidCx, y: ln.y, w: CELL_W, key: ln.key, plat: true});
   // Platform 5 loop (Up Relief only): its own row, island platform between it
@@ -549,12 +551,23 @@ for (const ln of LINES) {
     addCell({berths: ln.maidLoop, x: maidCx, y: ln.maidLoopY,
              w: CELL_W, key: ln.key, plat: true});
   }
-  layoutSeg(ln.stub, X_STUB, ln.y, ln.key, 'east');
+  if (isUr) layoutEven(ln.stub, X_STUB, ln.y, ln.key);
+  else      layoutAligned(ln.stub, urStubRef, ln.y, ln.key);
+  if (isUr) {
+    const refOf = arr => arr.map(b => ({dist: BERTH_MI[b], x: BERTH_CELL[b].x + CELL_W/2}));
+    urWestRef = refOf(ln.west);
+    urEastRef = refOf(ln.east);
+    urStubRef = refOf(ln.stub);
+  }
 }
+// Branch/siding cells are also CELL_W now (2026-07-09, were their own wider hand-tuned
+// widths — up to 74px for chevron visibility). c.x[0]/c.x[1] still define the slot used
+// for caption centring below; only the cell itself shrinks, centred within that slot.
 for (const c of BRANCH_CELLS)
-  addCell({berths: c.berths, x: c.x[0], y: c.y, w: c.x[1] - c.x[0], key: 'br', dir: c.dir});
-addCell({berths: STAB_CELL.berths, x: STAB_CELL.x[0], y: STAB_CELL.y,
-         w: STAB_CELL.x[1] - STAB_CELL.x[0], key: 'st'});
+  addCell({berths: c.berths, x: c.x[0] + (c.x[1]-c.x[0]-CELL_W)/2, y: c.y, w: CELL_W,
+           key: 'br', dir: c.dir});
+addCell({berths: STAB_CELL.berths, x: STAB_CELL.x[0] + (STAB_CELL.x[1]-STAB_CELL.x[0]-CELL_W)/2,
+         y: STAB_CELL.y, w: CELL_W, key: 'st'});
 
 const LINE_OF = {};   // row key → line def
 for (const ln of LINES) LINE_OF[ln.key] = ln;
@@ -736,9 +749,14 @@ function drawStatic() {
   connector(exitX('1622', 'up'), 152, entryX('1618', 'up'), 264);
   // Ruscombe DM<->DR.
   connector(exitX('1625', 'down'), 320, entryX('1631', 'down'), 208);
-  const twyWestX    = segCenter(0.85,  X_WEST, 'west');
-  const ruscombeUpX = segCenter(-0.95, X_EAST, 'east');
-  const ruscombeDnX = segCenter(-1.25, X_EAST, 'east');
+  // Caption x-positions derived from the connectors' own endpoints (BERTH_CELL-based,
+  // per above) rather than a separate segCenter/BERTH_MI lookup — segCenter no longer
+  // exists now that cell layout is UR-reference-grid + snap-to-nearest (2026-07-09)
+  // rather than a shared distance scale, so this keeps captions consistent with where
+  // the connectors they label actually are.
+  const twyWestX    = (entryX('1646', 'up') + exitX('1642', 'up')) / 2;
+  const ruscombeUpX = (exitX('1622', 'up') + entryX('1618', 'up')) / 2;
+  const ruscombeDnX = (exitX('1625', 'down') + entryX('1631', 'down')) / 2;
 
   /* junction captions */
   g.appendChild(el('text', Object.assign({x:150, y:362, fill:'#4a5f82', 'font-size':9},
