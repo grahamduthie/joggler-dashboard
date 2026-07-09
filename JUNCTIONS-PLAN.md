@@ -14,7 +14,10 @@ Ruscombe Jn connectors much shorter/cleaner (the crossover berths now land in th
 same column across lines) and resolved a "phantom line through Down Relief" artifact that
 turned out to be the UR<->UM diagonal's flight path crossing an unrelated DR cell.
 `segCenter`/`WEST_MAX`/`WEST_MIN`/`EAST_MIN`/`EAST_MAX` are gone — no longer used by
-anything. Phase D (cheap route-taken highlight) and Phase E (advance route-set decode)
+anything. Round 3 (small): the "TWYFORD"/"MAIDENHEAD" station name labels overlapped the
+P5 Bay / Up Relief loop cell just above the station box (same y, same column) — moved the
+labels above that cell instead of through the middle of it. Phase D (cheap route-taken
+highlight) and Phase E (advance route-set decode)
 not started.
 
 Goal: make Ruscombe Jn and Twyford West Jn read correctly when a train crosses between

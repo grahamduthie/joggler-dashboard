@@ -690,7 +690,12 @@ function drawStatic() {
     const x0 = st.x[0] - 6, x1 = st.x[1] + 6;
     g.appendChild(el('rect', {x:x0, y:132, width:x1-x0, height:206, rx:3,
       fill:'#0b1520', 'fill-opacity':0.5, stroke:'#274058', 'stroke-width':1}));
-    g.appendChild(el('text', Object.assign({x:(x0+x1)/2, y:126, fill:'#6e8bb3',
+    // y:126 (2026-07-09: moved to y:88) put the station name's own baseline inside the
+    // P5 Bay / Up Relief loop cell just above it (that cell runs from y:108/118 down to
+    // y:128/138 depending on station), so the box rendered right on top of the middle
+    // of the word ("TWY" + box + "RD"). Nothing else occupies this column above the P5
+    // Bay/loop caption (itself at y:102), so the name now sits above that instead.
+    g.appendChild(el('text', Object.assign({x:(x0+x1)/2, y:88, fill:'#6e8bb3',
       'font-size':12, 'text-anchor':'middle'}, capFont), st.name));
     g.appendChild(el('text', Object.assign({x:(x0+x1)/2, y:352, fill:'#4a5f82',
       'font-size':9, 'text-anchor':'middle'}, capFont), st.sub));
