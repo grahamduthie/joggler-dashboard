@@ -491,7 +491,8 @@ Calls `/api/departures` → National Rail SOAP `ldb12.asmx` → JSON.
 
 Shows next 5 departures. Each row: time · destination CRS · platform · status.
 Tap a row to expand calling points. Settings (⚙) persists station/platform to localStorage.
-Default: TWY, platform 4.
+Default: TWY, all platforms (was hardcoded to platform 4 only until 2026-07-27 — an old
+saved `transConfig.platform: '4'` is migrated to `''` automatically on load).
 
 Departure status: `On time` → `OT` · `Delayed` → `D` · `Cancelled` → `C` · e.g. `Late 3 mins` → `3L`.
 
@@ -501,13 +502,19 @@ Leaflet.js OSM map + canvas overlay. Aircraft triangles rotated by heading.
 
 - ADS-B data via `/api/flights` → adsb.lol API (proxied — adsb.lol dropped direct CORS support)
 - Route data via `/api/flight-route?cs=CALLSIGN` → Pi scrapes FlightAware. Results cached in
-  `flightRouteCache` (localStorage). **TTL: 30 minutes** — timing data (actual/estimated
-  departure and arrival) changes while a flight is in progress, so short TTL keeps delay
-  information current. Proxy-side `ROUTE_TTL` is also 30 minutes for the same reason.
+  `localStorage` under **`flightRouteCacheV2`** (renamed from `flightRouteCache` 2026-07-27 —
+  see gotcha below). **TTL: 30 minutes** — timing data (actual/estimated departure and arrival)
+  changes while a flight is in progress, so short TTL keeps delay information current.
+  Proxy-side `ROUTE_TTL` is also 30 minutes for the same reason. Route objects also carry
+  `orig_tz`/`dest_tz` (IANA names, from FlightAware's `origin.TZ`/`destination.TZ`, added
+  2026-07-27) so departure/arrival times can be shown in genuine airport-local time with a UK
+  equivalent alongside — see "UK time" gotcha below.
 - Map is **draggable** — canvas intercepts mouse/touch drag gestures and calls `flightMap.panBy()`.
   Aircraft list shows up to 7 aircraft closest to the map centre that are within the visible bounds.
 - **Filter buttons:** Airlines (commercial callsigns in AIRLINES table) / Other / LHR only.
   `flightPassesFilter()` is used for both the canvas draw loop and the list — single source of truth.
+  Default changed 2026-07-27: `nonCommercial` now starts `false` (was `true`) — the Flights tab
+  opens showing airline traffic only; tap "Other" to bring military/GA/helicopters back in.
 - **Map controls:** ⌂ home (re-centres on Twyford), + / − zoom buttons (zoom 6–12, default 9 ≈ 21 nm)
 - **Performance (Atom Z520 critical):** Tile layer uses `updateWhenIdle:true, updateWhenZooming:false`
   so tiles only load after drag/zoom ends, not on every `panBy`. Canvas `mousemove`/`touchmove`
@@ -516,10 +523,20 @@ Leaflet.js OSM map + canvas overlay. Aircraft triangles rotated by heading.
 - **Cache key normalisation:** `lat`/`lon` rounded to 2 dp, `dist` snapped to nearest 10 nm so
   different screen sizes share the same Pi-side cache entry.
 - Twyford coordinates: lat=51.4741, lon=**-0.8647** (not -0.9752 which is Reading/Caversham)
+- **`#fd-focus` is dashboard.html's OWN full-screen focus overlay** — entirely separate code
+  from `aircraft.html`'s `#closest-view` (see below), even though both share `.cv-*` class
+  names and were originally copy-pasted from one another. This is the view the Aircraft *tile*
+  actually opens (`showView('aircraft')` maps to the Transport view's Flights tab, not the
+  standalone `/aircraft` page). A fix applied to one does **not** apply to the other — confirmed
+  the hard way 2026-07-27, when a bar-removal fix was first applied only to `aircraft.html` and
+  the tile still showed the old double-bar layout. `#fd-focus` is `position:fixed` covering the
+  whole viewport including the persistent `#topbar` (was `position:absolute`, scoped only to
+  `#view-transport`'s box, which is why the global date/clock/home bar used to show above its
+  own back bar). Tap anywhere to close (`onmousedown` on `#fd-focus` itself) — no back button.
 
 **Config defaults** (localStorage `transConfig`):
 ```json
-{ "station": "TWY", "platform": "4", "flightLat": 51.4741, "flightLon": -0.8647, "flightRadius": 100 }
+{ "station": "TWY", "platform": "", "flightLat": 51.4741, "flightLon": -0.8647, "flightRadius": 100 }
 ```
 
 ### aircraft.html — Standalone Full-Screen Aircraft SPA
@@ -543,11 +560,21 @@ or TV alongside the main Joggler kiosk.
 
 **Focus mode ("Focus" button in topbar):**
 - Full-screen view of the single closest commercial aircraft, auto-updating
+- `#closest-view` is `position:fixed; inset:0`, no back-button bar or clock bar (both removed
+  2026-07-27 — previously had their own 64px `.cv-bar` header eating vertical space). **Tap
+  anywhere on the screen to close** (`onmousedown` on the overlay itself) — same pattern as
+  dashboard.html's `#fd-focus` (see above), which got the identical treatment the same day
+  since it's a separate implementation with the same historical bars
 - Airline header: logo (left) + airline name (right) in brand colours
 - Large flight number + IATA code centred
 - Aircraft type/registration in top-right
 - Vertical origin→destination route with dep/arr times (left column) + flight duration/distance (right column)
 - Four stat cards below: altitude, speed, heading, distance
+- Dep/Arr times shown in genuine airport-local time (`route.orig_tz`/`dest_tz`) with a UK-time
+  pill badge alongside (e.g. `10:20 UK`) whenever the airport isn't itself in the UK — added
+  2026-07-27. Always shown (not just when numerically different from local — Portugal shares
+  the UK's clock year-round, and suppressing it there looked like a bug rather than "same
+  timezone right now")
 - Sends `&focus=1` on ADS-B fetch so proxy uses 20 s TTL instead of 60 s
 
 **Airport name resolution:**
@@ -1550,6 +1577,40 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
   specificity — always check both when debugging unexpected overrides
 - **Weather contrast** — the clear daytime background is bright blue (`#1976d2`). All SVG strokes
   and stat text must use ≥35% white opacity. Rain % text uses `#c2e4f7` (pale ice-blue)
+- **Flex children need `min-width: 0` before `text-overflow: ellipsis` will actually truncate**
+  — a flex item defaults to `min-width: auto`, which floors it at its content's natural width and
+  silently defeats `white-space:nowrap; overflow:hidden; text-overflow:ellipsis`. Bit us for real
+  2026-07-27: `#fd-focus`'s header flight-number/airline-name column had no width guard, so
+  "Virgin Atlantic" (squeezed narrower than usual because the aircraft-info column had grown to
+  3 lines after the "Built YYYY" fetch bug below was fixed) wrapped onto a second line instead of
+  ellipsizing. Since the header has `flex-shrink:0`, it just grew taller to fit — which pushed the
+  route section below its fixed budget and clipped the arrival line against the stats row. Fixed
+  with `min-width:0` on the column plus nowrap+ellipsis on both the flight number and airline name,
+  so the header's height is now deterministic regardless of content length — this is the more
+  durable fix; tuning font sizes around specific known-long names (which was also done, modestly)
+  is not, by itself, a guarantee
+- **`justify-content: center` on an overflowing flex column doesn't reserve its padding as a
+  hard minimum** — when content exceeds the box, centering can push it past the padding on both
+  sides equally rather than compressing toward one edge, and `scrollHeight` measurements on such
+  a box get unreliable (part of the "overflow" can sit above the container's own top, which
+  `scrollHeight` doesn't account for). When tuning `.cv-route`-style centered flex boxes for
+  overflow safety, verify visually with a screenshot, not just by comparing `offsetHeight` vs
+  `scrollHeight`
+
+### JavaScript
+- **`var` hoists the declaration, not the assignment** — a top-level `var x = null;` that
+  appears *later* in the file still executes its `= null` in place, in file order, during the
+  linear top-to-bottom run. Bit us for real: dashboard.html called `startNowPlaying()`/
+  `startShowSSE()` near the top of the script (page-load init, so the Radio tile updates without
+  needing the Radio view opened first), but `var nowPlayingES = null;`/`var showES = null;` were
+  declared *below* that call, inside the functions' own section. The functions ran fine and
+  created the `EventSource` objects — then execution reached those later `var` lines and reset
+  the globals straight back to `null`, orphaning the connections (still open, still receiving
+  data, but nothing held a reference any more, so `onmessage`'s `if (es !== nowPlayingES) return`
+  guard silently dropped every update). Fixed by moving the state-var declarations above the
+  calls that use them, and deleting the now-duplicate declarations from their old spot. Symptom
+  was exactly "works after I open the view once" — opening the view re-ran the same init calls,
+  by which point nothing downstream could clobber them any more
 
 ### API / Data
 - **UKMO model breaks rain %** — `&models=ukmo_seamless` causes Open-Meteo to return no
@@ -1560,9 +1621,22 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
 - **Bauer PLS streams** — must call `/api/radio/resolve` each time to get a fresh `skey` token.
   Never cache or hardcode the resolved stream URL
 - **Magic Classical Bauer station key is `scala-mp3`** (not `magicclassical-mp3`)
-- **Route cache TTL is 6 hours** — low-cost carriers (Ryanair, easyJet, Wizz Air etc.) reuse
-  flight numbers daily on completely different routes. A longer TTL shows stale/wrong destinations.
-  To clear immediately: `localStorage.removeItem('flightRouteCache')` in browser console
+- **Route cache TTL is 30 minutes** (this doc previously said 6 hours — was simply wrong, never
+  matched `ROUTE_CACHE_MAX_AGE` in the code) — low-cost carriers (Ryanair, easyJet, Wizz Air
+  etc.) reuse flight numbers daily on completely different routes, and timing data changes while
+  a flight is in progress, so a short TTL matters. To clear immediately:
+  `localStorage.removeItem('flightRouteCacheV2')` in browser console (key renamed from
+  `flightRouteCache` 2026-07-27, see next gotcha)
+- **Age-based cache pruning doesn't catch a schema change** — `flightRouteCacheV2` (dashboard.html
+  and aircraft.html; shared localStorage, same key) only prunes entries older than 30 minutes. If
+  the backend route object's *shape* changes (e.g. a new field is added), an entry fetched just
+  before the change is still "fresh" by age and keeps getting reused, silently missing the new
+  field, for up to 30 minutes after every such deploy. Bit us for real 2026-07-27 when `orig_tz`/
+  `dest_tz` were added — some already-cached flights just didn't show the new UK-time feature
+  until their cache entry aged out, looking like an intermittent bug rather than a caching one.
+  Fixed by bumping the localStorage key itself (`flightRouteCache` → `flightRouteCacheV2`), which
+  invalidates every old-shape entry at once. **If the route object's shape changes again, bump
+  the suffix again** (in both dashboard.html and aircraft.html — they must stay in sync)
 - **Twyford coordinates** — lat=51.4741, lon=**-0.8647** (not -0.9752 which is Reading/Caversham)
 - **OSM bus route data quality** — routes 127/128/129 relations have geometry only (no node
   members); route 12 has no OSM relation. The `route_ref` tag on individual stop nodes is
@@ -1704,7 +1778,7 @@ ssh of@172.16.10.168 'sudo of-expand'
 
 ## Current Status
 
-Everything working as of 2026-07-07.
+Everything working as of 2026-07-27.
 
 - [x] Joggler: Boot, WiFi, SSH
 - [x] Autologin → X → Openbox → kiosk chain (Chromium → Pi)
@@ -1823,3 +1897,18 @@ Everything working as of 2026-07-07.
 - [x] lineside.html: NRCC disruption message was hard-truncated at 130 characters mid-word (and boxed to 44px, ~2.6 lines) — raised to a 280-char cap with a clean word-boundary ellipsis if genuinely longer, and the box to 72px so realistic messages fit in full
 - [x] lineside.html: Henley branch (2H headcodes) coloured grey instead of GWR green in the berth diagram — these trains are deliberately excluded from every /api/trains path server-side ("Henley branch — excluded everywhere", out of scope for the Reading↔Maidenhead corridor ETA logic), so op_code is never populated. `opInfo()` now special-cases 2H headcodes to GWR's colour directly (100% GWR-operated in reality)
 - [x] lineside.html: split the two merged Henley-branch direction-pair berth cells (BYUP/BYDN near Henley, 1632/1643 near Henley Br Jn) into separate boxes — real SMART/live-TD data confirms these are genuine direction-specific TD berths on the single bidirectional line, not duplicates. Fixed a wrong "WARGRAVE · SHIPLAKE" caption on the BYUP/BYDN cell in the process (both actually resolve to STANME HENLEYONT — Henley itself; no berth coverage exists for the real Wargrave/Shiplake stations). Widened cells to ≥42px and added direction chevrons (reusing the existing width-gated mechanism) so the pair is distinguishable at a glance; BYUP/BYDN stacked vertically per user preference, 1632/1643 kept side by side
+
+### Session 2026-07-27
+
+- [x] dashboard.html: Radio tile silently never auto-updated (needed the Radio view opened once first to start working) — root cause was a `var` hoisting bug, see "JavaScript" gotcha above. `nowPlayingES`/`showES`/etc. state vars moved above the init calls that use them
+- [x] dashboard.html: Trains tile + Transport view's Trains tab were hardcoded to Platform 4 only (`TRANS_DEFAULTS.platform: '4'`) — changed default to `''` (all platforms), with an automatic one-time migration of any existing saved `transConfig.platform === '4'` so already-configured installs pick up the fix without a manual settings change
+- [x] aircraft.html: Focus mode's `.cv-bar` (back-button + "Updated HH:MM:SS" bar) removed — full-bleed `#closest-view`, tap anywhere to close. `.cv-route` absorbs the reclaimed space automatically via its existing `flex:1`
+- [x] dashboard.html: `#fd-focus` (the Aircraft *tile's* own separate focus-mode implementation — see Flights tab notes above) got the identical bar-removal + tap-to-close treatment, plus changed from `position:absolute` (scoped to the Flights tab's box) to `position:fixed` covering the whole viewport, since it was previously leaving the global topbar's date/clock/home bar visible above its own bar
+- [x] dashboard.html: found and fixed an unrelated pre-existing bug while testing the above — `flightUpdateFocus()`'s aircraft-year fetch called `flightFocusFetchAcInfo(hex)` with a bare undefined `hex` instead of `ac.hex`, throwing on every focus-mode open and silently breaking the "Built YYYY" year lookup
+- [x] dashboard.html: `#fd-focus` text enlarged substantially (flight number, airport names, times, stat values) to use the space reclaimed from removing the bars, matching aircraft.html's proven sizing rather than the old cramped fixed-px overrides that were tuned for a squeezed 354px content box
+- [x] dashboard.html: `.cv-terminal` (terminal/gate text, e.g. "T4S · Gate S31") changed from inline-after-airport-name to `display:block` on its own line — at the enlarged sizes, a long city name plus terminal/gate could exceed 800px and wrap unpredictably mid-phrase, colliding with the stats row below. Its own line is both more robust (deterministic height regardless of text length) and reads better than the wrap it replaced
+- [x] transport-proxy.py: `/api/flight-route` now also extracts `orig_tz`/`dest_tz` (IANA names, e.g. `America/Costa_Rica`) from FlightAware's `origin.TZ`/`destination.TZ` fields (prefixed with a POSIX `:`, stripped)
+- [x] dashboard.html, aircraft.html, now.html: departure/arrival times now render in genuine airport-local time via the new `orig_tz`/`dest_tz` — previously `toLocaleTimeString()` with no explicit `timeZone` silently used the device's own system zone (Europe/London), so times were already showing UK time the whole time, just mislabelled as "local". A small dimmed pill badge (`HH:MM UK`) is shown alongside whenever the airport isn't itself in the UK — always shown, not just when numerically different from the local time (Portugal shares the UK's clock year-round; suppressing a redundant-looking badge there read as broken rather than "same timezone right now")
+- [x] dashboard.html: `#fd-focus`'s route-section padding trimmed too far while fixing the terminal/gate overflow above, leaving entries visually touching the header/stats divider lines for the common (short-route) case — rebalanced by reclaiming a little more room from the header/stats padding (which have more slack to spare) instead, roughly doubling the visible gap
+- [x] dashboard.html, aircraft.html: flight-route localStorage cache key renamed `flightRouteCache` → `flightRouteCacheV2` — the existing 30-min age-based pruning doesn't catch entries that are still "fresh" by age but were fetched before the backend response gained a new field (the `orig_tz`/`dest_tz` change above), so some already-cached flights just didn't show the new UK-time badges until their entry aged out, looking like an intermittent bug. Versioning the key invalidates every old-shape entry at once, and is the pattern to repeat if the route object's shape changes again (bump the suffix in both files — they share the key)
+- [x] dashboard.html: Aircraft tile's Flights tab now defaults to `nonCommercial: false` (was `true`) — opens showing airline traffic only; the "Other" filter button still toggles military/GA/helicopters back in

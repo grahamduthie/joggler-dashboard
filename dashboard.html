@@ -1926,36 +1926,20 @@
   .fd-back-btn:active { background: #2a3a4a; }
 
   /* ── Flight focus overlay ── */
+  /* position:fixed (not absolute) so this covers the persistent #topbar too —
+     it was previously scoped to #view-transport's box, leaving the global
+     date/clock/home bar visible above this overlay's own back bar. */
   #fd-focus {
-    position: absolute;
+    position: fixed;
     inset: 0;
-    z-index: 20;
+    z-index: 50;
     background: #0d1b2a;
     display: none;
     flex-direction: column;
     overflow: hidden;
+    cursor: none;
   }
   #fd-focus.active { display: flex; }
-  .cv-bar {
-    flex-shrink: 0;
-    height: 64px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #111e2e;
-    border-bottom: 2px solid #1e3a5a;
-    padding: 0 28px;
-  }
-  .cv-back {
-    font-size: clamp(15px, 2vw, 28px);
-    font-weight: bold;
-    color: #7fb3d3;
-    cursor: none;
-    letter-spacing: 0.5px;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .cv-back:active { color: #ffffff; }
-  .cv-updated { font-size: clamp(12px, 1.4vw, 20px); color: #4a7a9a; }
   #fd-focus-content {
     flex: 1;
     display: flex;
@@ -1963,17 +1947,20 @@
     min-height: 0;
     overflow: hidden;
   }
+  #fd-focus {
+    font-family: 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif;
+  }
   .cv-header {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 3vw;
-    padding: 2.5vh 3vw;
+    padding: 2vh 3.5vw;
     border-bottom: 2px solid rgba(255,255,255,0.12);
   }
   .cv-logo {
-    height: 16vh;
-    max-height: 110px;
+    height: 17vh;
+    max-height: 130px;
     max-width: 28vw;
     object-fit: contain;
     background: #ffffff;
@@ -1982,21 +1969,28 @@
     flex-shrink: 0;
   }
   .cv-flight-num {
-    font-size: clamp(36px, 7.5vw, 120px);
+    font-size: clamp(40px, 8.5vw, 130px);
     font-weight: bold;
     line-height: 1;
     font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .cv-airline-name { font-size: clamp(20px, 4vw, 60px); opacity: 0.85; margin-top: 0.5vh; }
+  /* Long names (e.g. "Virgin Atlantic") must never wrap — that grows the
+     fixed-height header past its budget and pushes/clips the route section
+     below it. Truncate instead; the header's height must stay predictable. */
+  .cv-airline-name {
+    font-size: clamp(20px, 3.6vw, 52px); opacity: 0.85; margin-top: 0.6vh;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .cv-flight-info {
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
     justify-content: center;
-    font-size: clamp(13px, 2.2vw, 36px);
+    font-size: clamp(15px, 2.6vw, 40px);
     color: #5a8fad;
-    gap: 0.8vh;
+    gap: 1vh;
     text-align: right;
   }
   .cv-ac-info-right {
@@ -2005,26 +1999,36 @@
     flex-direction: column;
     align-items: flex-end;
     justify-content: center;
-    gap: 0.6vh;
-    font-size: clamp(15px, 2.8vw, 44px);
+    gap: 0.7vh;
+    font-size: clamp(15px, 2.6vw, 40px);
+    white-space: nowrap;
     opacity: 0.75;
     text-align: right;
   }
   .cv-route {
     flex: 1;
     min-height: 0;
-    padding: 2vh 3vw;
+    padding: 3.2vh 3.5vw;
     border-bottom: 2px solid #1e3a5a;
     display: flex;
     flex-direction: column;
     justify-content: center;
+    overflow: hidden;
   }
-  .cv-airport { font-size: clamp(22px, 5vw, 80px); font-weight: bold; color: #e8eaf0; line-height: 1.2; }
-  .cv-route-arrow { font-size: clamp(14px, 2vw, 32px); color: #4a7a9a; padding: 0.2vh 0; }
-  .cv-iata { font-size: clamp(12px, 2.2vw, 36px); opacity: 0.55; font-weight: normal; }
-  .cv-terminal { font-size: clamp(11px, 1.6vw, 26px); color: #7fb3d3; margin-left: 10px; }
-  .cv-times { font-size: clamp(13px, 2.2vw, 36px); color: #7fb3d3; margin-top: 0.8vh; }
-  .cv-route-loading { font-size: clamp(14px, 2vw, 28px); color: #4a7a9a; font-style: italic; padding: 1vh 0; }
+  .cv-airport { font-size: clamp(26px, 6.1vw, 90px); font-weight: bold; color: #e8eaf0; line-height: 1.2; }
+  .cv-route-arrow { font-size: clamp(18px, 2.8vw, 40px); color: #4a7a9a; padding: 0.45vh 0; }
+  .cv-iata { font-size: clamp(14px, 2.6vw, 40px); opacity: 0.55; font-weight: normal; }
+  /* Block (not inline): "City (IATA) Terminal · Gate" together could exceed 800px
+     width at this font size and wrap mid-phrase unpredictably. Its own line is both
+     more robust and reads better than the wrap this replaced. */
+  .cv-terminal { display: block; font-size: clamp(13px, 1.8vw, 26px); color: #7fb3d3; margin-top: 0.2vh; }
+  .cv-times { font-size: clamp(15px, 2.5vw, 38px); color: #7fb3d3; margin-top: 0.6vh; }
+  .cv-uk-time {
+    font-size: 0.58em; font-weight: normal; color: #5a8fad; opacity: 0.85;
+    border: 1px solid rgba(90,143,173,0.5); border-radius: 4px; padding: 0.05em 0.4em;
+    margin-left: 0.3em; white-space: nowrap;
+  }
+  .cv-route-loading { font-size: clamp(16px, 2.4vw, 32px); color: #4a7a9a; font-style: italic; padding: 1vh 0; }
   .cv-stats {
     flex-shrink: 0;
     display: flex;
@@ -2037,38 +2041,14 @@
     align-items: center;
     justify-content: center;
     border-right: 1px solid #1e3a5a;
-    padding: 2vh 1vw;
-    gap: 0.8vh;
+    padding: 1.6vh 1.2vw;
+    gap: 0.7vh;
   }
   .cv-stat-card:last-child { border-right: none; }
-  .cv-stat-label { font-size: clamp(12px, 1.4vw, 22px); color: #4a7a9a; text-transform: uppercase; letter-spacing: 3px; }
-  .cv-stat-value { font-size: clamp(26px, 4vw, 64px); font-weight: bold; color: #ffffff; line-height: 1; font-family: 'DejaVu Sans Mono', 'Courier New', monospace; }
-  .cv-stat-unit { font-size: clamp(12px, 1.6vw, 26px); color: #5a8fad; }
-  .cv-heading-arrow { font-size: clamp(26px, 5vw, 80px); color: #7fb3d3; line-height: 1; display: inline-block; }
-
-  /* ── Focus overlay size overrides for 800×418px Joggler content area ── */
-  /* cv-bar=64px, so content gets 354px. Sizes below are tuned to fit. */
-  #fd-focus {
-    font-family: 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif;
-  }
-  #fd-focus .cv-header    { padding: 8px 24px; gap: 20px; }
-  #fd-focus .cv-logo      { height: 50px; max-height: 50px; max-width: 140px; padding: 6px 14px; border-radius: 6px; }
-  #fd-focus .cv-flight-num  { font-size: clamp(26px, 4.2vw, 52px); }
-  #fd-focus .cv-airline-name { font-size: clamp(13px, 1.8vw, 24px); margin-top: 3px; }
-  #fd-focus .cv-ac-info-right { font-size: clamp(11px, 1.5vw, 20px); gap: 2px; }
-  #fd-focus .cv-route     { padding: 10px 24px; }
-  #fd-focus .cv-airport   { font-size: clamp(17px, 2.8vw, 36px); }
-  #fd-focus .cv-route-arrow { font-size: clamp(11px, 1.5vw, 20px); padding: 1px 0; }
-  #fd-focus .cv-iata      { font-size: clamp(11px, 1.5vw, 20px); }
-  #fd-focus .cv-terminal  { font-size: clamp(10px, 1.2vw, 16px); }
-  #fd-focus .cv-times     { font-size: clamp(12px, 1.6vw, 22px); margin-top: 3px; }
-  #fd-focus .cv-route-loading { font-size: clamp(13px, 1.7vw, 22px); }
-  #fd-focus .cv-flight-info   { font-size: clamp(12px, 1.6vw, 22px); gap: 3px; }
-  #fd-focus .cv-stat-card { padding: 8px 8px; gap: 3px; }
-  #fd-focus .cv-stat-label { font-size: clamp(9px, 1vw, 13px); letter-spacing: 2px; }
-  #fd-focus .cv-stat-value { font-size: clamp(22px, 2.9vw, 38px); }
-  #fd-focus .cv-stat-unit  { font-size: clamp(10px, 1.2vw, 16px); }
-  #fd-focus .cv-heading-arrow { font-size: clamp(22px, 2.9vw, 38px); }
+  .cv-stat-label { font-size: clamp(13px, 1.6vw, 24px); color: #4a7a9a; text-transform: uppercase; letter-spacing: 3px; }
+  .cv-stat-value { font-size: clamp(30px, 4.6vw, 72px); font-weight: bold; color: #ffffff; line-height: 1; font-family: 'DejaVu Sans Mono', 'Courier New', monospace; }
+  .cv-stat-unit { font-size: clamp(13px, 1.8vw, 28px); color: #5a8fad; }
+  .cv-heading-arrow { font-size: clamp(28px, 5.5vw, 84px); color: #7fb3d3; line-height: 1; display: inline-block; }
 
   #flight-msg {
     display: none; align-items: center; justify-content: center;
@@ -2617,7 +2597,7 @@
           <div id="flight-list"></div>
           <div id="flight-filters">
             <button id="flt-btn-commercial"    class="flt-btn active" onmousedown="flightToggleFilter('commercial')"    ontouchstart="flightToggleFilter('commercial')">Airlines</button>
-            <button id="flt-btn-nonCommercial" class="flt-btn active" onmousedown="flightToggleFilter('nonCommercial')" ontouchstart="flightToggleFilter('nonCommercial')">Other</button>
+            <button id="flt-btn-nonCommercial" class="flt-btn"        onmousedown="flightToggleFilter('nonCommercial')" ontouchstart="flightToggleFilter('nonCommercial')">Other</button>
             <button id="flt-btn-lhr"           class="flt-btn"        onmousedown="flightToggleFilter('lhr')"           ontouchstart="flightToggleFilter('lhr')">LHR only</button>
             <button id="flt-btn-focus"         class="flt-btn"        onmousedown="flightToggleFocus()"                 ontouchstart="flightToggleFocus()">Focus</button>
           </div>
@@ -2681,12 +2661,8 @@
       </div>
     </div>
 
-    <!-- Flight focus overlay -->
-    <div id="fd-focus">
-      <div class="cv-bar">
-        <div class="cv-back" onmousedown="flightCloseFocus()">&#8592; Back</div>
-        <div class="cv-updated" id="fd-focus-updated"></div>
-      </div>
+    <!-- Flight focus overlay: tap anywhere to close -->
+    <div id="fd-focus" onmousedown="flightCloseFocus()">
       <div id="fd-focus-content"></div>
     </div>
   </div>
@@ -3858,6 +3834,17 @@
     if (!isNaN(_si) && _si >= 0 && _si < RADIO_STATIONS.length) currentStationIdx = _si;
   } catch(e) {}
 
+  // These state vars must be declared (and initialised) here, before the init calls below —
+  // their `var ... = null` re-declarations further down the file execute in place during the
+  // linear top-to-bottom run and would otherwise null out the connections these calls create.
+  var nowPlayingES = null;
+  var nowPlayingRetry = null;
+  var nowPlayingErrCount = 0;
+  var nowPlayingTimer = null;
+  var showES = null;
+  var showRetry = null;
+  var showErrCount = 0;
+
   radioApplyStation();
   renderStationPicker();
   startNowPlaying();
@@ -3957,11 +3944,6 @@
   }
 
   // ── Now Playing ──
-  var nowPlayingES = null;
-  var nowPlayingRetry = null;
-  var nowPlayingErrCount = 0;
-  var nowPlayingTimer = null;
-
   function startNowPlaying() {
     if (nowPlayingRetry) { clearTimeout(nowPlayingRetry); nowPlayingRetry = null; }
     var st = RADIO_STATIONS[currentStationIdx];
@@ -4282,10 +4264,6 @@
   }
 
   // ── Show SSE (Marlow FM tile: current show/presenter) ──
-  var showES = null;
-  var showRetry = null;
-  var showErrCount = 0;
-
   function startShowSSE() {
     if (showRetry) { clearTimeout(showRetry); showRetry = null; }
     var st = RADIO_STATIONS[currentStationIdx];
@@ -4852,7 +4830,7 @@
 
   var transConfig = null;
   var TRANS_DEFAULTS = {
-    station: 'TWY', platform: '4',
+    station: 'TWY', platform: '',
     flightLat: 51.4741, flightLon: -0.8647,
     flightRadius: 25, flightName: 'Twyford'
   };
@@ -4866,6 +4844,11 @@
     // Migrate old wrong Twyford longitude
     if (transConfig.flightLon === -0.9752) {
       transConfig.flightLon = -0.8647;
+      localStorage.setItem('transConfig', JSON.stringify(transConfig));
+    }
+    // Migrate old hardcoded "Platform 4 only" default to "All platforms"
+    if (transConfig.platform === '4' && transConfig.station === 'TWY') {
+      transConfig.platform = '';
       localStorage.setItem('transConfig', JSON.stringify(transConfig));
     }
   }
@@ -5052,21 +5035,28 @@
   var flightFocusAcInfoCache = {};
   var flightTimer     = null;
   var ROUTE_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes — timing data changes while flight is in progress
+  // Key is versioned ("V2") rather than just "flightRouteCache" — the 30-min
+  // age-based pruning only catches genuinely old entries, not entries that
+  // are still fresh but were fetched before a backend response field was
+  // added (e.g. orig_tz/dest_tz). Bump this suffix again if the route
+  // object's shape changes so stale-but-recent cached copies can't silently
+  // hide a new field for up to 30 minutes. Shared with aircraft.html, which
+  // must use the same key/suffix.
   var flightRouteCache = (function() {
     try {
-      var raw    = JSON.parse(localStorage.getItem('flightRouteCache') || '{}');
+      var raw    = JSON.parse(localStorage.getItem('flightRouteCacheV2') || '{}');
       var cutoff = Date.now() - ROUTE_CACHE_MAX_AGE;
       var pruned = false;
       Object.keys(raw).forEach(function(k) {
         if (raw[k]._ts && raw[k]._ts < cutoff) { delete raw[k]; pruned = true; }
       });
-      if (pruned) localStorage.setItem('flightRouteCache', JSON.stringify(raw));
+      if (pruned) localStorage.setItem('flightRouteCacheV2', JSON.stringify(raw));
       return raw;
     } catch(e) { return {}; }
   })();
   var flightTrails    = {};   // hex → [{lat,lon}, ...]
   var TRAIL_MAX       = 200;
-  var flightFilters   = { commercial: true, nonCommercial: true, lhr: false };
+  var flightFilters   = { commercial: true, nonCommercial: false, lhr: false };
 
   var AIRLINES = {
     'BAW':{iata:'BA', name:'British Airways',      bg:'#002157',fg:'#ffffff'},
@@ -5333,7 +5323,7 @@
         if (!route.orig || !route.dest) return;
         route._ts = Date.now();
         flightRouteCache[cs] = route;
-        try { localStorage.setItem('flightRouteCache', JSON.stringify(flightRouteCache)); } catch(e) {}
+        try { localStorage.setItem('flightRouteCacheV2', JSON.stringify(flightRouteCache)); } catch(e) {}
         if (acTileCurrentCs !== cs) return;
         var routeEl  = document.getElementById('ac-tile-route');
         var flightEl = document.getElementById('ac-tile-flight');
@@ -6107,7 +6097,7 @@
         if (route.orig && route.dest) {
           route._ts = Date.now();
           flightRouteCache[cs] = route;
-          try { localStorage.setItem('flightRouteCache', JSON.stringify(flightRouteCache)); } catch(e) {}
+          try { localStorage.setItem('flightRouteCacheV2', JSON.stringify(flightRouteCache)); } catch(e) {}
           if (flightFocusOpen && flightFocusAc && (flightFocusAc.flight || '').trim() === cs) {
             flightUpdateFocus();
           } else if (flightSelected && (flightSelected.flight || '').trim() === cs) {
@@ -6196,10 +6186,6 @@
     var ac = commercial[0] || null;
     flightFocusAc = ac;
 
-    var now = new Date();
-    var updEl = document.getElementById('fd-focus-updated');
-    if (updEl) updEl.textContent = 'Updated ' + now.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-
     var contentEl = document.getElementById('fd-focus-content');
     if (!contentEl) return;
 
@@ -6229,13 +6215,13 @@
       var destCity  = (route.dest_iata && AIRPORTS[route.dest_iata]) ? AIRPORTS[route.dest_iata] : route.dest;
       var origIata  = route.orig_iata ? ' <span class="cv-iata">(' + route.orig_iata + ')</span>' : '';
       var destIata  = route.dest_iata ? ' <span class="cv-iata">(' + route.dest_iata + ')</span>' : '';
-      var origTerm  = route.orig_terminal ? '&nbsp;<span class="cv-terminal">T' + route.orig_terminal + '</span>' : '';
+      var origTerm  = route.orig_terminal ? '<span class="cv-terminal">T' + route.orig_terminal + '</span>' : '';
       var dParts    = [];
       if (route.dest_terminal) dParts.push('T' + route.dest_terminal);
       if (route.dest_gate)     dParts.push('Gate ' + route.dest_gate);
-      var destTerm  = dParts.length ? '&nbsp;<span class="cv-terminal">' + dParts.join(' &middot; ') + '</span>' : '';
-      var depLine   = fdFmtTimeLine('Dep', route.depart_sched, route.depart_est);
-      var arrLine   = fdFmtTimeLine('Arr', route.arrive_sched, route.arrive_est);
+      var destTerm  = dParts.length ? '<span class="cv-terminal">' + dParts.join(' &middot; ') + '</span>' : '';
+      var depLine   = fdFmtTimeLine('Dep', route.depart_sched, route.depart_est, route.orig_tz, true);
+      var arrLine   = fdFmtTimeLine('Arr', route.arrive_sched, route.arrive_est, route.dest_tz, true);
       var eteStr    = route.ete_s ? fdFmtEte(route.ete_s) : '';
       var distStr   = route.distance_nm ? route.distance_nm.toLocaleString() + ' nm' : '';
       var infoParts = [eteStr, distStr].filter(Boolean);
@@ -6286,7 +6272,7 @@
     contentEl.innerHTML =
       '<div class="cv-header" style="background:' + bg + ';color:' + fg + '">' +
         logoHtml +
-        '<div style="flex:1">' +
+        '<div style="flex:1;min-width:0">' +
           '<div class="cv-flight-num">' + dispFlt + '</div>' +
           '<div class="cv-airline-name">' + alName + '</div>' +
         '</div>' +
@@ -6320,7 +6306,7 @@
       '</div>';
 
     // Fetch aircraft build year to augment ac-info-right
-    flightFocusFetchAcInfo(hex);
+    flightFocusFetchAcInfo(ac.hex);
   }
 
   function flightFocusFetchAcInfo(hex) {
@@ -6341,9 +6327,9 @@
     xhr.send();
   }
 
-  function fdFmtTime(ts) {
+  function fdFmtTime(ts, tz) {
     var d = new Date(ts * 1000);
-    return d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+    return d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', timeZone: tz || 'Europe/London'});
   }
 
   function fdFmtEte(s) {
@@ -6359,10 +6345,16 @@
     return parts.length ? '<span class="fd-terminal">' + parts.join(' · ') + '</span>' : '';
   }
 
-  function fdFmtTimeLine(label, sched, est) {
+  // tz: IANA name for the airport this time belongs to (route.orig_tz for
+  // Dep, route.dest_tz for Arr) — without it FlightAware's raw timestamps
+  // would render in whatever zone the device happens to be set to, silently
+  // mislabelled as "local". showUk additionally appends the same instant in
+  // UK time, when it differs from the airport-local time shown.
+  function fdFmtTimeLine(label, sched, est, tz, showUk) {
     if (!sched && !est) return null;
-    var schedStr = sched ? fdFmtTime(sched) : '';
-    var estStr   = est   ? fdFmtTime(est)   : '';
+    var localTz = tz || 'Europe/London';
+    var schedStr = sched ? fdFmtTime(sched, localTz) : '';
+    var estStr   = est   ? fdFmtTime(est, localTz)   : '';
     var deltaHtml = '';
     if (sched && est) {
       var deltaMins = Math.round((est - sched) / 60);
@@ -6374,10 +6366,21 @@
         deltaHtml = ' <span style="color:#66ddff">(' + (-deltaMins) + ' min early)</span>';
       }
     }
-    if (schedStr && estStr && schedStr !== estStr) {
-      return label + ' ' + schedStr + ' → ' + estStr + deltaHtml;
+    var mainStr = (schedStr && estStr && schedStr !== estStr)
+      ? schedStr + ' → ' + estStr
+      : (schedStr || estStr);
+
+    // Always show when the airport itself isn't in the UK — even if the two
+    // times happen to be numerically equal right now (e.g. Portugal shares
+    // the UK's clock year-round), suppressing it made it look inconsistent/
+    // broken rather than "same timezone right now".
+    var ukHtml = '';
+    if (showUk && tz && tz !== 'Europe/London') {
+      var bestTs = est || sched;
+      var ukStr  = fdFmtTime(bestTs, 'Europe/London');
+      ukHtml = ' <span class="cv-uk-time">' + ukStr + ' UK</span>';
     }
-    return label + ' ' + (schedStr || estStr) + deltaHtml;
+    return label + ' ' + mainStr + deltaHtml + ukHtml;
   }
 
   function flightShowRoute(route) {
@@ -6389,8 +6392,8 @@
     if (route.distance_nm) arrowParts.push(route.distance_nm + ' nm (' + Math.round(route.distance_nm * 1.852) + ' km)');
     var arrowStr = '&#8595;' + (arrowParts.length ? '&nbsp;&nbsp;' + arrowParts.join(' · ') : '');
 
-    var depLine = fdFmtTimeLine('Dep', route.depart_sched, route.depart_est);
-    var arrLine = fdFmtTimeLine('Arr', route.arrive_sched, route.arrive_est);
+    var depLine = fdFmtTimeLine('Dep', route.depart_sched, route.depart_est, route.orig_tz);
+    var arrLine = fdFmtTimeLine('Arr', route.arrive_sched, route.arrive_est, route.dest_tz);
     var timesHtml = (depLine ? '<div class="fd-times">' + depLine + '</div>' : '') +
                     (arrLine ? '<div class="fd-times">' + arrLine + '</div>' : '');
 

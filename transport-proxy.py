@@ -4058,6 +4058,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             result['dest_terminal'] = dest_d['terminal']
                         if dest_d.get('gate'):
                             result['dest_gate'] = dest_d['gate']
+                        # IANA tz names (FlightAware prefixes with ':', the POSIX
+                        # "use tzdata entry" convention) — lets the frontend show
+                        # genuine local departure/arrival time at each airport,
+                        # not just the browser's own timezone mislabelled as local.
+                        if orig_d.get('TZ'):
+                            result['orig_tz'] = orig_d['TZ'].lstrip(':')
+                        if dest_d.get('TZ'):
+                            result['dest_tz'] = dest_d['TZ'].lstrip(':')
                         if f.get('flightStatus'):
                             result['flight_status'] = f['flightStatus']
                         tt = f.get('takeoffTimes') or {}

@@ -345,26 +345,8 @@
     display: none;
     flex-direction: column;
     overflow: hidden;
-  }
-  .cv-bar {
-    flex-shrink: 0;
-    height: 64px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #111e2e;
-    border-bottom: 2px solid #1e3a5a;
-    padding: 0 28px;
-  }
-  .cv-back {
-    font-size: 2vw;
-    font-weight: bold;
-    color: #7fb3d3;
     cursor: pointer;
-    letter-spacing: 0.5px;
   }
-  .cv-back:hover, .cv-back:active { color: #ffffff; }
-  .cv-updated { font-size: 1.4vw; color: #4a7a9a; }
   #cv-content {
     flex: 1;
     display: flex;
@@ -438,6 +420,11 @@
   .cv-iata { font-size: 2.2vw; opacity: 0.55; font-weight: normal; }
   .cv-terminal { font-size: 1.6vw; color: #7fb3d3; margin-left: 10px; }
   .cv-times { font-size: 2.2vw; color: #7fb3d3; margin-top: 0.8vh; }
+  .cv-uk-time {
+    font-size: 0.58em; font-weight: normal; color: #5a8fad; opacity: 0.85;
+    border: 1px solid rgba(90,143,173,0.5); border-radius: 4px; padding: 0.05em 0.4em;
+    margin-left: 0.3em; white-space: nowrap;
+  }
   .cv-route-loading { font-size: 2vw; color: #4a7a9a; font-style: italic; padding: 1vh 0; }
   .cv-stats {
     flex-shrink: 0;
@@ -599,8 +586,6 @@
   ─────────────────────────────────────────────────────────── */
 
   /* Focus view: minimum readable sizes for every vw font */
-  .cv-back          { font-size: clamp(15px, 2vw,   28px); }
-  .cv-updated       { font-size: clamp(12px, 1.4vw, 20px); }
   .cv-flight-num    { font-size: clamp(36px, 7.5vw, 120px); }
   .cv-airline-name  { font-size: clamp(20px, 4vw,   60px); }
   .cv-airport       { font-size: clamp(22px, 5vw,   80px); }
@@ -630,7 +615,7 @@
   .det-no-route     { font-size: clamp(13px, 1.6vw, 24px); }
 
   /* Fast touch response on all interactive elements */
-  .ac-row, .map-btn, .topbar-btn, .cv-back, .det-back,
+  .ac-row, .map-btn, .topbar-btn, #closest-view, .det-back,
   #loc-search-btn, #loc-cancel, #loc-apply {
     touch-action: manipulation;
   }
@@ -667,7 +652,6 @@
     .ac-dist-unit { font-size: 10px; }
     .ac-dist-wrap { min-width: 58px; }
 
-    .cv-bar      { height: 52px; }
     .det-back    { height: 52px; }
     #alt-legend  { display: none; }
 
@@ -683,7 +667,6 @@
 
   /* ── Landscape phone (short screen): compact focus view ── */
   @media (max-height: 480px) and (orientation: landscape) {
-    .cv-bar     { height: 46px; }
     .cv-logo    { height: 9vh; max-width: 18vw; }
     .cv-header  { padding: 1vh 2vw; gap: 2vw; }
     .cv-route   { padding: 1vh 2vw; }
@@ -727,11 +710,7 @@
   </div>
 </div>
 
-<div id="closest-view" style="display:none">
-  <div class="cv-bar">
-    <div class="cv-back" onmousedown="toggleClosest()">&#8592; Back to List</div>
-    <div id="cv-updated"></div>
-  </div>
+<div id="closest-view" style="display:none" onmousedown="toggleClosest()">
   <div id="cv-content"></div>
 </div>
 
@@ -994,9 +973,14 @@ var flightMap = null;
 var fetchTimer = null;
 
 var ROUTE_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 min — timing data changes while in progress
+// Key is versioned ("V2") — age-based pruning alone doesn't catch entries
+// that are still fresh but were fetched before a backend response field was
+// added (e.g. orig_tz/dest_tz). Bump this suffix again if the route
+// object's shape changes. Shared with dashboard.html, which must use the
+// same key/suffix.
 var routeCache = (function() {
   try {
-    var raw = JSON.parse(localStorage.getItem('flightRouteCache') || '{}');
+    var raw = JSON.parse(localStorage.getItem('flightRouteCacheV2') || '{}');
     var cutoff = Date.now() - ROUTE_CACHE_MAX_AGE;
     Object.keys(raw).forEach(function(k) {
       if (raw[k]._ts && raw[k]._ts < cutoff) delete raw[k];
@@ -1387,7 +1371,7 @@ function fetchRoute(cs) {
       r._ts = Date.now();
       if (!r.orig || !r.dest) r._notFound = true;
       routeCache[cs] = r;
-      try { localStorage.setItem('flightRouteCache', JSON.stringify(routeCache)); } catch(e) {}
+      try { localStorage.setItem('flightRouteCacheV2', JSON.stringify(routeCache)); } catch(e) {}
       renderList();
       if (selectedAc && (selectedAc.flight || '').trim() === cs) showRoute(r);
       if (closestMode) updateClosestView();
@@ -1398,9 +1382,9 @@ function fetchRoute(cs) {
 }
 
 // ── Time / detail helpers ─────────────────────────────────────
-function fmtTime(ts) {
+function fmtTime(ts, tz) {
   var d = new Date(ts * 1000);
-  return d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+  return d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', timeZone: tz || 'Europe/London'});
 }
 
 function fmtEte(s) {
@@ -1409,10 +1393,16 @@ function fmtEte(s) {
   return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
 }
 
-function fmtTimeLine(label, sched, est) {
+// tz: IANA name for the airport this time belongs to (route.orig_tz for
+// Dep, route.dest_tz for Arr) — without it FlightAware's raw timestamps
+// would render in whatever zone the device happens to be set to, silently
+// mislabelled as "local". showUk additionally appends the same instant in
+// UK time, when it differs from the airport-local time shown.
+function fmtTimeLine(label, sched, est, tz, showUk) {
   if (!sched && !est) return null;
-  var schedStr = sched ? fmtTime(sched) : '';
-  var estStr   = est   ? fmtTime(est)   : '';
+  var localTz = tz || 'Europe/London';
+  var schedStr = sched ? fmtTime(sched, localTz) : '';
+  var estStr   = est   ? fmtTime(est, localTz)   : '';
   var deltaHtml = '';
   if (sched && est) {
     var deltaMins = Math.round((est - sched) / 60);
@@ -1424,10 +1414,21 @@ function fmtTimeLine(label, sched, est) {
       deltaHtml = ' <span style="color:#66ddff">(' + (-deltaMins) + ' min early)</span>';
     }
   }
-  if (schedStr && estStr && schedStr !== estStr) {
-    return label + ' ' + schedStr + ' &rarr; ' + estStr + deltaHtml;
+  var mainStr = (schedStr && estStr && schedStr !== estStr)
+    ? schedStr + ' &rarr; ' + estStr
+    : (schedStr || estStr);
+
+  // Always show when the airport itself isn't in the UK — even if the two
+  // times happen to be numerically equal right now (e.g. Portugal shares
+  // the UK's clock year-round), suppressing it made it look inconsistent/
+  // broken rather than "same timezone right now".
+  var ukHtml = '';
+  if (showUk && tz && tz !== 'Europe/London') {
+    var bestTs = est || sched;
+    var ukStr  = fmtTime(bestTs, 'Europe/London');
+    ukHtml = ' <span class="cv-uk-time">' + ukStr + ' UK</span>';
   }
-  return label + ' ' + (schedStr || estStr) + deltaHtml;
+  return label + ' ' + mainStr + deltaHtml + ukHtml;
 }
 
 function detTerminalHtml(terminal, gate) {
@@ -1452,8 +1453,8 @@ function buildRouteHtml(route, ac) {
 
   var depTermHtml = detTerminalHtml(route.orig_terminal, null);
   var arrTermHtml = detTerminalHtml(route.dest_terminal, route.dest_gate);
-  var depLine     = fmtTimeLine('Dep', route.depart_sched, route.depart_est);
-  var arrLine     = fmtTimeLine('Arr', route.arrive_sched, route.arrive_est);
+  var depLine     = fmtTimeLine('Dep', route.depart_sched, route.depart_est, route.orig_tz);
+  var arrLine     = fmtTimeLine('Arr', route.arrive_sched, route.arrive_est, route.dest_tz);
 
   var arrowRow = '&#8595;';
   if (route.ete_s) arrowRow += '&nbsp;&nbsp;' + fmtEte(route.ete_s);
@@ -1656,10 +1657,6 @@ function toggleClosest() {
 
 function updateClosestView() {
   if (!closestMode) return;
-  var now = new Date();
-  var updEl = document.getElementById('cv-updated');
-  if (updEl) updEl.textContent = 'Updated ' + now.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-
   var contentEl = document.getElementById('cv-content');
   if (!contentEl) return;
 
@@ -1704,8 +1701,8 @@ function updateClosestView() {
     if (route.dest_terminal) dParts.push('T' + route.dest_terminal);
     if (route.dest_gate)     dParts.push('Gate ' + route.dest_gate);
     var destTerm  = dParts.length ? '  <span class="cv-terminal">' + dParts.join(' &middot; ') + '</span>' : '';
-    var depLine  = fmtTimeLine('Dep', route.depart_sched, route.depart_est);
-    var arrLine  = fmtTimeLine('Arr', route.arrive_sched, route.arrive_est);
+    var depLine  = fmtTimeLine('Dep', route.depart_sched, route.depart_est, route.orig_tz, true);
+    var arrLine  = fmtTimeLine('Arr', route.arrive_sched, route.arrive_est, route.dest_tz, true);
     var eteStr   = route.ete_s ? fmtEte(route.ete_s) : '';
     var distStr  = route.distance_nm ? route.distance_nm.toLocaleString() + ' nm' : '';
     var flightInfoParts = [eteStr, distStr].filter(Boolean);

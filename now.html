@@ -174,6 +174,11 @@ header {
 .ac-route-arrow { font-family: var(--mono); font-size: clamp(14px, 2.8vh, 32px); color: var(--air-dim); padding: 0.4vh 0; }
 .ac-times { font-family: var(--mono); font-size: clamp(14px, 2.7vh, 32px); color: var(--air); margin-top: 0.4vh; }
 .ac-times .early { color: var(--relief); } .ac-times .late { color: var(--late); } .ac-times .ontime { color: var(--ontime); }
+.ac-uk-time {
+  font-size: 0.58em; font-weight: normal; color: var(--text-dim); opacity: 0.9;
+  border: 1px solid var(--air-dim); border-radius: 4px; padding: 0.05em 0.4em;
+  margin-left: 0.3em; white-space: nowrap;
+}
 .ac-route-loading { font-size: clamp(14px, 2.4vh, 26px); color: var(--text-faint); font-style: italic; align-self: center; }
 .ac-flight-info { text-align: right; font-family: var(--mono); font-size: clamp(13px, 2.4vh, 28px); color: var(--text-dim); align-self: center; white-space: nowrap; }
 .ac-flight-info div + div { margin-top: 0.8vh; }
@@ -626,16 +631,22 @@ function fetchAirportName(iata) {
     .then(r => r.json()).then(r => { extraAirports[iata] = r.name || ''; if (r.name) renderAircraft(); })
     .catch(() => { extraAirports[iata] = null; });
 }
-function fmtTime(ts) {
-  return new Date(ts * 1000).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+function fmtTime(ts, tz) {
+  return new Date(ts * 1000).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', timeZone: tz || 'Europe/London'});
 }
 function fmtEte(s) {
   const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
   return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
 }
-function fmtTimeLine(label, sched, est) {
+// tz: IANA name for the airport this time belongs to (route.orig_tz for
+// Dep, route.dest_tz for Arr) — without it FlightAware's raw timestamps
+// would render in whatever zone the device happens to be set to, silently
+// mislabelled as "local". showUk additionally appends the same instant in
+// UK time, when it differs from the airport-local time shown.
+function fmtTimeLine(label, sched, est, tz, showUk) {
   if (!sched && !est) return null;
-  const schedStr = sched ? fmtTime(sched) : '', estStr = est ? fmtTime(est) : '';
+  const localTz = tz || 'Europe/London';
+  const schedStr = sched ? fmtTime(sched, localTz) : '', estStr = est ? fmtTime(est, localTz) : '';
   let deltaHtml = '';
   if (sched && est) {
     const deltaMins = Math.round((est - sched) / 60);
@@ -643,8 +654,18 @@ function fmtTimeLine(label, sched, est) {
     else if (deltaMins > 0) deltaHtml = ' <span class="late">+' + deltaMins + 'm</span>';
     else deltaHtml = ' <span class="early">' + (-deltaMins) + 'm early</span>';
   }
-  if (schedStr && estStr && schedStr !== estStr) return label + ' ' + schedStr + ' → ' + estStr + deltaHtml;
-  return label + ' ' + (schedStr || estStr) + deltaHtml;
+  const mainStr = (schedStr && estStr && schedStr !== estStr) ? schedStr + ' → ' + estStr : (schedStr || estStr);
+  // Always show when the airport itself isn't in the UK — even if the two
+  // times happen to be numerically equal right now (e.g. Portugal shares
+  // the UK's clock year-round), suppressing it made it look inconsistent/
+  // broken rather than "same timezone right now".
+  let ukHtml = '';
+  if (showUk && tz && tz !== 'Europe/London') {
+    const bestTs = est || sched;
+    const ukStr = fmtTime(bestTs, 'Europe/London');
+    ukHtml = ' <span class="ac-uk-time">' + ukStr + ' UK</span>';
+  }
+  return label + ' ' + mainStr + deltaHtml + ukHtml;
 }
 function fetchRoute(cs) {
   if (routeInFlight[cs] || routeCache[cs]) return;
@@ -697,8 +718,8 @@ function renderAircraft() {
     const destCity = airportName(route.dest_iata) || route.dest;
     const origIata = route.orig_iata ? ' <span class="ac-iata">' + route.orig_iata + '</span>' : '';
     const destIata = route.dest_iata ? ' <span class="ac-iata">' + route.dest_iata + '</span>' : '';
-    const depLine = fmtTimeLine('Dep', route.depart_sched, route.depart_est);
-    const arrLine = fmtTimeLine('Arr', route.arrive_sched, route.arrive_est);
+    const depLine = fmtTimeLine('Dep', route.depart_sched, route.depart_est, route.orig_tz, true);
+    const arrLine = fmtTimeLine('Arr', route.arrive_sched, route.arrive_est, route.dest_tz, true);
     const eteStr = route.ete_s ? fmtEte(route.ete_s) : '';
     const distStr = route.distance_nm ? route.distance_nm.toLocaleString() + ' nm' : '';
     const infoParts = [eteStr, distStr].filter(Boolean);
