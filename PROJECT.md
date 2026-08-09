@@ -258,7 +258,7 @@ icons/
   *.png / *.svg             # Radio station logos, WagtailCam logo
 
 logos/                      # Airline logos cached from pics.avs.io (created at runtime)
-aircraft-info/              # Aircraft year/reg from OpenSky (created at runtime)
+aircraft-info/              # Aircraft year of manufacture, CAA G-INFO + SkyLink (created at runtime)
 airport-names.json          # IATA→name map from OurAirports CSV (downloaded on first run)
 bus-stops.json              # OSM bus stop locations (created on first bus map load)
 bus-route-stops.json        # Bus route timetable stop lists (built progressively)
@@ -500,7 +500,9 @@ Departure status: `On time` → `OT` · `Delayed` → `D` · `Cancelled` → `C`
 
 Leaflet.js OSM map + canvas overlay. Aircraft triangles rotated by heading.
 
-- ADS-B data via `/api/flights` → adsb.lol API (proxied — adsb.lol dropped direct CORS support)
+- ADS-B data via `/api/flights` → proxied aggregator chain, **airplanes.live → adsb.fi → adsb.lol**
+  (see [ADS-B source fallback chain](#ads-b-source-fallback-chain)). Always proxied rather than
+  called direct — adsb.lol dropped direct CORS support, and the chain needs server-side failover.
 - Route data via `/api/flight-route?cs=CALLSIGN` → Pi scrapes FlightAware. Results cached in
   `localStorage` under **`flightRouteCacheV2`** (renamed from `flightRouteCache` 2026-07-27 —
   see gotcha below). **TTL: 30 minutes** — timing data (actual/estimated departure and arrival)
@@ -1069,7 +1071,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | Endpoint | Upstream | Proxy TTL | Notes |
 |----------|----------|-----------|-------|
 | `GET /api/departures?station=CRS&rows=N[&platform=P]` | National Rail SOAP ldb12.asmx | 90 s | |
-| `GET /api/flights?lat=…&lon=…&dist=…[&focus=1]` | adsb.lol `/v2/lat/{}/lon/{}/dist/{}` | 60 s (20 s with `focus=1`) | lat/lon rounded to 2 dp, dist snapped to 10 nm; `focus=1` sent by aircraft.html focus mode for faster refresh |
+| `GET /api/flights?lat=…&lon=…&dist=…[&focus=1]` | `ADSB_SOURCES` chain: airplanes.live → adsb.fi → adsb.lol | 60 s (20 s with `focus=1`) | lat/lon rounded to 2 dp, dist snapped to 10 nm; `focus=1` sent by aircraft.html focus mode for faster refresh. Response is **normalised** to `{ac, total, now, src}` — `src` names the source that served it |
 | `GET /api/bods/departures?stop=ATCO` | Passenger platform scrape (parallel per operator) | 30 s | |
 | `GET /api/bods/buses` | BODS SIRI-VM (all operators in parallel) | 30 s | Full bus list |
 | `GET /api/buses/vehicles` | BODS (filtered to tracked routes, GeoJSON) | 30 s | |
@@ -1078,7 +1080,7 @@ HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
 | `GET /api/hive` | Hive Beekeeper API (via Cognito tokens) | 300 s | Auto-refreshes tokens |
 | `GET /api/flight-route?cs=CALLSIGN` | FlightAware HTML scrape | 4 h | Route, times, aircraft type |
 | `GET /api/airline-logo?iata=XX` | pics.avs.io (file-cached) | File permanent | |
-| `GET /api/aircraft-info?hex=XXXXXX` | OpenSky metadata (file-cached) | 30 days (mtime check) | |
+| `GET /api/aircraft-info?hex=XXXXXX` | CAA G-INFO (UK `G-` regs), then SkyLink (global, needs `SKYLINK_API_KEY`) | **Permanent** file cache, no TTL | Returns `{built, built_label}` or `{}`. **Not OpenSky** — its metadata API was retired and returns HTTP 410 Gone |
 | `GET /api/airport-name?iata=XXX` | `airport-names.json` (OurAirports CSV, downloaded once) | In-memory for life of process | Returns `{"name": "…"}` or `{"name": null}` |
 | `GET /api/trains` | RTT API (Twyford + Reading, 2 calls) + NR STOMP/CIF + SMART/CA berth model | 30 s | Confirmed stops + bi-directional Reading prediction + corridor filter + NR freight; live-berth ETA refinement |
 | `GET /api/radio/resolve?url=…` | PLS/M3U playlist fetch | 30 s | Returns direct stream URL |
@@ -1161,7 +1163,9 @@ other device.
 | National Rail SOAP | Proxy | Tile (120 s) + trains view | 90 s TTL | ~720 + view | Fair use |
 | RTT API (Twyford + Reading) | Proxy | trains.html (30 s) | 30 s TTL | ~5,760 (2×/30 s) | 9,000/day |
 | NR TRUST STOMP (TRAIN_MVT_ALL_TOC) | Proxy | Persistent TCP stream | — (push) | — (push) | None (up to 600 msg/min) |
-| ADS-B LOL | Proxy | Tile (60 s) + flights view | 60 s TTL | ~720 + view | Generous |
+| ADS-B: airplanes.live (primary) | Proxy | Tile (60 s) + flights view | 60 s TTL | ~720 + view | **1 req/sec**, non-commercial, no SLA |
+| ADS-B: adsb.fi (fallback 1) | Proxy | Only when primary fails | 60 s TTL | ~0 | Fair use |
+| ADS-B: adsb.lol (fallback 2) | Proxy | Only when both above fail | 60 s TTL | ~0 | Generous (**aggregator down since Aug 2026**) |
 | BODS SIRI-VM | Proxy | Bus map tab | 30 s | Low | None |
 | Passenger platform scrape | Proxy | Bus departures tab | 30 s TTL | ~2,880 | None |
 | Transport API timetable | Proxy | Map tab (progressive) | Once per route | 12 total | **1,000/day** |
@@ -1169,7 +1173,8 @@ other device.
 | adsbdb.com routes | Browser | Flights view, per callsign | Once per callsign | Low | None |
 | FlightAware scrape | Proxy | Flights view, per callsign | 4 h TTL | Low | Fair use |
 | Last.fm API | Proxy | Radio, on track change | 3600 s TTL | Low | Fair use |
-| OpenSky aircraft metadata | Proxy | Once per hex code | File-cached | ~0 | Fair use |
+| CAA G-INFO aircraft year (UK only) | Proxy | Once per hex code | File-cached permanently | ~0 | Undocumented API |
+| SkyLink aircraft year (global) | Proxy | Once per hex code, if G-INFO misses | File-cached permanently | ~0 | **1,000/month** (free tier) |
 | Hive Beekeeper API | Proxy | Weather view (5 min) | 300 s TTL | ~288 | None |
 
 **Transport API quota management:** 12 timetable route calls are cached permanently after first
@@ -1178,6 +1183,63 @@ departures endpoint) must not drop below 300 s without recalculating daily budge
 
 **Tile timer pause:** All home screen tile `setInterval` timers are cleared when any view opens,
 and restarted on return to home. This avoids wasting quota on invisible tile data.
+
+### ADS-B source fallback chain
+
+`/api/flights` reads from three interchangeable ADS-B aggregators, defined by `ADSB_SOURCES` in
+`transport-proxy.py` and walked in order by `_adsb_fetch()`:
+
+| Order | Source | URL shape | Array key |
+|-------|--------|-----------|-----------|
+| 1 | airplanes.live | `/v2/point/{lat}/{lon}/{dist}` | `ac` |
+| 2 | adsb.fi | `/api/v2/lat/{lat}/lon/{lon}/dist/{dist}` | `aircraft` |
+| 3 | adsb.lol | `/v2/lat/{lat}/lon/{lon}/dist/{dist}` | `ac` |
+
+All three serve the same **tar1090 per-aircraft schema** (`hex`, `flight`, `r`, `t`, `alt_baro`,
+`gs`, `track`, `lat`, `lon`, …), so only the URL shape and the array key differ. Adding a fourth
+source is a one-line addition to `ADSB_SOURCES`.
+
+**Why this exists (2026-08-09).** adsb.lol's aggregator network collapsed: its API stayed *up*
+and returned `HTTP 200` with `{"ac":[],"total":0}` while its own `/0/me` endpoint reported only
+~100 aircraft and 9 beast feeders worldwide (normally thousands). The proxy faithfully relayed
+the empty list, so every aircraft view silently showed "no aircraft nearby" with no error
+anywhere to explain it. There was no announcement; adsb.lol's own map showed "Problem fetching
+data from the server", its status page has been frozen since 2025-04-14, and the last
+substantive `adsblol/api` commits were March 2026. It may or may not come back — hence keeping
+it last in the chain rather than deleting it.
+
+**Rules that fall out of that failure mode — do not "simplify" these away:**
+
+- **Zero aircraft counts as failure.** A source returning an empty list is treated exactly like
+  one that errored, and the next source is tried. HTTP status alone is *not* a health signal;
+  checking only the status code reproduces the original bug.
+- **Failed sources get a 300 s cooldown** (`ADSB_COOLDOWN`, tracked in the module-level
+  `_adsb_down` dict) so a dead primary doesn't cost its 8 s timeout on every poll.
+- **If every source is in cooldown, the cooldowns are ignored** and all are tried anyway.
+  Without this, a genuinely quiet sky puts all three into cooldown together and the next
+  request 502s. This is the non-obvious edge case in the design.
+- **`ADSB_TIMEOUT` is 8 s**, so a worst-case walk of all three still fits inside the page's own
+  fetch timeout.
+
+**Response normalisation.** `_adsb_fetch()` returns `{ac, total, now, src}` regardless of which
+source answered — this is what hides adsb.fi's `aircraft` key from the frontends. The browser
+pages (`dashboard.html`, `aircraft.html`, `now.html`) only ever read `data.ac` plus per-aircraft
+fields, never the envelope, so the envelope is safe to change. `src` names the serving source
+and is the fastest way to diagnose aircraft problems:
+
+```bash
+curl -s "http://172.16.10.136:5001/api/flights?lat=51.4741&lon=-0.8610&dist=25" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['src'], d['total'])"
+```
+
+The proxy also logs `[adsb] <name> failed: …` and `[adsb] <name> returned 0 aircraft, trying
+next` to `dashboard.log`.
+
+**airplanes.live terms** (primary source, worth respecting): rate limited to **1 request per
+second**, no API key, **non-commercial use**, explicitly no SLA or uptime guarantee. API access
+does not currently require running a feeder but their docs warn "that might change in the
+future". Our worst case is 1 req/20 s in focus mode. Run by four aviation enthusiasts as a
+community project, funded by donation, with a no-sale covenant in their terms.
 
 ---
 
@@ -1778,7 +1840,7 @@ ssh of@172.16.10.168 'sudo of-expand'
 
 ## Current Status
 
-Everything working as of 2026-07-27.
+Everything working as of 2026-08-09.
 
 - [x] Joggler: Boot, WiFi, SSH
 - [x] Autologin → X → Openbox → kiosk chain (Chromium → Pi)
@@ -1802,7 +1864,8 @@ Everything working as of 2026-07-27.
 - [x] Bus stop data file-cached (Overpass, run once)
 - [x] Bus timetable route data building progressively (Transport API, file-cached)
 - [x] Aircraft route cache persisted to localStorage (30-min TTL)
-- [x] Aircraft info disk-cached on Pi (30-day mtime expiry)
+- [x] Aircraft year-of-manufacture disk-cached on Pi, permanently (CAA G-INFO → SkyLink)
+- [x] ADS-B served from a 3-source fallback chain (airplanes.live → adsb.fi → adsb.lol)
 - [x] Hive indoor temperatures in Weather view
 - [x] Graceful shutdown via power button (Joggler only)
 - [x] Chromecast from Joggler (cast-server.py on Joggler, port 9998)
@@ -1912,3 +1975,40 @@ Everything working as of 2026-07-27.
 - [x] dashboard.html: `#fd-focus`'s route-section padding trimmed too far while fixing the terminal/gate overflow above, leaving entries visually touching the header/stats divider lines for the common (short-route) case — rebalanced by reclaiming a little more room from the header/stats padding (which have more slack to spare) instead, roughly doubling the visible gap
 - [x] dashboard.html, aircraft.html: flight-route localStorage cache key renamed `flightRouteCache` → `flightRouteCacheV2` — the existing 30-min age-based pruning doesn't catch entries that are still "fresh" by age but were fetched before the backend response gained a new field (the `orig_tz`/`dest_tz` change above), so some already-cached flights just didn't show the new UK-time badges until their entry aged out, looking like an intermittent bug. Versioning the key invalidates every old-shape entry at once, and is the pattern to repeat if the route object's shape changes again (bump the suffix in both files — they share the key)
 - [x] dashboard.html: Aircraft tile's Flights tab now defaults to `nonCommercial: false` (was `true`) — opens showing airline traffic only; the "Other" filter button still toggles military/GA/helicopters back in
+
+### Session 2026-08-09
+
+- [x] **Aircraft views were showing "no aircraft nearby" — root cause was upstream, not our code.**
+      adsb.lol's aggregator network collapsed: the API stayed up and kept returning a well-formed
+      `HTTP 200` with `{"ac":[],"total":0}`, while its own `/0/me` endpoint reported only ~100
+      aircraft and 9 beast feeders globally. Verified the sky was in fact busy (airplanes.live
+      returned 267 aircraft within 60 nm of Twyford at the same moment). No announcement from
+      adsb.lol; their own map showed "Problem fetching data from the server"
+- [x] transport-proxy.py: replaced the single `ADSB_URL` constant with `ADSB_SOURCES`, a chain of
+      three aggregators walked in order by the new `_adsb_fetch()` — airplanes.live → adsb.fi →
+      adsb.lol. adsb.lol deliberately kept last rather than deleted, in case its feeders return.
+      Full design notes in "ADS-B source fallback chain" above
+- [x] **A source returning zero aircraft is treated as failed** and falls through to the next.
+      This is the whole point: the outage never produced an error, so checking HTTP status alone
+      would have reproduced the original silent failure exactly
+- [x] Failed sources get a 300 s cooldown (`_adsb_down`) so a dead primary doesn't cost its 8 s
+      timeout on every poll — **but if all sources are cooling down the cooldowns are ignored**,
+      otherwise a genuinely empty sky puts all three in cooldown and 502s the next request. Caught
+      in testing before deploy; it's the one non-obvious edge case in the design
+- [x] Responses normalised to `{ac, total, now, src}` — this hides adsb.fi's `aircraft` array key
+      (the other two use `ac`) from the frontends. Confirmed first that `dashboard.html`,
+      `aircraft.html` and `now.html` only ever read `data.ac` plus per-aircraft tar1090 fields and
+      never touch the envelope, so reshaping it is safe. `src` names the serving source
+- [x] Tested all six paths against the live method before deploying (primary healthy, primary
+      broken, cooldown skip, two broken, all cooling down, all unreachable). Deployed to the Pi and
+      verified live: 59 aircraft at dist=25, 248 at dist=60, `src: airplanes.live`. Pre-change
+      proxy backed up on the Pi at `transport-proxy.py.bak-preadsb`
+- [x] **airplanes.live terms noted**: 1 req/sec, no key, non-commercial, explicitly no SLA, and
+      feeder-free API access "might change in the future". Our worst case is 1 req/20 s. Community
+      project run by four enthusiasts — worth donating to given we now depend on it
+- [x] Checked whether the new sources' inline `year` field could replace the CAA G-INFO/SkyLink
+      year lookup — **it can't**: only ~6 of 270 aircraft carry it, almost all US general aviation,
+      none of the LHR commercial traffic focus mode cares about. Existing lookup stays
+- [x] Docs: corrected stale references claiming `/api/aircraft-info` uses **OpenSky with a 30-day
+      mtime TTL** (PROJECT.md ×3, PI-SETUP.md ×1). It has actually used CAA G-INFO → SkyLink with a
+      **permanent** file cache since OpenSky's metadata API was retired (HTTP 410 Gone)

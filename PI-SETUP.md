@@ -278,5 +278,5 @@ on the LAN.
 | `bus-stops.json` | Fetched from Overpass on first bus map load | Yes — regenerates |
 | `bus-route-stops.json` | Built progressively from Transport API | Yes — rebuilds slowly |
 | `logos/*.png` | Cached airline logos from pics.avs.io | Yes — re-fetched on demand |
-| `aircraft-info/*.json` | Aircraft year/reg from OpenSky | Yes — re-fetched on demand |
+| `aircraft-info/*.json` | Aircraft year of manufacture from CAA G-INFO, then SkyLink | Yes — re-fetched on demand (SkyLink is capped at 1,000/month, so avoid mass deletion) |
 | `hive-tokens.json` | Created by hive-setup.py, auto-refreshed | No — re-run hive-setup.py |
