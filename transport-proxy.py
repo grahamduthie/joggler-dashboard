@@ -29,7 +29,18 @@ _TZ_LONDON = ZoneInfo('Europe/London')
 NR_TOKEN     = '32cf81aa-5b5f-4195-8a02-6dc47bc20ce5'
 SOAP_URL     = 'https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb12.asmx'
 SOAP_ACT     = 'http://thalesgroup.com/RTTI/2015-05-14/ldb/GetDepBoardWithDetails'
-ADSB_URL     = 'https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{dist}'
+# ADS-B aggregators, tried in order. All serve the tar1090 schema; only the URL
+# shape and the array key differ (adsb.fi uses 'aircraft', the others use 'ac').
+# A source that errors OR returns zero aircraft is treated as failed and the next
+# is tried — adsb.lol's Aug 2026 outage served HTTP 200 with an empty list rather
+# than an error, so status code alone is not a health signal.
+ADSB_SOURCES = [
+    ('airplanes.live', 'https://api.airplanes.live/v2/point/{lat}/{lon}/{dist}',        'ac'),
+    ('adsb.fi',        'https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{dist}', 'aircraft'),
+    ('adsb.lol',       'https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{dist}',       'ac'),
+]
+ADSB_TIMEOUT = 8    # seconds per source — 3 sources must fit inside the page's own timeout
+ADSB_COOLDOWN = 300 # seconds to skip a source after it fails, so we don't pay its timeout every poll
 CACHE_TTL    = 90   # seconds — tile polls every 120s; TTL < interval = every call misses
 FLIGHT_TTL   = 60   # seconds — tile polls every 60s; same principle
 RADIO_TTL    = 30   # seconds — Bauer session keys expire quickly; resolve fresh each play
@@ -106,6 +117,7 @@ MIME    = {'.html': 'text/html', '.js': 'application/javascript',
 
 _cache         = {}
 _lock          = threading.Lock()
+_adsb_down     = {}   # ADS-B source name → unix ts until which it is skipped
 _calib_lock    = threading.Lock()
 _CALIB_OFFSETS   = {}   # line key ('ur'/'dr'/'um'/'dm') -> seconds to add to house_pass_ts
 _calib_offsets_ts = 0
@@ -3783,17 +3795,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if key in _cache and now - _cache[key][0] < ttl:
                 self._respond(200, 'application/json', _cache[key][1])
                 return
-        url = ADSB_URL.format(lat=lat, lon=lon, dist=dist)
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Joggler/1.0'})
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                body = resp.read()
-        except Exception as e:
-            self._respond(502, 'text/plain', str(e).encode())
+        body = self._adsb_fetch(lat, lon, dist, now)
+        if body is None:
+            self._respond(502, 'text/plain', b'no ADS-B source available')
             return
         with _lock:
             _cache[key] = (now, body)
         self._respond(200, 'application/json', body)
+
+    def _adsb_fetch(self, lat, lon, dist, now):
+        """Try each ADS-B source in turn, returning normalised JSON bytes with an
+        'ac' array. Returns the last empty result if every source is reachable but
+        the sky is genuinely quiet; None only if all sources errored."""
+        with _lock:
+            live = [s for s in ADSB_SOURCES if _adsb_down.get(s[0], 0) <= now]
+        # If everything is cooling down (e.g. a genuinely empty sky put all three
+        # in cooldown together), ignore the cooldowns rather than returning 502.
+        if not live:
+            live = ADSB_SOURCES
+        empty = None
+        for name, tmpl, arr_key in live:
+            url = tmpl.format(lat=lat, lon=lon, dist=dist)
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': 'Joggler/1.0'})
+                with urllib.request.urlopen(req, timeout=ADSB_TIMEOUT) as resp:
+                    data = json.loads(resp.read())
+            except Exception as e:
+                print(f'[adsb] {name} failed: {e}', flush=True)
+                with _lock:
+                    _adsb_down[name] = now + ADSB_COOLDOWN
+                continue
+            arr = data.get(arr_key) or []
+            out = json.dumps({
+                'ac': arr, 'total': len(arr), 'now': int(now * 1000), 'src': name,
+            }).encode()
+            if arr:
+                with _lock:
+                    _adsb_down.pop(name, None)
+                return out
+            # Reachable but no aircraft: could be a dead aggregator or a genuinely
+            # empty sky. Hold it as a fallback and let the next source prove itself.
+            print(f'[adsb] {name} returned 0 aircraft, trying next', flush=True)
+            with _lock:
+                _adsb_down[name] = now + ADSB_COOLDOWN
+            if empty is None:
+                empty = out
+        return empty
 
     def _bus_departures(self, qs):
         stop = qs.get('stop', ['035091060001'])[0].strip()
