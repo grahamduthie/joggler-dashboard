@@ -1,4 +1,9 @@
 #!/bin/bash
+# --remote-debugging-port=9222 binds to 127.0.0.1 only, so it is reachable just
+# over SSH (ssh -L 9222:127.0.0.1:9222 of@joggler), never from the LAN. It is here
+# because diagnosing a wedged page previously required restarting Chromium, which
+# destroys the very state being diagnosed. With CDP you can read the console and
+# evaluate JS in the live page instead.
 export DISPLAY=:0
 
 # Kill any stale Chromium from a previous session
@@ -50,6 +55,7 @@ except: pass
     --js-flags="--max-old-space-size=80" \
     --window-position=0,0 \
     --window-size=800,480 \
+    --remote-debugging-port=9222 \
     http://172.16.10.136:5001/
 
   echo "$(date): Chromium exited (code $?), restarting in 5s" >> /tmp/kiosk-watchdog.log

@@ -1754,6 +1754,55 @@ scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
 Config at `/boot/network.yaml` (EFI partition). `of-netplan` service copies to `/etc/netplan/`
 on every boot. Always edit `/boot/network.yaml`, never `/etc/netplan/`.
 
+### IPv6 blackhole on the Joggler (fixed 2026-08-10)
+The LAN router advertises itself as an IPv6 gateway, so the Joggler installed a
+`default … proto ra` IPv6 route — but it only ever gets a **link-local** address and has no
+working IPv6 path off-link. Any AAAA lookup therefore **blackholed**: a silent hang until
+timeout, with no ICMP unreachable to trigger fast failover.
+
+| Request | Before | After |
+|---------|--------|-------|
+| `tile.openstreetmap.org` (dualstack via Fastly) | HTTP 000 after 18–22 s | HTTP 200 in 0.42 s |
+| `unpkg.com` (Leaflet CDN, IPv4-only) | 6.4 s | 0.83 s |
+
+Symptom was blank Leaflet map tiles on the Transport view's Flights tab while every
+Pi-served endpoint (all IPv4, on-LAN) worked normally — so the dashboard looked half-broken
+rather than offline. IPv4-only hosts were merely slow; dualstack hosts failed outright.
+
+**Fix:** `/etc/sysctl.d/99-disable-ipv6.conf` on the Joggler sets
+`net.ipv6.conf.wlan0.disable_ipv6 = 1` and `net.ipv6.conf.default.disable_ipv6 = 1`.
+Loopback is deliberately left alone so `::1` still resolves. Revert by deleting the file
+and rebooting.
+
+Verify with `getent ahosts tile.openstreetmap.org` returning **only** IPv4 — *not* by
+reading `ip -6 route`, where the stale `proto ra` default entry can linger harmlessly
+(the interface has no IPv6 address left to source from).
+
+### Restarting the kiosk browser safely
+`kiosk.sh` is a `while true` watchdog launched from `~/.config/openbox/autostart`, and every
+loop iteration starts with `pkill -f chromium`. Two traps:
+
+- **Exactly one copy may run.** Two watchdogs fight — each kills the other's Chromium,
+  producing a permanently black screen and load average ~6. Check with
+  `pgrep -c -f "bash /home/of/kiosk.sh"`.
+- `pkill -f chromium` over SSH **often drops the connection** (exit 255) before later
+  commands in the same invocation run. Reconnect and check real state instead of assuming
+  the rest ran — a half-executed restart is exactly how the duplicate watchdog above happens.
+
+### Remote-debugging the kiosk browser
+`kiosk.sh` passes `--remote-debugging-port=9222`, bound to **127.0.0.1 only** (never exposed
+to the LAN). Reach it over SSH:
+
+```bash
+ssh -i ~/.ssh/id_ed25519 -N -L 9222:127.0.0.1:9222 of@172.16.10.168
+# http://127.0.0.1:9222/json/list → webSocketDebuggerUrl → speak CDP over that socket
+```
+
+It exists because a wedged page could previously only be inspected by restarting Chromium,
+which destroys the state you're trying to diagnose. With CDP you can read the console and
+evaluate JS in the live page. Python's `websockets` works from the Mac but needs
+`open_timeout=90` — the Atom Z520 is too slow for the default 10 s handshake timeout.
+
 ---
 
 ## Compatibility Notes
@@ -2012,3 +2061,28 @@ Everything working as of 2026-08-09.
 - [x] Docs: corrected stale references claiming `/api/aircraft-info` uses **OpenSky with a 30-day
       mtime TTL** (PROJECT.md ×3, PI-SETUP.md ×1). It has actually used CAA G-INFO → SkyLink with a
       **permanent** file cache since OpenSky's metadata API was retired (HTTP 410 Gone)
+
+### Session 2026-08-10
+
+- [x] **"No data" again — but not the ADS-B chain.** The proxy was healthy throughout
+      (`/api/flights` serving from airplanes.live, plus trains/buses/departures/TD/NRCC all
+      returning data), and the home screen's six tiles were fully populated including Aircraft.
+      Only the Transport view's **Flights tab** was blank
+- [x] **Root cause found: IPv6 blackhole on the Joggler** — router advertises an IPv6 default
+      route, device only has a link-local address and no path off-link, so every AAAA lookup
+      hung silently until timeout. OSM tiles (dualstack via Fastly) failed outright; IPv4-only
+      hosts like unpkg were just slow. Fixed with `/etc/sysctl.d/99-disable-ipv6.conf` — tiles
+      went from HTTP 000 after 18–22 s to HTTP 200 in 0.42 s, Leaflet CDN 6.4 s → 0.83 s.
+      Details under "IPv6 blackhole on the Joggler" above
+- [x] **Honest limit on the diagnosis**: the IPv6 breakage is proven and fixed, but it was
+      *not* proven to be what wedged the browser. A hard reload (`ctrl+shift+r`) produced a
+      pixel-identical blank screen; only restarting Chromium recovered it. The link between the
+      two is plausible, not confirmed — worth re-checking if the Flights tab blanks again
+- [x] kiosk.sh: added `--remote-debugging-port=9222` (127.0.0.1 only, reachable via SSH tunnel).
+      Diagnosing the wedged page previously required restarting Chromium, which destroys the
+      evidence; CDP lets the live page be inspected instead. Used it here to confirm recovery —
+      Leaflet loaded, 9/9 tiles, 32 aircraft, 23 passing filters, no exceptions
+- [x] Documented two kiosk restart traps hit while fixing this: two `kiosk.sh` watchdogs will
+      fight over Chromium (black screen, load ~6), and `pkill -f chromium` over SSH usually
+      drops the connection before the rest of the command runs — which is how the duplicate
+      watchdog gets created in the first place
