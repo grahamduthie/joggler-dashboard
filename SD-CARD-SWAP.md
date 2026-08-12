@@ -1,7 +1,7 @@
 # Swapping the Pi's failing SD card — clone-and-repair runbook
 
-Written 2026-08-12, after confirming the card returns different data on every physical read
-(see PROJECT.md → "The Pi's SD card is failing").
+Written 2026-08-12, after confirming the card returned different data on every physical read
+(see PROJECT.md → "The Pi's SD card failed and was REPLACED").
 
 > **This was executed successfully on 2026-08-12.** Old card SanDisk `SL16G` (06/2016) →
 > new SanDisk `SN64G` (02/2026). Root expanded 14 GB → 59 GB, `/home` verified byte-identical,
