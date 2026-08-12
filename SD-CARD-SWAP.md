@@ -72,28 +72,56 @@ ssh gduthie@172.16.10.136 'sudo shutdown -h now'
 
 ## Step 1 — Clone, on the Mac
 
-Put the old card in a reader. Identify it carefully — **`dd` to the wrong disk destroys it.**
+**These `dd` commands must be run from a real terminal window (Terminal.app / iTerm).** They
+need `sudo`, and neither a Claude Code tool call nor the `!` prefix provides a TTY for the
+password prompt — both fail with *"a terminal is required to read the password"*. On macOS the
+raw disk nodes are `root:operator` mode 640 and a normal admin account is not in `operator`, so
+there is no way around the password.
+
+Identify the card by **difference**, not by eye — `dd` to the wrong node destroys that disk:
 
 ```bash
-diskutil list                       # find the card, e.g. /dev/disk4
-diskutil unmountDisk /dev/diskOLD
-sudo dd if=/dev/rdiskOLD of=~/pi-card-image.img bs=4m status=progress
+diskutil list | grep '^/dev/disk'    # BEFORE inserting the card
+# ...insert card...
+diskutil list | grep '^/dev/disk'    # the new entry is your card
+diskutil info /dev/diskN | grep -iE 'Disk Size|Removable|Protocol'
 ```
 
-Using `/dev/rdiskN` (raw) rather than `/dev/diskN` is substantially faster on macOS.
-Expect roughly 10–20 minutes for 14.5 GB.
+Cross-check before trusting it: the old card is **exactly 15,523,119,104 bytes** and shows an
+`FDisk_partition_scheme` with `Windows_FAT_32 bootfs` + `Linux`. It should report
+`external, physical`, USB, removable. macOS will pop *"disk not readable"* when you insert it —
+that is the ext4 partition it cannot read. **Click Ignore, never Initialize.**
+
+```bash
+diskutil unmountDisk /dev/diskOLD
+sudo dd if=/dev/rdiskOLD of="$HOME/pi-card-image.img" bs=4m status=progress
+```
+
+`/dev/rdiskN` (raw, note the `r`) is several times faster than `/dev/diskN`. Expect roughly
+10–20 minutes for 14.5 GB. Recent macOS `dd` does accept `status=progress`; on older versions
+press **Ctrl-T** for a progress line instead.
+
+Verify the image is complete before going any further — it must be exactly the card's size:
+
+```bash
+stat -f%z "$HOME/pi-card-image.img"     # expect 15523119104
+```
+
+No read errors are expected: `badblocks` found zero *unreadable* sectors, since this card's
+failure is silent corruption rather than I/O failure. If `dd` does report read errors, re-run
+with `conv=noerror,sync` so the image keeps its offsets aligned.
 
 Then write it to the new card:
 
 ```bash
 diskutil list                       # find the NEW card
 diskutil unmountDisk /dev/diskNEW
-sudo dd if=~/pi-card-image.img of=/dev/rdiskNEW bs=4m status=progress
+sudo dd if="$HOME/pi-card-image.img" of=/dev/rdiskNEW bs=4m status=progress
 sync
 ```
 
 Going via an image file (rather than card-to-card) means you only read the failing card once,
-and you keep the image as a second fallback.
+it works with a single reader, and you keep the image as a second fallback.
 
 ## Step 2 — Boot the Pi on the new card
 
