@@ -4,10 +4,17 @@ Written 2026-08-12, after confirming the card returns different data on every ph
 (see PROJECT.md → "The Pi's SD card is failing").
 
 > **This was executed successfully on 2026-08-12.** Old card SanDisk `SL16G` (06/2016) →
-> new SanDisk `SN64G` (02/2026). Result: 110 corrupted files repaired to 0, root expanded
-> 14 GB → 59 GB, `/home` verified byte-identical, all services healthy. Total ~90 minutes.
-> The "gotchas hit in practice" section at the end records what the plan did not anticipate —
-> **read it before repeating this.**
+> new SanDisk `SN64G` (02/2026). Root expanded 14 GB → 59 GB, `/home` verified byte-identical,
+> all services healthy, 155 packages then brought up to date.
+>
+> Corruption was repaired over **two passes**, and the intermediate counts were misleading
+> because `dpkg -V` was silently aborting on corrupt dpkg metadata: reported 110 → "2", then
+> after fixing the metadata the first *complete* run showed **68** → repaired to **6**, all six
+> being verified-legitimate conffile customisations rather than damage. An independent
+> whole-system `gzip -t` sweep (8,697 files) confirms 0 failures.
+>
+> Budget ~4 hours, not 90 minutes. The "gotchas hit in practice" section at the end records
+> everything the plan did not anticipate — **read it before repeating this.**
 
 **You do not need to reinstall the OS.** Clone the card, then repair the corrupted files from
 the package repositories. All config, users, WiFi, SSH keys, systemd units and `/home` survive.
