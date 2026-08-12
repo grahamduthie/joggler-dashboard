@@ -230,16 +230,61 @@ assume it, `py-spy` is installed in that project's venv
 `py-spy dump --pid <pid> --locals` landing inside `refresh()` with a *different*
 `ComposableImage` address every time means the list has grown into the hundreds.
 
-**Pi-only files are backed up outside git — keep the backup current:** the Pi's SD card
-started showing signs of failure on 2026-07-08 (intermittent binary corruption). Everything
-under `/home/gduthie/twyford-dashboard` that isn't tracked in this repo (`.env`,
+### The Pi's SD card is failing — CONFIRMED 2026-08-12
+
+The suspicion raised on 2026-07-08 (intermittent binary corruption, `Illegal Instruction`
+crashes, `dpkg -V` mismatches) was **verified on 2026-08-12**. The card returns *different data
+on every physical read* of affected files. **Replace it.**
+
+The test that detects this — re-read the same file with the page cache dropped each time:
+
+```bash
+ssh gduthie@172.16.10.136 'for i in $(seq 1 10); do
+  sudo sh -c "sync; echo 3 > /proc/sys/vm/drop_caches"
+  md5sum /usr/bin/sed
+done | sort | uniq -c'
+```
+
+Ten reads produced **ten different MD5 sums**, none matching dpkg's recorded checksum.
+
+**Do not conclude the card is healthy from the usual checks — every one of them passes on this
+failing card**, and reading them as an all-clear is a mistake already made once in this project:
+
+| Check | Reported | Why it is blind to this |
+|---|---|---|
+| `badblocks` full 14.5 GB read-only scan | 0 bad blocks | Detects *unreadable* sectors only; the card returns data happily, just wrong |
+| ext4 `Filesystem state` / error count | `clean` / zero | ext4 does not checksum file **data** by default |
+| Lifetime writes / wear | 334 GB ≈ 21 P/E cycles | Wear was never the failure mode |
+| `dmesg` `mmc0` errors, read throughput | none, 18.2 MB/s | The card signals no error and does not slow down |
+
+Integrity has to be *tested by re-reading*, never inferred from error counters.
+
+It is the card and not the Pi: a 64 MB tmpfs file hashed 8× identically, repeated `sha256sum` of
+a constant returned the correct known value, and cached re-reads were stable — only cold reads
+from the media vary. Note also that **`mmc0` is the SD card and `mmc1` is the WiFi SDIO
+interface**; the journal is full of `mmc1`/`brcmf_sdio_*` noise that looks like storage failure
+and is not.
+
+Corruption is **region-localised**, which is why the box still runs: `dpkg -V` flags a contiguous
+alphabetical run (`/usr/bin/s*` binaries, babel locales `ak`→`dsb`, gtk30 locales `mk`→`nb`), and
+the flagged count *varies between runs*. **`/home/gduthie` is currently unaffected** — all 1245
+files under `twyford-dashboard/` and `Bus-Departure-Board/` read identically across two cold
+passes on 2026-08-12.
+
+**Pi-only files are backed up outside git — keep the backup current.** Everything under
+`/home/gduthie/twyford-dashboard` that isn't tracked in this repo (`.env`,
 `hive-credentials.json`, `hive-tokens.json`, `bus-stops.json`, `bus-route-stops.json`,
-`berth_chain.json`, `logos/`, `aircraft-info/`, `airport-names.json`,
-`calibration_log.jsonl`) plus the `twyford-dashboard.service`/`twyford-cast.service` unit
-files were mirrored to `~/Programming/pi-backups/2026-07-08/joggler/` on the Mac (see the
-`README.md` there for full contents and restore steps). If you add new gitignored files on
-the Pi, change credentials/tokens, or edit either unit file, refresh that backup (or make a
-new dated one) so a card failure doesn't lose them.
+`berth_chain.json`, `logos/`, `aircraft-info/`, `airport-names.json`, `signals_learned.json`,
+`calibration_log.jsonl`) plus the systemd unit files are mirrored to
+`~/Programming/pi-backups/` on the Mac. **Two dated backups exist deliberately:**
+
+- `2026-07-08/` — taken when the card's state was better understood; verified against the Mac repos
+- `2026-08-12/` — current; 1245 files checksum-verified against the Pi after two cold read passes
+
+Keep both until the Pi is rebuilt on a new card. Do not overwrite a known-good backup with data
+pulled off a corrupting card. See each directory's `README.md` for contents and restore steps.
+If you add new gitignored files on the Pi, change credentials/tokens, or edit a unit file,
+refresh the current backup.
 
 ---
 

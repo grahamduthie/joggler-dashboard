@@ -14,8 +14,15 @@ on the LAN) connects to `http://172.16.10.136:5001/`.
 | Model | Raspberry Pi 3 Model B Rev 1.2 (`a02082`), hostname `trainpi` |
 | CPU | 4 cores, nominal 1200 MHz |
 | RAM | 906 MB usable |
-| Storage | 14 GB SD card (`/dev/mmcblk0p2`), ~35% used |
+| Storage | 14 GB SD card (`/dev/mmcblk0p2`), ~35% used — **failing, see below** |
 | Network | WiFi via `brcmfmac` |
+
+**⚠ The SD card is failing (confirmed 2026-08-12).** SanDisk `SL16G`, manufactured **06/2016**.
+It returns *different data on every physical read* of affected files — ten cold reads of
+`/usr/bin/sed` gave ten different MD5 sums. `badblocks`, ext4 error counters, wear stats and
+`dmesg` all report clean, and are **blind to this failure mode**. Full detail, the detection
+test, and the backup situation are in PROJECT.md → "The Pi's SD card is failing". Replace the
+card; re-verify any new one with the same cold-reread test.
 
 **It runs hot and gets frequency-capped.** No heatsink or fan is fitted. Measured 2026-08-12:
 idling at **78–83 °C**, and at 83 °C `vcgencmd get_throttled` returned **`0x20002`** — bit 1
