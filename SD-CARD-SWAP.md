@@ -439,3 +439,64 @@ upgrade of a working display. Pin to what is installed instead:
 `RPi.GPIO` and `spidev` fail to rebuild (no wheels, missing build deps) — harmless, the existing
 installs survive, but confirm with `pip list` afterwards since `--force-reinstall` uninstalls
 before installing.
+
+### `dpkg -V` aborts silently — never suppress its stderr
+
+**The most dangerous trap in this whole exercise.** A corrupt file in dpkg's *own* metadata
+made the global verify abort partway:
+
+```
+dpkg: error: control file 'md5sums' for package 'adwaita-icon-theme' is missing value separator
+```
+
+That message goes to **stderr**, while the findings go to stdout. Running
+`dpkg -V 2>/dev/null` — the obvious thing to do, since dpkg is noisy — hides the abort and
+leaves you reading a *truncated* result as though it were complete. It reported "2 files
+failing" when the true figure was 68.
+
+Always run it as `dpkg -V 2>&1` and check for `dpkg: error`:
+
+```bash
+sudo dpkg -V 2>&1 | grep -c '^dpkg: error'    # must be 0
+sudo dpkg -V 2>/dev/null | wc -l              # only meaningful if the above is 0
+```
+
+Repair corrupt metadata by reinstalling the owning package, then re-run — the count will jump.
+Find malformed metadata directly with:
+
+```bash
+for m in /var/lib/dpkg/info/*.md5sums; do
+  awk 'NF && !/^[0-9a-f]{32}  /{bad=1} END{exit bad}' "$m" || echo "MALFORMED: $m"
+done
+```
+
+### Cross-check with a tool that does not depend on dpkg
+
+Because of the above, verify integrity a second way. A whole-system gzip test is cheap, needs no
+metadata, and independently caught 8 corrupt changelogs that the truncated `dpkg -V` had skipped:
+
+```bash
+sudo find /usr /var /etc /boot -name '*.gz' -type f -print0 \
+  | xargs -0 -n50 sudo gzip -t 2>&1 | grep '^gzip:' \
+  | grep -v '/var/lib/dpkg/alternatives/'      # those are plain text named after .gz manpages
+```
+
+8,697 files tested; expect **0** failures when the system is clean.
+
+### Expect several repair passes
+
+Because each pass reveals more (metadata repaired → verify runs further), budget for iterating
+until two consecutive checks agree:
+
+| Pass | Reported damaged | Real state |
+|---|---|---|
+| 1 | 110 | truncated run — real figure unknown |
+| after repair | 2 | still truncated |
+| after fixing dpkg metadata | **68** | first complete run |
+| after second repair | **6** | all 6 verified legitimate customisations |
+
+Conffiles (`c` in column 2) stay flagged forever — `dpkg -V` reports any deviation, including
+legitimate edits. On this system the permanent six are `/etc/login.defs`, `/etc/skel/.bashrc`,
+`/etc/default/useradd`, `/etc/avahi/avahi-daemon.conf`, `/etc/initramfs-tools/initramfs.conf`
+and `/usr/lib/modprobe.d/g_ether.conf` (the last has the machine's serial substituted at
+install). Diff against a pristine `apt-get download` copy to tell customisation from corruption.
