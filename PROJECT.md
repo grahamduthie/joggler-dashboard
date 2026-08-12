@@ -195,6 +195,41 @@ startup — it changes the size/timing of this memory spike and could reopen the
 window for the co-hosted service. Not a reason to avoid changes, just worth knowing the Pi
 isn't dedicated to this project alone.
 
+**The OLED board slows down over days — it is NOT a dashboard problem (diagnosed 2026-08-12).**
+The symptom is the LED/OLED departure board taking visibly longer and longer to refresh, which
+naturally reads as "the Pi is running out of memory". It isn't. Full writeup lives on the TrainPi
+side; recorded here because the obvious first suspect is `transport-proxy.py` and it should be
+ruled out quickly:
+
+- **Not memory.** ~300–400 MB available, swap essentially untouched (14 MB), zero OOM kills over
+  15 days uptime. `transport-proxy.py`'s **281 MB RSS is normal and stable** — that is the
+  in-memory CIF freight index (see the boot-time spike note above), not a leak. Confirm stability
+  by sampling `grep VmRSS /proc/<pid>/status` rather than reacting to the absolute number.
+- **Actual cause:** `luma.core`'s `ImageComposition.composed_images` grows without bound in
+  `NationalRailPy3.py`. `refresh()` iterates that whole list and PIL-`crop()`s every entry on
+  *every frame*, so frame time grows linearly, stretching the carousel cycle — and the board's
+  API fetch only fires once per carousel rotation. Measured degradation was **64 s → 190 s over
+  15 days** (~9 s/day) against a configured 55 s. Restarting the unit restored 58 s and dropped
+  RSS 169 MB → 40 MB.
+- **Mitigation in place:** `train-pi-restart.timer` → `train-pi-restart.service` on the Pi
+  restarts `train-pi-controller.service` nightly at 04:00 (`try-restart --no-block`,
+  `Persistent=false`). ~15 s of blank display, ~75 s to live data.
+
+Quick triage if the board looks slow again — measure, don't guess:
+
+```bash
+ssh gduthie@172.16.10.136 \
+  'sudo journalctl -u train-pi-controller --no-pager -o short-iso \
+     | grep "Background Fetch Started" | awk "{print \$1}" | tail -20'
+```
+
+Consecutive gaps should be ~58 s. If they are drifting upward, the leak has re-accumulated and a
+`sudo systemctl restart train-pi-controller` is the fix. To confirm the mechanism rather than
+assume it, `py-spy` is installed in that project's venv
+(`/home/gduthie/Bus-Departure-Board/venv/bin/py-spy`, needs `sudo`, use `--nonblocking`): repeated
+`py-spy dump --pid <pid> --locals` landing inside `refresh()` with a *different*
+`ComposableImage` address every time means the list has grown into the hundreds.
+
 **Pi-only files are backed up outside git — keep the backup current:** the Pi's SD card
 started showing signs of failure on 2026-07-08 (intermittent binary corruption). Everything
 under `/home/gduthie/twyford-dashboard` that isn't tracked in this repo (`.env`,

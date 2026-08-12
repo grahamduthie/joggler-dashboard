@@ -7,6 +7,41 @@ on the LAN) connects to `http://172.16.10.136:5001/`.
 
 ---
 
+## The Pi itself
+
+| Component | Detail |
+|-----------|--------|
+| Model | Raspberry Pi 3 Model B Rev 1.2 (`a02082`), hostname `trainpi` |
+| CPU | 4 cores, nominal 1200 MHz |
+| RAM | 906 MB usable |
+| Storage | 14 GB SD card (`/dev/mmcblk0p2`), ~35% used |
+| Network | WiFi via `brcmfmac` |
+
+**It runs hot and gets frequency-capped.** No heatsink or fan is fitted. Measured 2026-08-12:
+idling at **78–83 °C**, and at 83 °C `vcgencmd get_throttled` returned **`0x20002`** — bit 1
+(ARM frequency *currently* capped) plus bit 17 (has occurred). Actual ARM clock was bouncing
+**1034–1195 MHz** against the 1200 nominal, i.e. losing up to ~14% of clock. No under-voltage
+bits (0/16 clear), so the PSU is fine — this is purely thermal. A heatsink or small fan would
+help; until then, expect anything CPU-bound on this box to run slower than the spec implies.
+
+```bash
+vcgencmd measure_temp; vcgencmd get_throttled; vcgencmd measure_clock arm
+```
+
+**WiFi noise (benign so far):** `brcmfmac` SDIO errors recur 2–3×/day in the journal
+(`mmc1: Controller never released inhibit bit(s)`, `brcmf_sdio_read_control: read 2048 control
+bytes failed: -5`, `brcmf_sdio_rxfail: abort command, terminate frame, send NAK`). Connectivity
+recovers each time. Noted in case a future hang or stale-data incident correlates with them.
+
+`/boot/firmware/config.txt` still loads `dtoverlay=vc4-kms-v3d` and `display_auto_detect=1` on
+what is a headless box — harmless, but removable if you ever want the few MB back.
+
+**The Pi is shared with an unrelated project** (`train-pi-controller.service`, an OLED departure
+board). See PROJECT.md → "Boot / Autostart Chain → Pi (systemd)" for the memory-race and
+board-slowdown notes; both are things that look like dashboard faults but aren't.
+
+---
+
 ## Prerequisites
 
 - Raspberry Pi already installed, networked, and reachable at `172.16.10.136`
@@ -169,6 +204,28 @@ curl http://172.16.10.136:5001/api/hive
 # Bus stops (first call triggers Overpass fetch — may take ~10s)
 curl http://172.16.10.136:5001/api/buses/stops | python3 -m json.tool
 ```
+
+**Note the ADS-B endpoint is `/api/flights`, not `/api/adsb`** — easy to get wrong, and a wrong
+path returns a bare `404` that looks like a dead upstream rather than a typo. The full route list
+is greppable from the source:
+
+```bash
+grep -oE "'/api/[a-z-]+'" transport-proxy.py | sort -u
+```
+
+**What healthy looks like** (measured 2026-08-12, all served from localhost on the Pi):
+
+| Endpoint | Response |
+|----------|----------|
+| `/api/trains` | `trains` ≈ 55, ~0.3 s |
+| `/api/departures` | `services` ≈ 6 + `nrccMessages`, ~0.14 s |
+| `/api/flights?lat=51.474&lon=-0.861` | `ac` ≈ 227, `src: airplanes.live`, cached ~0.004 s |
+| `/api/td-live` | `positions` ≈ 43, `signals` ≈ 290, ~0.1 s |
+| `/api/nrcc` | `messages` ≈ 2, cached ~0.003 s |
+
+The `src` field on `/api/flights` names which ADS-B source served it — if it reads `adsb.fi` or
+`adsb.lol` rather than `airplanes.live`, the primary has failed over (see PROJECT.md for the
+three-source fallback chain).
 
 ---
 
