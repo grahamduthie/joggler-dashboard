@@ -3,6 +3,12 @@
 Written 2026-08-12, after confirming the card returns different data on every physical read
 (see PROJECT.md → "The Pi's SD card is failing").
 
+> **This was executed successfully on 2026-08-12.** Old card SanDisk `SL16G` (06/2016) →
+> new SanDisk `SN64G` (02/2026). Result: 110 corrupted files repaired to 0, root expanded
+> 14 GB → 59 GB, `/home` verified byte-identical, all services healthy. Total ~90 minutes.
+> The "gotchas hit in practice" section at the end records what the plan did not anticipate —
+> **read it before repeating this.**
+
 **You do not need to reinstall the OS.** Clone the card, then repair the corrupted files from
 the package repositories. All config, users, WiFi, SSH keys, systemd units and `/home` survive.
 
@@ -39,10 +45,13 @@ stably once you account for it changing mid-read.
 
 Two consequences, both folded into the steps below:
 
-- **The boot partition is affected**, so the kernel/firmware packages must be reinstalled too,
-  not just userland. Step 4 covers this.
-- **The venv's compiled `.so` files are corrupt** (pygame/SDL objects). Do **not** trust the
-  cloned venv — rebuild it from `requirementsPy3.txt`. Step 5a.
+- **The boot partition is affected**, so the kernel/firmware must be rewritten too, not just
+  userland. In practice the package repair regenerates the initramfs and does this for free.
+- **The venv's compiled `.so` files sit in a damaged region.** In the event they survived the
+  clone intact, but do not assume it — verify by force-reinstalling at *pinned* versions, not by
+  rebuilding from `requirementsPy3.txt` (whose `>=` constraints would upgrade a working display).
+  See "Verifying the venv" at the end. Also purge `__pycache__`: corrupt `.pyc` files are
+  invisible to `dpkg -V` and survive every package repair.
 
 ---
 
@@ -304,3 +313,129 @@ ssh gduthie@172.16.10.136 'systemctl is-active twyford-dashboard train-pi-contro
 Fall back to a fresh Raspberry Pi OS image (Raspberry Pi Imager can pre-set hostname, user, SSH
 key and WiFi, so it needs no monitor), then follow the restore outline in
 `~/Programming/pi-backups/2026-08-12/README.md`. Slower and more hands-on, but provably clean.
+
+---
+
+## Gotchas hit in practice (2026-08-12)
+
+Four things the plan above did not anticipate. All cost time; all are avoidable next time.
+
+### 1. `sqv` was corrupt, which broke apt entirely — a chicken-and-egg
+
+Trixie's apt verifies repository signatures with `/usr/bin/sqv`. That binary was in the damaged
+set, so **every** repository failed with `No good signature` and `apt-get update` was unusable —
+apt could not repair the very thing apt needed to work.
+
+Resolved **without** weakening apt, by fetching the package directly over HTTPS and verifying it
+against the md5 dpkg recorded at original install (which predates the corruption):
+
+```bash
+curl -fsSL -o /tmp/sqv.deb \
+  "https://deb.debian.org/debian/pool/main/r/rust-sequoia-sqv/sqv_1.3.0-3+b2_arm64.deb"
+dpkg-deb -x /tmp/sqv.deb /tmp/sqvx
+md5sum /tmp/sqvx/usr/bin/sqv                                   # compare against:
+sudo grep -h "usr/bin/sqv$" /var/lib/dpkg/info/*.md5sums
+sudo dpkg -i /tmp/sqv.deb
+```
+
+TLS transport plus a hash match against a pre-corruption record is stronger evidence than
+`--allow-unauthenticated`, and keeps signature verification on for everything afterwards.
+Note the archive carries the binNMU (`+b2`); `dpkg -s` reports the version without it.
+
+**Generalise this:** if any of `sqv`, `gpgv`, `apt`, `dpkg`, `tar` or `bash` is corrupt, apt
+cannot bootstrap itself. Repair those by direct download first.
+
+### 2. Repair `sed` before the bulk run
+
+`/usr/bin/sed` was corrupt and dying with `Illegal instruction`. Countless dpkg maintainer
+scripts call `sed`, so a bulk repair could fail midway. Fix it first:
+
+```bash
+sudo DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y sed
+echo x | sed s/x/ok/          # must print "ok"
+```
+
+Then check `bash perl awk grep tar gzip` all still run before proceeding.
+
+### 3. Reinstall only the damaged packages, not all 902
+
+The blanket reinstall in step 3 is wrong for a system with pending updates. It hit a
+`libcamera` solver conflict, and — more importantly — **204 packages had upgrades pending**, so
+it would have upgraded the system rather than repaired it. That is a much bigger change than a
+card swap warrants.
+
+Because the new card reads deterministically, `dpkg -V` is now stable and complete (it varied
+129/203 on the failing card, which is why the original plan distrusted it). So target precisely:
+
+```bash
+sudo dpkg -V | awk '{print $NF}' | sort -u > files.txt
+xargs -a files.txt -n1 dpkg -S 2>/dev/null | cut -d: -f1 | tr -d ' ' | sort -u > pkgs.txt
+sudo apt-get install --reinstall -y -o Dpkg::Options::=--force-confold $(tr '\n' ' ' < pkgs.txt)
+```
+
+110 damaged files → 36 packages → repaired to 0 in about 6 minutes. `--force-confold` keeps your
+edited conffiles; check them individually rather than letting them be replaced (see below).
+A few packages cannot be reinstalled at their installed version because the archive only carries
+a newer build — those necessarily upgrade, which for `bash`/`systemd`/`openssh` is fine.
+
+This also regenerates the initramfs, which rewrites `/boot/firmware/initramfs8` and
+`initramfs_2712` — covering the damaged boot-partition chunk without a separate kernel reinstall.
+
+### 4. Corrupt `.pyc` bytecode caches survive a package repair
+
+After the package repair the board still crashed:
+
+```
+File "<frozen importlib._bootstrap_external>", line 784, in _compile_bytecode
+ValueError: could not convert string to float: ''
+```
+
+A failure inside `_compile_bytecode` means Python read a **cached `.pyc` that unmarshalled to
+garbage**. Bytecode caches are not package-managed, so `dpkg -V` cannot see them and
+`apt --reinstall` does not clear them. Purge them wherever Python runs:
+
+```bash
+sudo find /home/gduthie/Bus-Departure-Board /home/gduthie/twyford-dashboard \
+  -name __pycache__ -type d -prune -exec rm -rf {} +
+sudo find /home/gduthie/Bus-Departure-Board /home/gduthie/twyford-dashboard -name '*.pyc' -delete
+```
+
+1,346 `.pyc` files were purged. Python regenerates them on next import.
+
+### Conffiles: check, do not blanket-replace
+
+`dpkg -V` flags conffiles (`c` in column 2) for *any* deviation, including legitimate edits.
+Two remain flagged permanently and **should not be repaired**:
+
+| File | Why it differs |
+|---|---|
+| `/etc/login.defs` | Raspberry Pi OS adds sbin dirs to `ENV_PATH` |
+| `/etc/skel/.bashrc` | Raspberry Pi OS enables colour prompt + grep aliases |
+
+Distinguish corruption from customisation by diffing against a pristine copy
+(`apt-get download <pkg>`, `dpkg-deb -x`, `diff`) — a real edit is coherent, corruption is not.
+Do this **before** trusting `--force-confold`; and check `sudo visudo -c` parses, since
+`/etc/sudoers.d/010_pi-nopasswd` is what grants passwordless sudo.
+
+### Two shell traps worth knowing
+
+- **`pkill -f <pattern>` matches your own SSH command line** and will kill your session
+  (exit 255). Use `pgrep -x`, or a pattern that cannot match the invoking command.
+- **`fs.protected_regular`** stops root overwriting another user's file in a sticky directory
+  like `/tmp`, giving a confusing `Permission denied` *as root*. Use a root-owned working
+  directory. Related: `sudo cmd > /root/file` redirects as **your** user and fails — use
+  `sudo bash -c 'cmd > /root/file'`.
+
+### Verifying the venv
+
+Do not rebuild from `requirementsPy3.txt` — its `>=` constraints turn a repair into a version
+upgrade of a working display. Pin to what is installed instead:
+
+```bash
+./venv/bin/pip freeze > /tmp/venv-pinned.txt
+./venv/bin/pip install --force-reinstall --no-cache-dir -r /tmp/venv-pinned.txt
+```
+
+`RPi.GPIO` and `spidev` fail to rebuild (no wheels, missing build deps) — harmless, the existing
+installs survive, but confirm with `pip list` afterwards since `--force-reinstall` uninstalls
+before installing.
