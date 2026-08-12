@@ -15,6 +15,35 @@ that handles all API proxying and serves the dashboard.
 
 ---
 
+## Current state — last verified 2026-08-12
+
+Read this first; it is the orientation a fresh session needs.
+
+| | |
+|---|---|
+| **Pi** (`trainpi`, 172.16.10.136) | Pi 3B. **SD card replaced 2026-08-12** — SanDisk `SN64G`, root 59 GB. Kernel 6.18.39, **0 pending package upgrades**. |
+| **Joggler** (172.16.10.168) | Unchanged thin client — Chromium → `http://172.16.10.136:5001/` |
+| **Services** | `twyford-dashboard`, `train-pi-controller`, `train-pi-restart.timer` — all active, 0 failed units |
+| **Integrity** | `dpkg -V` 0 errors / 6 flagged (all verified-legitimate conffiles); 0 corrupt `.gz` of 8,697 |
+| **Backup** | `~/Programming/pi-backups/2026-08-12/` — 1253 files, checksum-verified |
+
+Three known-open items, none urgent:
+
+1. **No heatsink.** Runs 79–86 °C and gets ARM-frequency-capped. Judge against ambient — the
+   86 °C reading was on a 32 °C day, which is roughly what an unheatsinked Pi 3 predicts. It is
+   an airflow problem, not a load problem (~17% CPU across four cores at that temperature).
+2. **The OLED board leaks and slows ~9 s/day** — an unfixed `updateCard()` bug in the
+   co-hosted TrainPi project. A nightly 04:00 restart timer works around it. See below.
+3. **Old SD card + `~/pi-card-image.img` retained as rollback.** Drop them once the new card has
+   run clean for a week or two.
+
+Where the detail lives: **`SD-CARD-SWAP.md`** (card swap procedure + a long list of traps that
+generalise — `dpkg -V` aborting silently, `mmc0` vs `mmc1`, corrupt `.pyc`), **`PI-SETUP.md`**
+(Pi hardware, build-from-scratch, endpoint health baselines), and the sections below for the
+dashboard itself.
+
+---
+
 ## Architecture
 
 ```
@@ -230,13 +259,26 @@ assume it, `py-spy` is installed in that project's venv
 `py-spy dump --pid <pid> --locals` landing inside `refresh()` with a *different*
 `ComposableImage` address every time means the list has grown into the hundreds.
 
-### The Pi's SD card is failing — CONFIRMED 2026-08-12
+### The Pi's SD card failed and was REPLACED — 2026-08-12 (resolved)
 
-The suspicion raised on 2026-07-08 (intermittent binary corruption, `Illegal Instruction`
-crashes, `dpkg -V` mismatches) was **verified on 2026-08-12**. The card returns *different data
-on every physical read* of affected files. **Replace it.**
+The 2026-07-08 suspicion (intermittent binary corruption, `Illegal Instruction` crashes) was
+confirmed on 2026-08-12: the card returned *different data on every physical read*. It has been
+**replaced and the system repaired** — SanDisk `SL16G` (06/2016) → `SN64G` (02/2026), root
+expanded 14 GB → 59 GB, and everything brought fully up to date (kernel 6.18.39).
 
-The test that detects this — re-read the same file with the page cache dropped each time:
+**Full procedure and traps: `SD-CARD-SWAP.md`.** Four lessons generalise beyond card swaps:
+
+**1. Test storage integrity by re-reading, never by error counters.** Every routine check passed
+on a card that was actively corrupting data — a mistake made once in this project already:
+
+| Check | Reported on the failing card | Why it is blind |
+|---|---|---|
+| `badblocks` full read-only scan | 0 bad blocks | Detects *unreadable* sectors; the card returned data happily, just wrong |
+| ext4 `Filesystem state` / error count | `clean` / zero | ext4 does not checksum file **data** by default |
+| Lifetime writes / wear | 334 GB ≈ 21 P/E cycles | Wear was never the failure mode |
+| `dmesg` `mmc0`, read throughput | none, 18.2 MB/s | No error signalled, no slowdown |
+
+The test that does work — 10 identical hashes means healthy:
 
 ```bash
 ssh gduthie@172.16.10.136 'for i in $(seq 1 10); do
@@ -245,31 +287,27 @@ ssh gduthie@172.16.10.136 'for i in $(seq 1 10); do
 done | sort | uniq -c'
 ```
 
-Ten reads produced **ten different MD5 sums**, none matching dpkg's recorded checksum.
+**2. `mmc0` is the SD card; `mmc1` is the WiFi SDIO interface.** The journal carries constant
+`mmc1` / `brcmf_sdio_*` noise that reads like storage failure and is not.
 
-**Do not conclude the card is healthy from the usual checks — every one of them passes on this
-failing card**, and reading them as an all-clear is a mistake already made once in this project:
+**3. `dpkg -V` can abort silently — never run it as `2>/dev/null`.** Corrupt dpkg metadata
+(`adwaita-icon-theme.md5sums`) made the global verify bail out partway; the error goes to
+**stderr** while findings go to stdout, so suppressing stderr presents a *truncated* result as a
+complete one. It reported "2 files failing" when the real figure was 68. Always:
 
-| Check | Reported | Why it is blind to this |
-|---|---|---|
-| `badblocks` full 14.5 GB read-only scan | 0 bad blocks | Detects *unreadable* sectors only; the card returns data happily, just wrong |
-| ext4 `Filesystem state` / error count | `clean` / zero | ext4 does not checksum file **data** by default |
-| Lifetime writes / wear | 334 GB ≈ 21 P/E cycles | Wear was never the failure mode |
-| `dmesg` `mmc0` errors, read throughput | none, 18.2 MB/s | The card signals no error and does not slow down |
+```bash
+sudo dpkg -V 2>&1 | grep -c '^dpkg: error'    # must be 0 before the count means anything
+```
 
-Integrity has to be *tested by re-reading*, never inferred from error counters.
+Cross-check with something that doesn't depend on dpkg metadata — a whole-system `gzip -t`
+sweep independently caught 8 corrupt changelogs the truncated run had skipped.
 
-It is the card and not the Pi: a 64 MB tmpfs file hashed 8× identically, repeated `sha256sum` of
-a constant returned the correct known value, and cached re-reads were stable — only cold reads
-from the media vary. Note also that **`mmc0` is the SD card and `mmc1` is the WiFi SDIO
-interface**; the journal is full of `mmc1`/`brcmf_sdio_*` noise that looks like storage failure
-and is not.
+**4. Corrupt `.pyc` caches survive any package repair.** Not package-managed, invisible to
+`dpkg -V`. Symptom is `ValueError` inside `_compile_bytecode`. Purge `__pycache__` and let
+Python regenerate.
 
-Corruption is **region-localised**, which is why the box still runs: `dpkg -V` flags a contiguous
-alphabetical run (`/usr/bin/s*` binaries, babel locales `ak`→`dsb`, gtk30 locales `mk`→`nb`), and
-the flagged count *varies between runs*. **`/home/gduthie` is currently unaffected** — all 1245
-files under `twyford-dashboard/` and `Bus-Departure-Board/` read identically across two cold
-passes on 2026-08-12.
+`/home/gduthie` came through the swap byte-identical — all 1245 files verified against the
+backup after the fact.
 
 **Pi-only files are backed up outside git — keep the backup current.** Everything under
 `/home/gduthie/twyford-dashboard` that isn't tracked in this repo (`.env`,
@@ -278,13 +316,18 @@ passes on 2026-08-12.
 `calibration_log.jsonl`) plus the systemd unit files are mirrored to
 `~/Programming/pi-backups/` on the Mac. **Two dated backups exist deliberately:**
 
-- `2026-07-08/` — taken when the card's state was better understood; verified against the Mac repos
-- `2026-08-12/` — current; 1245 files checksum-verified against the Pi after two cold read passes
+- `2026-07-08/` — pre-dates the card failure; kept as a second opinion
+- `2026-08-12/` — **current** (1253 files, refreshed after the swap and the upgrade). Includes
+  the `train-pi-restart` units and was checksum-verified against the Pi.
 
-Keep both until the Pi is rebuilt on a new card. Do not overwrite a known-good backup with data
-pulled off a corrupting card. See each directory's `README.md` for contents and restore steps.
-If you add new gitignored files on the Pi, change credentials/tokens, or edit a unit file,
-refresh the current backup.
+Keep both until the new card has run clean for a week or two, then `2026-07-08/` can go. The
+reason two exist: a backup pulled off a corrupting card should never overwrite a known-good one.
+See each directory's `README.md` for contents and restore steps. If you add new gitignored files
+on the Pi, change credentials/tokens, or edit a unit file, refresh the current backup.
+
+Also outside git: `~/pi-card-image.img` on the Mac — the 14.5 GB raw image of the **old, failing**
+card. Useful only as a last-resort forensic copy; it contains the corruption. The old physical
+card is retained as the rollback.
 
 ---
 

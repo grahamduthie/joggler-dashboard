@@ -14,22 +14,42 @@ on the LAN) connects to `http://172.16.10.136:5001/`.
 | Model | Raspberry Pi 3 Model B Rev 1.2 (`a02082`), hostname `trainpi` |
 | CPU | 4 cores, nominal 1200 MHz |
 | RAM | 906 MB usable |
-| Storage | 14 GB SD card (`/dev/mmcblk0p2`), ~35% used — **failing, see below** |
+| Storage | 64 GB SD card, root `/dev/mmcblk0p2` = 59 GB, ~10% used |
 | Network | WiFi via `brcmfmac` |
+| Kernel | 6.18.39+rpt-rpi-v8 (Debian Trixie, fully up to date as of 2026-08-12) |
 
-**⚠ The SD card is failing (confirmed 2026-08-12).** SanDisk `SL16G`, manufactured **06/2016**.
-It returns *different data on every physical read* of affected files — ten cold reads of
-`/usr/bin/sed` gave ten different MD5 sums. `badblocks`, ext4 error counters, wear stats and
-`dmesg` all report clean, and are **blind to this failure mode**. Full detail, the detection
-test, and the backup situation are in PROJECT.md → "The Pi's SD card is failing". Replace the
-card; re-verify any new one with the same cold-reread test.
+**SD card replaced 2026-08-12.** The previous card (SanDisk `SL16G`, 06/2016) failed with
+*silent read corruption* and was swapped for a **SanDisk `SN64G` (02/2026)**. The full
+procedure, the measured damage map, and a long list of traps are in **`SD-CARD-SWAP.md`** —
+read that before ever repeating a swap. Two things from it are worth knowing generally:
+
+- **`mmc0` is the SD card; `mmc1` is the WiFi SDIO interface.** The journal is full of
+  `mmc1` / `brcmf_sdio_*` errors that look like storage failure and are not.
+- **To test card integrity, re-read a file with the cache dropped** — `badblocks`, ext4 error
+  counters, wear stats and `dmesg` all reported perfectly clean on a card that was returning
+  different bytes on every read:
+
+```bash
+for i in $(seq 1 10); do
+  sudo sh -c "sync; echo 3 > /proc/sys/vm/drop_caches"
+  md5sum /usr/bin/sed
+done | sort | uniq -c        # 10 identical = healthy; anything else = failing
+```
+
+A fallback kernel is staged at `/boot/firmware/kernel8-old.img` (6.12.47) — if a future kernel
+misbehaves, add `kernel=kernel8-old.img` to `/boot/firmware/config.txt` from any machine.
+Safe to delete once 6.18.39 has proven itself.
 
 **It runs hot and gets frequency-capped.** No heatsink or fan is fitted. Measured 2026-08-12:
-idling at **78–83 °C**, and at 83 °C `vcgencmd get_throttled` returned **`0x20002`** — bit 1
-(ARM frequency *currently* capped) plus bit 17 (has occurred). Actual ARM clock was bouncing
-**1034–1195 MHz** against the 1200 nominal, i.e. losing up to ~14% of clock. No under-voltage
-bits (0/16 clear), so the PSU is fine — this is purely thermal. A heatsink or small fan would
-help; until then, expect anything CPU-bound on this box to run slower than the spec implies.
+**79–86 °C**, with `vcgencmd get_throttled` showing ARM frequency capping and, at peak, bit 18
+(hard thermal throttle reached). Actual clock bounces **1034–1195 MHz** against 1200 nominal.
+No under-voltage bits (0/16 clear), so the PSU is fine — purely thermal.
+
+**Interpret those numbers against ambient**: that day the kitchen was **32 °C**, and a Pi 3
+without a heatsink sits roughly 50 °C above ambient under partial load, so ~86 °C was close to
+predicted rather than a fault. Re-measure on an ordinary day. Note also that at 86 °C the box
+was only ~17% busy across four cores (board ~56% of one core, proxy ~19%) — so this is airflow,
+not load, and **cooling is the lever, not reducing work**. Throttle flags reset on reboot.
 
 ```bash
 vcgencmd measure_temp; vcgencmd get_throttled; vcgencmd measure_clock arm
