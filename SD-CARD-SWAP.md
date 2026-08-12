@@ -123,6 +123,42 @@ sync
 Going via an image file (rather than card-to-card) means you only read the failing card once,
 it works with a single reader, and you keep the image as a second fallback.
 
+### Never mount a partition to inspect it — read it raw
+
+**Mounting a filesystem on macOS is never read-only.** Mounting the FAT `bootfs` volume to check
+its contents causes macOS to write `.Spotlight-V100`/`.fseventsd` and to update the FSInfo
+free-cluster counters, so the card immediately stops matching the image. Worse, macOS
+**auto-mounts the volume as soon as `dd` finishes** and re-reads the partition table, and
+`diskutil unmountDisk` then flushes FSInfo back to the card — so the difference reappears even
+if you rewrite the partition. It is not a fight you can win, and does not need winning.
+
+Verify structures by reading the device or image directly instead — boot signature, partition
+entries, FAT32 BPB, ext4 superblock magic/UUID/state can all be parsed from raw bytes without
+mounting anything (see the Python snippets used on 2026-08-12, and step 7 below).
+
+### Expect the FSInfo sector to differ, and ignore it
+
+A byte-for-byte `cmp` of card against image will report a difference at **absolute offset
+8,389,608–8,389,615** — partition offset 1000–1007, which is `FSI_Free_Count` and `FSI_Nxt_Free`
+in the FAT32 FSInfo sector. This is benign and expected:
+
+- The FAT32 spec explicitly permits these to be stale; they are hints, not authority.
+- Linux's FAT driver treats them as untrusted and recomputes from the FAT on mount.
+- The Pi bootloader reads `config.txt`/`kernel8.img` without consulting FSInfo at all.
+
+What matters is that **nothing differs in the data region** (absolute offset ≥ 10,493,952 for
+this layout, i.e. past both FAT copies) and nothing differs in the ext4 partition (≥ 545,259,520).
+Use `cmp -l` to list *all* differences rather than plain `cmp`, which stops at the first:
+
+```bash
+sudo dd if=/dev/rdiskN bs=4m 2>/dev/null | head -c 15523119104 \
+  | cmp -l - "$HOME/pi-card-image.img" > /tmp/carddiff.txt
+wc -l < /tmp/carddiff.txt          # expect a handful, all around 8389609
+```
+
+Note `cmp -l` is CPU-bound and runs at roughly 25 MB/s — budget ~10 minutes for 14.5 GB, versus
+~3 for a plain `cmp`.
+
 ## Step 2 — Boot the Pi on the new card
 
 Swap the card in and power up. It should come up identically — same hostname (`trainpi`), same
