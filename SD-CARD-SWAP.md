@@ -15,6 +15,11 @@ Written 2026-08-12, after confirming the card returned different data on every p
 >
 > Budget ~4 hours, not 90 minutes. The "gotchas hit in practice" section at the end records
 > everything the plan did not anticipate — **read it before repeating this.**
+>
+> **Postscript 2026-08-13.** The new card was re-verified clean, and the old card was re-tested
+> on the Mac through a USB reader — still returning 38 unstable chunks in 3,701 with zero
+> reported errors, which proved the fault was the card and not the Pi's SD slot. **Old card
+> binned; there is no physical rollback.** See "Testing a suspect card off the Pi" near the end.
 
 **You do not need to reinstall the OS.** Clone the card, then repair the corrupted files from
 the package repositories. All config, users, WiFi, SSH keys, systemd units and `/home` survive.
@@ -300,6 +305,10 @@ Then a full package verification — should print nothing:
 ssh gduthie@172.16.10.136 'sudo dpkg -V'
 ```
 
+**Run it twice and diff the output.** Determinism is the real signal: on the failing card the
+count *changed between runs*, so one clean-looking run proves less than two identical ones. Done
+2026-08-13 — byte-identical, 6 entries, all verified-legitimate conffile edits.
+
 And confirm the services and endpoints are live:
 
 ```bash
@@ -310,10 +319,37 @@ ssh gduthie@172.16.10.136 'systemctl is-active twyford-dashboard train-pi-contro
 
 ## Step 8 — Afterwards
 
-- Keep the old card until the new one has run clean for a week.
-- Fit a heatsink while the Pi is open — it idles at 78–83 °C and gets ARM-frequency-capped
-  (PI-SETUP.md → "The Pi itself"). Heat plausibly contributed to the card's failure.
+- Keep the old card until the new one has run clean for a week, then test it before discarding —
+  see "Testing a suspect card off the Pi" below.
+- Fit a heatsink while the Pi is open — it runs 45–54 °C above ambient and gets
+  ARM-frequency-capped (PI-SETUP.md → "The Pi itself" has the measurements against ambient).
+  Heat plausibly contributed to the card's failure.
 - Re-run `dpkg -V` after a week as a regression check.
+
+## Testing a suspect card off the Pi (done 2026-08-13)
+
+Worth doing before binning a card, because it answers a question the in-Pi test cannot: **was it
+the card, or the Pi's SD slot?** Read the card on a different machine through a USB reader — if
+the fault follows the card, the card is guilty and the Pi's reader is cleared.
+
+On macOS, read the **raw character device** `/dev/rdiskN`, not `/dev/diskN`. The raw device
+bypasses the buffer cache, which is what makes each pass a genuine fresh read from the flash —
+the equivalent of `drop_caches` on Linux. Hash every 4 MiB chunk on each pass and compare.
+
+Two traps, both hit:
+
+- **`lseek(SEEK_END)` returns 0 on a macOS raw character device**, so a naive size probe yields
+  a zero-byte disk and the scan "passes" instantly having read nothing. Get the size from
+  `DKIOCGETBLOCKCOUNT`/`DKIOCGETBLOCKSIZE` ioctls or `diskutil info -plist`, and hard-fail on 0.
+- **`kill -0 <pid>` fails with `EPERM`, not `ESRCH`, when a normal user probes a root-owned
+  process** — so it reports a running scan as dead. Use `ps -p <pid>` to poll instead.
+
+Result on the old card: **38 of 3,701 chunks unstable (1.03%), 0 hard read errors**, 34 of them
+returning a different value on all three reads, scattered across the whole card. Throughput was a
+healthy 41 MiB/s throughout — **speed is never the tell with this failure mode**. Card binned.
+
+Do not compare percentages between read paths (Pi SD controller vs USB reader) and call a
+difference improvement — which chunks misread varies run to run.
 
 ## If the clone comes up broken instead
 

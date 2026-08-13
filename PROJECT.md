@@ -24,18 +24,21 @@ Read this first; it is the orientation a fresh session needs.
 | **Pi** (`trainpi`, 172.16.10.136) | Pi 3B. **SD card replaced 2026-08-12** — SanDisk `SN64G`, root 59 GB. Kernel 6.18.39, **0 pending package upgrades**. |
 | **Joggler** (172.16.10.168) | Unchanged thin client — Chromium → `http://172.16.10.136:5001/` |
 | **Services** | `twyford-dashboard`, `train-pi-controller`, `train-pi-restart.timer` — all active, 0 failed units |
-| **Integrity** | `dpkg -V` 0 errors / 6 flagged (all verified-legitimate conffiles); 0 corrupt `.gz` of 8,697 |
+| **Integrity** | `dpkg -V` 0 errors / 6 flagged (all verified-legitimate conffiles); 0 corrupt `.gz` of 8,697. **Re-verified 2026-08-13**: 10/10 identical cold re-reads, `dpkg -V` byte-identical across two runs |
 | **Backup** | `~/Programming/pi-backups/2026-08-12/` — 1253 files, checksum-verified |
 
-Three known-open items, none urgent:
+Two known-open items, neither urgent:
 
-1. **No heatsink.** Runs 79–86 °C and gets ARM-frequency-capped. Judge against ambient — the
-   86 °C reading was on a 32 °C day, which is roughly what an unheatsinked Pi 3 predicts. It is
-   an airflow problem, not a load problem (~17% CPU across four cores at that temperature).
+1. **No heatsink.** Judge against ambient, always. Two data points:
+   **86 °C on a 32 °C day** (54 °C rise) and **70.9–73.1 °C on a 26 °C day** (45 °C rise,
+   measured 2026-08-13). At the lower reading `get_throttled` was `0x20000` — bit 17 only, so
+   capping *had* occurred since boot but was not active, and the clock read a full 1200 MHz.
+   An airflow problem, not a load problem (~17% CPU across four cores even at 86 °C).
 2. **The OLED board leaks and slows ~9 s/day** — an unfixed `updateCard()` bug in the
    co-hosted TrainPi project. A nightly 04:00 restart timer works around it. See below.
-3. **Old SD card + `~/pi-card-image.img` retained as rollback.** Drop them once the new card has
-   run clean for a week or two.
+
+**Closed 2026-08-13:** the old SD card was re-tested and confirmed dead — **binned**. It is no
+longer a rollback option; see "The Pi's SD card failed" below.
 
 Where the detail lives: **`SD-CARD-SWAP.md`** (card swap procedure + a long list of traps that
 generalise — `dpkg -V` aborting silently, `mmc0` vs `mmc1`, corrupt `.pyc`), **`PI-SETUP.md`**
@@ -287,6 +290,32 @@ ssh gduthie@172.16.10.136 'for i in $(seq 1 10); do
 done | sort | uniq -c'
 ```
 
+**1b. Confirmed on independent hardware, 2026-08-13 — the old card was re-tested on the Mac
+through a USB card reader** (`/dev/rdisk5`, the raw character device, which bypasses the macOS
+buffer cache the way `drop_caches` does on Linux). Three full passes, 4 MiB chunks:
+
+| | |
+|---|---|
+| Chunks compared | 3,701 × 4 MiB (14.46 GiB) |
+| **Unstable chunks** | **38 (1.03%, ~152 MiB)** |
+| **Hard read errors** | **0** — full 41 MiB/s throughput, never once reported a failure |
+| All three reads differed | **34 of the 38** |
+| Distribution | chunk 14 → 3677, 29 separate runs, longest 2 chunks — scattered, not localised |
+
+**Why this mattered: reproducing the fault through a completely different controller, driver
+stack and power supply proves the card itself was bad, not the Pi's SD slot.** That was the last
+alternative explanation still open for the 2026-07-08 symptoms, and it is now closed — which also
+exonerates the Pi's reader for the new card.
+
+Do **not** read 1.03% against the original 1.6% as improvement: different read path, and *which*
+chunks misread varies between runs. The instability is random; both figures say the same thing.
+
+**No repair is possible for this failure mode.** A card returning wrong data while reporting
+success has lost its internal error detection. Reformatting only rewrites data — it cannot
+restore the controller's ability to know a read went bad, and there is nothing to remap because
+nothing is being flagged. **The card was binned 2026-08-13.** `~/pi-card-image.img` (the raw
+forensic image, corruption included) is the only remaining copy.
+
 **2. `mmc0` is the SD card; `mmc1` is the WiFi SDIO interface.** The journal carries constant
 `mmc1` / `brcmf_sdio_*` noise that reads like storage failure and is not.
 
@@ -326,8 +355,9 @@ See each directory's `README.md` for contents and restore steps. If you add new 
 on the Pi, change credentials/tokens, or edit a unit file, refresh the current backup.
 
 Also outside git: `~/pi-card-image.img` on the Mac — the 14.5 GB raw image of the **old, failing**
-card. Useful only as a last-resort forensic copy; it contains the corruption. The old physical
-card is retained as the rollback.
+card. Useful only as a last-resort forensic copy; it contains the corruption. **The old physical
+card was re-tested and binned on 2026-08-13 — there is no physical rollback.** The `2026-07-08/`
+and `2026-08-12/` backups are what you restore from.
 
 ---
 

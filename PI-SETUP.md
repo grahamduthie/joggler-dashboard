@@ -36,6 +36,17 @@ for i in $(seq 1 10); do
 done | sort | uniq -c        # 10 identical = healthy; anything else = failing
 ```
 
+**New card re-verified 2026-08-13:** 10/10 identical cold re-reads, and `dpkg -V` byte-identical
+across two consecutive runs. That second check is the useful one — on the failing card the
+`dpkg -V` count *changed between runs*, so determinism matters more than the count itself.
+
+**The old card was re-tested on the Mac and binned 2026-08-13.** Read through a USB card reader
+via `/dev/rdisk5` (raw character device — bypasses the macOS buffer cache, the equivalent of
+`drop_caches`), 3 passes × 3,701 × 4 MiB chunks: **38 unstable chunks (1.03%), 0 hard read
+errors**, 34 of them differing on all three reads. Reproducing the fault on entirely different
+hardware proved the card was bad rather than the Pi's SD slot. There is no fix for this failure
+mode and no physical rollback now exists — restore from `~/Programming/pi-backups/` instead.
+
 A fallback kernel is staged at `/boot/firmware/kernel8-old.img` (6.12.47) — if a future kernel
 misbehaves, add `kernel=kernel8-old.img` to `/boot/firmware/config.txt` from any machine.
 Safe to delete once 6.18.39 has proven itself.
@@ -47,9 +58,22 @@ No under-voltage bits (0/16 clear), so the PSU is fine — purely thermal.
 
 **Interpret those numbers against ambient**: that day the kitchen was **32 °C**, and a Pi 3
 without a heatsink sits roughly 50 °C above ambient under partial load, so ~86 °C was close to
-predicted rather than a fault. Re-measure on an ordinary day. Note also that at 86 °C the box
-was only ~17% busy across four cores (board ~56% of one core, proxy ~19%) — so this is airflow,
-not load, and **cooling is the lever, not reducing work**. Throttle flags reset on reboot.
+predicted rather than a fault. Note also that at 86 °C the box was only ~17% busy across four
+cores (board ~56% of one core, proxy ~19%) — so this is airflow, not load, and **cooling is the
+lever, not reducing work**. Throttle flags reset on reboot.
+
+**Re-measured on an ordinary day, 2026-08-13** (the check the paragraph above asked for):
+**70.9–73.1 °C with ambient 26 °C** — a **45 °C rise**, against 54 °C on the 32 °C day. So the
+rise over ambient is consistent, and the box is not in trouble day to day. `get_throttled` read
+`0x20000` — **bit 17 only**, meaning capping *had* occurred since boot but was not active, and
+the clock read a full 1200 MHz. Track the *delta over ambient*, not the absolute number:
+
+| Date | Ambient | SoC | Rise | `get_throttled` |
+|---|---|---|---|---|
+| 2026-08-12 | 32 °C | 79–86 °C | ~54 °C | `0x60002` — hard throttle reached (bit 18) |
+| 2026-08-13 | 26 °C | 70.9–73.1 °C | ~45 °C | `0x20000` — capped at some point, not active |
+
+A heatsink is still the highest-value fix, but it is not urgent at ordinary room temperatures.
 
 ```bash
 vcgencmd measure_temp; vcgencmd get_throttled; vcgencmd measure_clock arm
@@ -62,6 +86,31 @@ recovers each time. Noted in case a future hang or stale-data incident correlate
 
 `/boot/firmware/config.txt` still loads `dtoverlay=vc4-kms-v3d` and `display_auto_detect=1` on
 what is a headless box — harmless, but removable if you ever want the few MB back.
+
+**`man-db.service` failed daily until 2026-08-13 — fixed, and a red herring worth recognising.**
+The symptom was `mandb: can't create index cache /var/cache/man/be/<pid>: Resource temporarily
+unavailable`, which on this box looked alarmingly like the storage fault. It was not:
+
+- The **top-level** `/var/cache/man/index.db` was current — apt's man-db trigger refreshes it on
+  package installs — so `man ls` worked fine and nothing seemed wrong day to day.
+- The **per-locale** databases were all still the image-build originals from 04 Dec 2025. The
+  daily sweep walks locales alphabetically, hit the stale Belarusian db first, got `EAGAIN` out
+  of gdbm, and aborted the entire run two directories in.
+- Diagnostic that separated the two: user `man` could `touch` a file in that directory fine, and
+  `mandb` against a scratch directory worked — so it was the old database *files*, not the
+  directory, permissions, or the card.
+
+Fix (the cache is regenerable — it carries `CACHEDIR.TAG`, and was only 1.9 MB):
+
+```bash
+sudo mv /var/cache/man /var/cache/man.bak          # reversible; delete once happy
+sudo install -d -o man -g man -m 0755 /var/cache/man
+sudo -u man mandb --create                          # ~9,000 pages, a few minutes on a Pi 3B
+sudo systemctl reset-failed man-db.service && sudo systemctl start man-db.service
+```
+
+Verified by starting the unit twice (idempotent) and by `whatis`/`apropos` returning results.
+`systemctl --failed` is now empty.
 
 **The Pi is shared with an unrelated project** (`train-pi-controller.service`, an OLED departure
 board). See PROJECT.md → "Boot / Autostart Chain → Pi (systemd)" for the memory-race and
