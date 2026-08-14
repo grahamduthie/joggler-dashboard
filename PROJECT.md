@@ -465,13 +465,38 @@ The dashboard detects the display at startup and sets a class on `<html>`:
 
 | Class | Condition | Layout |
 |-------|-----------|--------|
-| `profile-joggler` | w==800 && h≤490 | Original Joggler layout; power button shown |
+| `profile-joggler` | 780≤w≤820 && h≤500 | Original Joggler layout; power button shown |
 | `profile-phone-portrait` | w≤540 && h>w | 2-col tile grid, views scroll vertically |
 | `profile-phone-landscape` | w≤900 && h≤500 | 3-col compact tiles, views fill screen |
 | `profile-card` | Everything else | 800 px centred card, rounded corners, power button hidden |
 
-An early-running `<script>` in `<head>` sets the class before the first CSS paint (prevents
-layout flash). A `resize` listener handles orientation changes.
+The rule lives in a single `applyProfile()` function defined in an early-running `<script>` in
+`<head>`, so the class is set before the first CSS paint (prevents layout flash). It is re-run
+on `DOMContentLoaded`, `load` and `resize` via `detectProfile()`, which wraps it.
+
+#### Why the Joggler match is a band, not `w == 800` (fixed 2026-08-14)
+
+The Joggler is exactly 800×480, and the check used to be `w === 800 && h <= 490`. Two bugs
+combined to make the **power button vanish for a whole session**:
+
+1. At kiosk startup Chromium can briefly report a slightly different viewport (window
+   decorations before Openbox settles). An exact `800` match then fails and falls through to
+   `profile-phone-landscape` — which hides `#power-btn` outright.
+2. The correction never ran. The `<head>` script classifies the viewport, but the
+   `resize` listener was registered near the **end of the body**. The startup resize fired
+   before that listener existed, so it was missed and the wrong class stuck until reload.
+
+Symptom: no power icon on the home screen, *and* the entire dashboard silently rendering in
+the compact phone-landscape layout. Diagnosed live over CDP — `document.documentElement.className`
+read `profile-phone-landscape` while `innerWidth/innerHeight` were a correct 800×480.
+
+Fix: widen the Joggler match to a 780–820 band, and re-run detection on `DOMContentLoaded` and
+`load` so a bad first-paint classification self-heals instead of persisting.
+
+**When touching this, keep the CSS fallback in step:** `@media (max-width: 779px)` hides
+`#power-btn` before JS runs. It must stop *below* the Joggler band, or it will hide the button
+on the Joggler itself regardless of the profile class. It was `799px` and had to move with the
+band.
 
 ### Top Bar (always visible)
 
@@ -1936,8 +1961,18 @@ reading `ip -6 route`, where the stale `proto ra` default entry can linger harml
 loop iteration starts with `pkill -f chromium`. Two traps:
 
 - **Exactly one copy may run.** Two watchdogs fight — each kills the other's Chromium,
-  producing a permanently black screen and load average ~6. Check with
-  `pgrep -c -f "bash /home/of/kiosk.sh"`.
+  producing a permanently black screen and load average ~6. Count them with
+  `pgrep -c -x -f "/bin/bash /home/of/kiosk.sh"` or
+  `ps -eo args | grep -c "^/bin/bash /home/of/kiosk.sh"`.
+
+  **Do not use `pgrep -c -f "bash /home/of/kiosk.sh"` over SSH.** `-f` matches full command
+  lines, including the remote `bash -c` running your own command — whose command line contains
+  the pattern string. It always reports one too many, so a healthy system looks like the
+  black-screen fault. (Verified 2026-08-14: reported 2, actual 1. Same class of bug as the
+  `pgrep -x` note in SD-CARD-SWAP.md.)
+- **Load average ~5-6 in the first minutes after boot is normal** on the Atom Z520 and is not
+  by itself evidence of the duplicate-watchdog fight. Confirm with the process count above
+  before restarting anything.
 - `pkill -f chromium` over SSH **often drops the connection** (exit 255) before later
   commands in the same invocation run. Reconnect and check real state instead of assuming
   the rest ran — a half-executed restart is exactly how the duplicate watchdog above happens.

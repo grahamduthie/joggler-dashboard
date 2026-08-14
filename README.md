@@ -39,7 +39,7 @@ The dashboard automatically adapts to the display it runs on:
 
 | Profile | Condition | Layout |
 |---------|-----------|--------|
-| `profile-joggler` | 800×≤490 px (Joggler exactly) | Original kiosk layout; power button visible |
+| `profile-joggler` | 780–820 px wide, ≤500 px tall | Original kiosk layout; power button visible |
 | `profile-phone-portrait` | ≤540 px wide, portrait | 2-column tile grid; views scroll |
 | `profile-phone-landscape` | ≤900 px wide, ≤500 px tall | 3-column compact tiles |
 | `profile-card` | Everything else | 800 px centred card; power button hidden |

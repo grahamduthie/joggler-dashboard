@@ -9,14 +9,20 @@
 <script src="hls.min.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
 <script>
-(function() {
+// Runs before render so the right profile is in place for the first paint.
+// The Joggler is 800x480, but at kiosk startup Chromium can briefly report a slightly
+// different viewport (window decorations before Openbox settles), so match a band rather
+// than exactly 800 — an exact match silently fell through to profile-phone-landscape,
+// which hides the power button. Re-run on load and resize (see detectProfile below).
+function applyProfile() {
   var w = window.innerWidth, h = window.innerHeight;
-  var profile = (w === 800 && h <= 490) ? 'profile-joggler'
-              : (w <= 540 && h > w)     ? 'profile-phone-portrait'
-              : (w <= 900 && h <= 500)  ? 'profile-phone-landscape'
-              :                           'profile-card';
+  var profile = (w >= 780 && w <= 820 && h <= 500) ? 'profile-joggler'
+              : (w <= 540 && h > w)                ? 'profile-phone-portrait'
+              : (w <= 900 && h <= 500)             ? 'profile-phone-landscape'
+              :                                      'profile-card';
   document.documentElement.className = profile;
-})();
+}
+applyProfile();
 </script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
@@ -2302,8 +2308,9 @@
   /* Radio: slightly smaller logo in landscape */
   html.profile-phone-landscape .tile-radio img.tile-icon { height: 32px; max-width: 130px; }
 
-  /* Fallback: power button on phones before JS profile detection */
-  @media (max-width: 799px) { #power-btn { display: none !important; } }
+  /* Fallback: power button on phones before JS profile detection.
+     Stops below the 780-820 Joggler band so it can't hide the button on the Joggler itself. */
+  @media (max-width: 779px) { #power-btn { display: none !important; } }
 
   /* Cursor: only real mouse/trackpad devices */
   @media (hover: hover) and (pointer: fine) {
@@ -2813,18 +2820,18 @@
   var CAST_BASE        = 'http://localhost:9998';
 
   function detectProfile() {
-    var w = window.innerWidth, h = window.innerHeight;
-    var profile = (w === 800 && h <= 490) ? 'profile-joggler'
-                : (w <= 540 && h > w)     ? 'profile-phone-portrait'
-                : (w <= 900 && h <= 500)  ? 'profile-phone-landscape'
-                :                           'profile-card';
-    document.documentElement.className = profile;
+    applyProfile();
     var flightsPanel = document.getElementById('trans-flights');
     if (flightsPanel && flightsPanel.classList.contains('active')) {
       setTimeout(flightSetupCanvas, 50);
     }
   }
   window.addEventListener('resize', detectProfile);
+  // The head script classifies the viewport before this listener exists, so a resize during
+  // startup is missed and its (wrong) profile sticks for the whole session. Re-check once the
+  // document is parsed and again after load, when the window has settled at its final size.
+  document.addEventListener('DOMContentLoaded', detectProfile);
+  window.addEventListener('load', detectProfile);
 
   // Force cursor:none to take effect immediately on load (Chromium/X11 doesn't apply it
   // until the first mouse event fires, leaving the cursor visible at its last position).
