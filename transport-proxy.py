@@ -21,12 +21,17 @@ import gzip
 import io
 import base64
 import collections
+import tempfile
 from urllib.parse import urlparse, parse_qs, quote
 from zoneinfo import ZoneInfo
 
 _TZ_LONDON = ZoneInfo('Europe/London')
+# The Pi deployment historically used this absolute path.  Keeping the default
+# alongside the source makes the backend portable while JOGGLER_APP_DIR lets a
+# service manager choose an explicit persistent state directory.
+APP_DIR = os.path.abspath(os.environ.get('JOGGLER_APP_DIR', os.path.dirname(__file__)))
 
-NR_TOKEN     = '32cf81aa-5b5f-4195-8a02-6dc47bc20ce5'
+NR_TOKEN     = ''
 SOAP_URL     = 'https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb12.asmx'
 SOAP_ACT     = 'http://thalesgroup.com/RTTI/2015-05-14/ldb/GetDepBoardWithDetails'
 # ADS-B aggregators, tried in order. All serve the tar1090 schema; only the URL
@@ -41,15 +46,41 @@ ADSB_SOURCES = [
 ]
 ADSB_TIMEOUT = 8    # seconds per source — 3 sources must fit inside the page's own timeout
 ADSB_COOLDOWN = 300 # seconds to skip a source after it fails, so we don't pay its timeout every poll
+WEATHER_URL = ('https://api.open-meteo.com/v1/forecast?latitude=51.474&longitude=-0.861'
+               '&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,'
+               'wind_gusts_10m,relative_humidity_2m,apparent_temperature,precipitation,'
+               'cloud_cover,surface_pressure,uv_index,is_day,dew_point_2m,visibility'
+               '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,pressure_msl'
+               '&daily=temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset,'
+               'precipitation_probability_max,precipitation_sum,wind_speed_10m_max,'
+               'wind_direction_10m_dominant,apparent_temperature_max,'
+               'apparent_temperature_min,uv_index_max&timezone=Europe%2FLondon'
+               '&past_days=1&forecast_days=7')
 CACHE_TTL    = 90   # seconds — tile polls every 120s; TTL < interval = every call misses
 FLIGHT_TTL   = 60   # seconds — tile polls every 60s; same principle
 RADIO_TTL    = 30   # seconds — Bauer session keys expire quickly; resolve fresh each play
 NOWPLAYING_TTL = 25  # seconds — ICY metadata cache; slightly under 30s poll interval
 ROUTE_TTL    = 14400  # 4 hours — FlightAware route per callsign; doesn't change mid-flight
 
+# HTTPS pages cannot play these HTTP streams directly.  This is deliberately a
+# host allow-list, not an open proxy: it only relays known radio stream origins.
+RADIO_STREAM_HOSTS = frozenset({
+    'marlowfm.radioca.st', 'stream.live.vc.bbcmedia.co.uk',
+    'icecast.thisisdax.com', 'media-ice.musicradio.com',
+    'icecast.radiofrance.fr', 'stream.kennetradio.com',
+    'stream.radioparadise.com', 'stv-dsharp.sharp-stream.com',
+    'times.live.stream.broadcasting.news', 'chandra.shoutca.st',
+})
+RADIO_STREAM_SUFFIXES = ('.sharp-stream.com',)
+
+
+def _radio_stream_host_allowed(hostname):
+    return hostname in RADIO_STREAM_HOSTS or any(
+        hostname.endswith(suffix) for suffix in RADIO_STREAM_SUFFIXES)
+
 # ── Bus: Transport API (departures + on-time) ────────────────────────────────
-BUS_APP_ID   = '8355685c'
-BUS_APP_KEY  = '4c99459ebd761de52c51b0b98766deb7'
+BUS_APP_ID   = ''
+BUS_APP_KEY  = ''
 BUS_DEP_URL  = ('https://transportapi.com/v3/uk/bus/stop/{stop}/live.json'
                 '?app_id={app_id}&app_key={app_key}&group=no&nextbuses=yes&limit=20')
 BUS_DEP_TTL  = 300  # seconds — ~288 req/day, leaves headroom for timetable calls
@@ -84,12 +115,12 @@ BUS_TIMETABLE_ROUTES = [
 BUS_TIMETABLE_URL  = ('https://transportapi.com/v3/uk/bus/route'
                       '/{op}/{route}/{direction}/timetable.json'
                       '?app_id={app_id}&app_key={app_key}')
-BUS_TIMETABLE_FILE = '/home/gduthie/twyford-dashboard/bus-route-stops.json'
+BUS_TIMETABLE_FILE = os.path.join(APP_DIR, 'bus-route-stops.json')
 
 # ── Hive central heating temperatures ────────────────────────────────────────
-HIVE_TOKEN_FILE = '/home/gduthie/twyford-dashboard/hive-tokens.json'
-HIVE_CREDS_FILE = '/home/gduthie/twyford-dashboard/hive-credentials.json'
-HIVE_SETUP_PY   = '/home/gduthie/twyford-dashboard/hive-setup.py'
+HIVE_TOKEN_FILE = os.path.join(APP_DIR, 'hive-tokens.json')
+HIVE_CREDS_FILE = os.path.join(APP_DIR, 'hive-credentials.json')
+HIVE_SETUP_PY   = os.path.join(APP_DIR, 'hive-setup.py')
 HIVE_API_BASE   = 'https://beekeeper-uk.hivehome.com/1.0'
 HIVE_TEMP_TTL   = 300   # 5 minutes
 
@@ -105,12 +136,12 @@ OVERPASS_QUERY  = (
     'out body;'
 )
 TRACKED_ROUTES  = frozenset({'850', '127', '128', '129', '12'})
-BUS_STOPS_FILE  = '/home/gduthie/twyford-dashboard/bus-stops.json'  # persisted across reboots
+BUS_STOPS_FILE  = os.path.join(APP_DIR, 'bus-stops.json')  # persisted across reboots
 BUS_STOPS_TTL   = 14400  # 4-hour in-memory cache; file reused indefinitely
 
-APP_DIR            = '/home/gduthie/twyford-dashboard'
 AIRPORT_NAMES_FILE = os.path.join(APP_DIR, 'airport-names.json')
 CALIBRATION_FILE   = os.path.join(APP_DIR, 'calibration_log.jsonl')
+TRAIN_EVIDENCE_FILE = os.path.join(APP_DIR, 'train-evidence.jsonl')
 MIME    = {'.html': 'text/html', '.js': 'application/javascript',
            '.png':  'image/png',  '.svg': 'image/svg+xml',
            '.json': 'application/json', '.css': 'text/css'}
@@ -122,6 +153,16 @@ _calib_lock    = threading.Lock()
 _CALIB_OFFSETS   = {}   # line key ('ur'/'dr'/'um'/'dm') -> seconds to add to house_pass_ts
 _calib_offsets_ts = 0
 _CALIB_MIN_N     = 4    # need at least this many logged presses on a line before trusting it
+# The safe rollout contract: callers get the proven legacy model unless they
+# explicitly request v2.  This lets the new model run against production data
+# and be compared without changing a kiosk screen.
+_TRAIN_MODEL_DEFAULT = 'legacy'
+_evidence_lock = threading.Lock()
+_evidence_recent = collections.deque(maxlen=240)
+_evidence_last_signature = ''
+_evidence_last_record_ts = 0
+_evidence_scored_crossings = collections.deque(maxlen=1000)
+_EVIDENCE_LOOKBACK_S = 180
 _airport_names = {}
 
 _ident_lock = threading.Lock()
@@ -172,10 +213,8 @@ def _load_airport_names():
     except Exception as e:
         print(f'Airport names download failed: {e}')
 
-threading.Thread(target=_load_airport_names, daemon=True).start()
-
 # ── Bus: BODS (Bus Open Data Service) ────────────────────────────────────────
-BODS_ENV_FILE   = '/home/gduthie/twyford-dashboard/.env'
+BODS_ENV_FILE   = os.path.join(APP_DIR, '.env')
 BODS_API_KEY    = ''   # loaded from BODS_ENV_FILE at startup
 LASTFM_API_KEY  = ''   # loaded from BODS_ENV_FILE at startup
 SKYLINK_API_KEY = ''   # loaded from BODS_ENV_FILE at startup
@@ -643,6 +682,7 @@ def _hive_fetch_temps():
 
 def _load_env():
     global BODS_API_KEY, LASTFM_API_KEY, SKYLINK_API_KEY, RTT_REFRESH_TOKEN
+    global NR_TOKEN, BUS_APP_ID, BUS_APP_KEY
     global NR_USERNAME, NR_PASSWORD
     try:
         with open(BODS_ENV_FILE) as f:
@@ -663,6 +703,12 @@ def _load_env():
                         NR_USERNAME = v
                     elif k == 'NR_PASSWORD':
                         NR_PASSWORD = v
+                    elif k == 'NR_TOKEN':
+                        NR_TOKEN = v
+                    elif k == 'BUS_APP_ID':
+                        BUS_APP_ID = v
+                    elif k == 'BUS_APP_KEY':
+                        BUS_APP_KEY = v
     except Exception:
         pass
 
@@ -1225,8 +1271,8 @@ def _rtt_normalise(svc, confirmed):
     pas = td.get('pass') or {}
     best = dep if dep else (arr if arr else pas)
 
-    sched_iso  = best.get('scheduleAdvertised', '')
-    actual_iso = best.get('realtimeActual', '')
+    sched_iso    = best.get('scheduleAdvertised', '')
+    actual_iso   = best.get('realtimeActual', '')
     forecast_iso = best.get('realtimeForecast', '')
     late_min   = best.get('realtimeAdvertisedLateness') or 0
     # RTT often omits realtimeAdvertisedLateness even when realtimeForecast differs
@@ -1256,7 +1302,12 @@ def _rtt_normalise(svc, confirmed):
     if confirmed:
         call_type  = 'STOP' if td.get('displayAs') == 'CALL' else 'PASS'
         twy_sched  = sched_iso
-        twy_actual = actual_iso or forecast_iso
+        # A realtime forecast is useful, but it is not an observation.  The
+        # old code placed both in twy_actual, which then prevented a later TD
+        # house crossing from becoming authoritative and made the frontend
+        # treat a prediction as a passed train.  Keep provenance intact.
+        twy_actual = actual_iso
+        twy_forecast = forecast_iso
     else:
         # Reading is ~4 min from Twyford.  UP trains depart Reading and reach
         # Twyford AFTER (add offset); DOWN trains pass Twyford BEFORE arriving
@@ -1264,6 +1315,7 @@ def _rtt_normalise(svc, confirmed):
         # stoppers, so the offset is smaller.
         call_type  = 'PASS'
         twy_actual = ''
+        twy_forecast = ''
         offset = 3 if track == 'Main' else 5
         delta  = offset if direction == 'up' else -offset
         if sched_iso:
@@ -1283,8 +1335,10 @@ def _rtt_normalise(svc, confirmed):
     # - UP stop:   house passed at departure + 15s
     twy_arr_sched = arr.get('scheduleAdvertised', '') if confirmed and call_type == 'STOP' else ''
     twy_dep_sched = dep.get('scheduleAdvertised', '') if confirmed and call_type == 'STOP' else ''
-    twy_arr_actual = (arr.get('realtimeActual', '') or arr.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else ''
-    twy_dep_actual = (dep.get('realtimeActual', '') or dep.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else ''
+    twy_arr_actual = arr.get('realtimeActual', '') if confirmed and call_type == 'STOP' else ''
+    twy_dep_actual = dep.get('realtimeActual', '') if confirmed and call_type == 'STOP' else ''
+    twy_arr_forecast = arr.get('realtimeForecast', '') if confirmed and call_type == 'STOP' else ''
+    twy_dep_forecast = dep.get('realtimeForecast', '') if confirmed and call_type == 'STOP' else ''
 
     # General "dwelling at the Twyford platform" detection for ANY stopping
     # service (RTT's own arrival/departure times), not just the narrow
@@ -1296,8 +1350,8 @@ def _rtt_normalise(svc, confirmed):
     # sitting at the platform for its full dwell.
     at_station = False
     if confirmed and call_type == 'STOP':
-        arr_ts = _iso_to_ts(twy_arr_actual or twy_arr_sched)
-        dep_ts = _iso_to_ts(twy_dep_actual or twy_dep_sched)
+        arr_ts = _iso_to_ts(twy_arr_actual or twy_arr_forecast or twy_arr_sched)
+        dep_ts = _iso_to_ts(twy_dep_actual or twy_dep_forecast or twy_dep_sched)
         now_ts = time.time()
         if arr_ts and dep_ts and arr_ts <= now_ts < dep_ts + 20:
             at_station = True
@@ -1318,10 +1372,18 @@ def _rtt_normalise(svc, confirmed):
         'dest_arr':  dest_arr,
         'twy_sched': twy_sched,
         'twy_actual': twy_actual,
+        'twy_forecast': twy_forecast,
+        # Retained only for the reversible legacy API projection during the
+        # v2 shadow window.  Do not use these for new model decisions.
+        'legacy_twy_actual': actual_iso or forecast_iso,
         'twy_arr_sched': twy_arr_sched,
         'twy_dep_sched': twy_dep_sched,
         'twy_arr_actual': twy_arr_actual,
         'twy_dep_actual': twy_dep_actual,
+        'twy_arr_forecast': twy_arr_forecast,
+        'twy_dep_forecast': twy_dep_forecast,
+        'legacy_twy_arr_actual': (arr.get('realtimeActual', '') or arr.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else '',
+        'legacy_twy_dep_actual': (dep.get('realtimeActual', '') or dep.get('realtimeForecast', '')) if confirmed and call_type == 'STOP' else '',
         'late_min':  late_min if not cancelled else None,
         'cancelled': cancelled,
         'status':    td.get('status'),
@@ -1352,6 +1414,25 @@ def _calib_line_key(t):
     d = 'u' if t.get('direction') == 'up' else 'd'
     m = 'm' if t.get('track') == 'Main' else 'r'
     return d + m
+
+
+def _apply_train_calibration(t, off):
+    """Apply a prediction correction without ever moving an observation.
+
+    Returns True when a correction was applied. Kept pure enough for the
+    regression tests that protect the NOW-after-passage failure mode.
+    """
+    if not off or not t.get('display_pass_ts') or t.get('observed_pass_ts'):
+        return False
+    corrected = int(t['display_pass_ts'] + off)
+    t['display_pass_ts'] = corrected
+    t['house_pass_ts'] = corrected  # compatibility alias
+    if t.get('pass_time_source') == 'td_eta':
+        t['berth_eta_pass_ts'] = corrected
+    elif t.get('pass_time_source') == 'rtt_forecast':
+        t['forecast_pass_ts'] = corrected
+    t['calibration_applied_s'] = off
+    return True
 
 
 def _load_calib_offsets():
@@ -1569,37 +1650,64 @@ def _rtt_build_trains():
                 'source':      'cif',
             })
 
-    # Compute house_pass_ts for each train (unix seconds).
+    # Compute separate schedule, forecast and observed house-pass facts.
     # House is ~100m east of Twyford east platform signal = ~15s before/after the stop.
-    # DOWN stop: train passes house on approach → arrival_sched - 15s
-    # UP stop:   train passes house after departing → departure_sched + 15s
-    # PASS/freight/Main: twy_sched/twy_actual is already the pass time
+    # DOWN stop: train passes house on approach → arrival - 15s
+    # UP stop:   train passes house after departing → departure + 15s
+    # PASS/freight/Main: the Twyford time is already the pass time.
+    #
+    # Keep house_pass_ts as a compatibility alias for display_pass_ts while
+    # frontends migrate, but never again use it as the only source of truth.
     for t in trains:
         call = t.get('call_type', 'PASS')
         direction = t.get('direction', '')
         late_sec = (t.get('late_min') or 0) * 60
+        # Keep the pre-TD route classification for the legacy shadow model.
+        # v2 may deliberately wait for final-approach evidence before changing
+        # track-at-house; legacy used every live berth immediately.
+        t['legacy_track'] = t.get('track')
+        sched_ts = forecast_ts = observed_ts = 0
         if call == 'STOP':
             if direction == 'down':
-                actual = t.get('twy_arr_actual') or t.get('twy_actual')
-                iso = actual or t.get('twy_arr_sched') or t.get('twy_sched')
-                ts = _iso_to_ts(iso) - 15 if iso else 0
-                if not actual and late_sec:
-                    ts += late_sec
+                sched_iso = t.get('twy_arr_sched') or t.get('twy_sched')
+                forecast_iso = t.get('twy_arr_forecast') or t.get('twy_forecast')
+                actual_iso = t.get('twy_arr_actual') or t.get('twy_actual')
             else:
-                actual = t.get('twy_dep_actual') or t.get('twy_actual')
-                iso = actual or t.get('twy_dep_sched') or t.get('twy_sched')
-                ts = _iso_to_ts(iso) + 15 if iso else 0
-                if not actual and late_sec:
-                    ts += late_sec
+                sched_iso = t.get('twy_dep_sched') or t.get('twy_sched')
+                forecast_iso = t.get('twy_dep_forecast') or t.get('twy_forecast')
+                actual_iso = t.get('twy_dep_actual') or t.get('twy_actual')
+            shift = -15 if direction == 'down' else 15
+            sched_ts = _iso_to_ts(sched_iso) + shift if sched_iso else 0
+            forecast_ts = _iso_to_ts(forecast_iso) + shift if forecast_iso else 0
+            observed_ts = _iso_to_ts(actual_iso) + shift if actual_iso else 0
         else:
-            actual = t.get('twy_actual')
-            iso = actual or t.get('twy_sched')
-            ts = _iso_to_ts(iso) if iso else 0
-            if not actual and late_sec:
-                ts += late_sec
-        t['house_pass_ts'] = int(ts) if ts else 0
+            sched_ts = _iso_to_ts(t.get('twy_sched', ''))
+            forecast_ts = _iso_to_ts(t.get('twy_forecast', ''))
+            observed_ts = _iso_to_ts(t.get('twy_actual', ''))
+        if sched_ts and not forecast_ts and not observed_ts and late_sec:
+            forecast_ts = sched_ts + late_sec
+        t['scheduled_pass_ts'] = int(sched_ts) if sched_ts else 0
+        t['forecast_pass_ts'] = int(forecast_ts) if forecast_ts else 0
+        t['observed_pass_ts'] = int(observed_ts) if observed_ts else 0
+        if observed_ts:
+            source, display_ts = 'rtt_actual', observed_ts
+        elif forecast_ts:
+            source, display_ts = 'rtt_forecast', forecast_ts
+        else:
+            source, display_ts = 'schedule', sched_ts
+        t['pass_time_source'] = source
+        t['display_pass_ts'] = int(display_ts) if display_ts else 0
+        t['house_pass_ts'] = t['display_pass_ts']
 
     _td_enrich_trains(trains, now, ident)
+
+    # At this point both models have seen the same inputs.  Their only timing
+    # difference in the old model was that calibration also moved a physical
+    # observation.  Preserve the common pre-calibration timestamp so the
+    # legacy projection remains an honest, reversible comparison baseline.
+    for t in trains:
+        t.setdefault('legacy_track', t.get('track'))
+        t['legacy_house_pass_ts'] = t.get('display_pass_ts') or t.get('house_pass_ts') or 0
 
     # Apply the learned per-line calibration correction (from lineside.html's
     # "heard it pass" button, see /api/calibrate) to house_pass_ts. Refreshed
@@ -1610,8 +1718,9 @@ def _rtt_build_trains():
     if _CALIB_OFFSETS:
         for t in trains:
             off = _CALIB_OFFSETS.get(_calib_line_key(t))
-            if off and t.get('house_pass_ts'):
-                t['house_pass_ts'] = int(t['house_pass_ts'] + off)
+            _apply_train_calibration(t, off)
+            if off and t.get('legacy_house_pass_ts'):
+                t['legacy_house_pass_ts'] = int(t['legacy_house_pass_ts'] + off)
 
     # Stock type (display only) from today's full CIF schedule, keyed by
     # headcode — independent of the freight/ECS index above. Each headcode can
@@ -1686,8 +1795,19 @@ def _rtt_build_trains():
         return ts > now - keep
 
     trains = [t for t in trains if _fresh(t)]
-    trains.sort(key=lambda t: t.get('house_pass_ts') or _iso_to_ts(t.get('twy_sched', '')))
+    for t in trains:
+        # UID is the strongest run identity.  TD/CIF-only records fall back
+        # to a time/direction-qualified key so consumers and diagnostics do
+        # not silently treat a headcode as globally unique.
+        ts = t.get('display_pass_ts') or t.get('house_pass_ts') or 0
+        bucket = int(ts // 900) if ts else 0
+        t['run_key'] = (t.get('uid') or
+                        f"{t.get('headcode', '')}|{bucket}|{t.get('direction', '')}")
+        _finalise_train_state(t, now)
+    trains.sort(key=lambda t: t.get('display_pass_ts') or t.get('house_pass_ts')
+                or _iso_to_ts(t.get('twy_sched', '')))
     result = {'trains': trains, 'ts': int(now)}
+    _evidence_record_snapshot(trains, now)
 
     with _lock:
         _rtt_trains_data = result
@@ -2084,15 +2204,26 @@ def _td_enrich_trains(trains, now, ident=None):
         h = house_evts.get(hc)
         if h:
             expected = t.get('house_pass_ts') or 0
-            if not expected or abs(h['ts'] - expected) < 1800:
+            # A fresh exact TD crossing for this currently-listed headcode is
+            # stronger than an RTT forecast, even if disruption has pushed it
+            # more than 30 minutes away from its booked prediction. Retain the
+            # proximity guard for weaker “approaching” hints only.
+            if (h['event'] == 'at_house' or not expected
+                    or abs(h['ts'] - expected) < 1800):
                 evt = h['event']
                 t['confirmed'] = True
                 t['td_track']  = h['track']
                 if evt == 'at_house':
-                    if not t.get('twy_actual'):
-                        t['twy_actual']    = datetime.datetime.fromtimestamp(
-                            h['ts'], tz=datetime.timezone.utc).isoformat()
-                        t['house_pass_ts'] = int(h['ts'])
+                    # A TD zero-crossing is a physical observation.  It must
+                    # win even when RTT supplied a future forecast, and it
+                    # must survive later ETA/calibration processing intact.
+                    t['observed_pass_ts'] = int(h['ts'])
+                    t['display_pass_ts'] = int(h['ts'])
+                    t['house_pass_ts'] = int(h['ts'])  # legacy API alias
+                    t['pass_time_source'] = 'td_crossing'
+                    t['passed_evidence'] = 'td_crossing'
+                    t['twy_actual'] = datetime.datetime.fromtimestamp(
+                        h['ts'], tz=datetime.timezone.utc).isoformat()
                     # For a genuine through-PASS, crossing the house means it's
                     # moving away — clear at_station. For a STOP, the house is
                     # crossed right at arrival, immediately before the platform
@@ -2106,22 +2237,45 @@ def _td_enrich_trains(trains, now, ident=None):
         pos = td_pos.get(hc)
         if pos:
             t['confirmed']    = True
+            t['td_area']      = pos['area']
             t['td_berth']     = pos['to']
             t['td_berth_age'] = int(now - pos['ts'])
             berth_age = int(now - pos['ts'])
-            # Live berth line (from SMART) is ground truth — the train is
-            # physically on that line — so it overrides the heuristic `track`
-            # (e.g. a fast Paddington→Reading express on the Down Main whose
-            # destination "Reading" otherwise reads as a Relief stopper).
+            # Current berth line is ground truth for where the train is. It is
+            # only ground truth for the line at the house once it is in the
+            # final approach: an earlier berth can still lead through a
+            # crossover. Keep both facts so a distant sighting cannot put the
+            # wrong train on a physical row.
             binfo = _berth_info(pos['area'], pos['to'])
             if binfo and binfo.get('line'):
-                t['track'] = binfo['line']
+                # Legacy immediately treated every berth's line as the line
+                # at the house. Keep that historical classification solely
+                # for the shadow comparison; v2's guarded assignment follows.
+                t['legacy_track'] = binfo['line']
+                t['current_track'] = binfo['line']
+                t['current_track_source'] = 'td_berth'
+                d = binfo.get('dist_mi')
+                if d is not None and abs(d) <= 1.6:
+                    t['track'] = binfo['line']
+                    t['track_confidence'] = 'physical_final_approach'
+                    t['track_source'] = 'td_final_approach'
+                else:
+                    t.setdefault('track_confidence', 'booked_or_heuristic')
+                    t.setdefault('track_source', 'schedule')
             # Live position summary so frontends don't have to join /api/td-live
             if binfo:
                 if binfo.get('dist_mi') is not None:
                     t['td_dist_mi'] = round(binfo['dist_mi'], 2)
                 if binfo.get('stanme'):
                     t['td_place'] = binfo['stanme']
+            # TD is the highest-priority operational source. RTT may continue
+            # to describe a train as AT_PLATFORM after it has moved into a
+            # remote berth (2P85 at D1/1652 was the observed example). Do this
+            # before ETA/state selection so the fresh physical berth can mark
+            # a hold, approach or passage instead of a stale station dwell.
+            if t.get('at_station') and _td_berth_rejects_station(binfo, berth_age):
+                t['at_station'] = False
+                t['station_evidence'] = 'td_not_at_station'
             if (pos['area'] == 'D6'
                     and pos['to'] in ('1612', '1608', '1604')
                     and t.get('direction') == 'up'
@@ -2130,7 +2284,7 @@ def _td_enrich_trains(trains, now, ident=None):
                     and not t.get('twy_actual')):
                 t['at_station'] = True
             # Refine house_pass_ts from the live berth position (SMART distance).
-            elif (not t.get('twy_actual')
+            elif (not t.get('observed_pass_ts')
                     and not t.get('at_station')
                     and berth_age < 300):
                 res = _berth_eta_to_house_s(
@@ -2146,9 +2300,14 @@ def _td_enrich_trains(trains, now, ident=None):
                         # Dwelling at a station / held at a signal: floor the ETA
                         # (can't pass before the travel time) and flag it.
                         t['held'] = True
-                    # Live berth position is authoritative (beats the schedule),
-                    # whether the train is approaching (+) or has passed (−).
-                    t['house_pass_ts'] = int(now + eta_s)
+                    # Live berth position is authoritative over a schedule or
+                    # forecast, whether it is approaching (+) or past (−).
+                    # It is still an ETA, not an observed crossing unless the
+                    # dedicated zero-crossing detector recorded one above.
+                    t['berth_eta_pass_ts'] = int(now + eta_s)
+                    t['display_pass_ts'] = int(now + eta_s)
+                    t['pass_time_source'] = 'td_eta'
+                    t['house_pass_ts'] = t['display_pass_ts']
                     t['td_eta_s'] = int(eta_s)
     # Synthesise entries for trains PHYSICALLY inside the Reading↔Maidenhead
     # corridor that no schedule source matched.  A live berth fix strictly
@@ -2278,15 +2437,29 @@ def _td_enrich_trains(trains, now, ident=None):
             'twy_sched':  datetime.datetime.fromtimestamp(
                               pass_ts, tz=_TZ_LONDON).isoformat(),
             'twy_actual': '',
+            'twy_forecast': '',
             'twy_arr_sched': '', 'twy_dep_sched': '',
             'twy_arr_actual': '', 'twy_dep_actual': '',
+            'twy_arr_forecast': '', 'twy_dep_forecast': '',
+            'scheduled_pass_ts': 0,
+            'forecast_pass_ts': 0,
+            'observed_pass_ts': 0,
+            'berth_eta_pass_ts': pass_ts,
+            'display_pass_ts': pass_ts,
+            'pass_time_source': 'td_eta',
             'house_pass_ts': pass_ts,
             'td_eta_s':   int(eta_s),
+            'td_area':    pos['area'],
             'td_berth':   pos['to'],
             'td_berth_age': int(age),
             'td_dist_mi': round(d, 2),
             'td_place':   info.get('stanme') or '',
             'held':       bool(held),
+            'current_track': line or ('Main' if is_main else 'Relief'),
+            'current_track_source': 'td_berth',
+            'track_confidence': ('physical_final_approach' if abs(d) <= 1.6
+                                 else 'booked_or_heuristic'),
+            'track_source': ('td_final_approach' if abs(d) <= 1.6 else 'td_berth'),
             'late_min':   None,
             'cancelled':  False,
             'status':     None,
@@ -2438,7 +2611,7 @@ _sig_confirmed     = {}   # "area|from|to" → {'addr','bit','occ','hcs','unique
 _sig_recent_bits   = collections.deque()   # (area, addr, bit, ts) recent 1→0 transitions, pruned
 _sig_pending_steps = collections.deque()   # (eval_ts, step_key, area, hc, step_ts) awaiting scoring
 _sig_pending_hc    = {}    # headcode → {'step_key','area','addr','bit'} awaiting polarity check
-_SIG_FILE          = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_learned.json')
+_SIG_FILE          = os.path.join(APP_DIR, 'signals_learned.json')
 _SIG_MIN_OCC       = 5     # min matched occurrences before a candidate can confirm
 _SIG_MIN_HC        = 3     # min distinct headcodes
 _SIG_MIN_UNIQ      = 0.8   # matched occurrences / that bit's total 1→0 count, anywhere
@@ -2647,6 +2820,399 @@ def _sig_decode_states(now_ts):
     return out
 
 
+def _confirmed_signal_state(area, berth, direction):
+    """Return the live state of the confirmed exit signal for a berth.
+
+    The signal learner keys UP/east movements as ``east`` and DOWN/west
+    movements as ``west``.  Tentative candidates deliberately never reach
+    this helper: they are useful to /lineside, but not strong enough to alter
+    a train's operational state.
+    """
+    if not area or not berth or direction not in ('up', 'down'):
+        return None
+    sig_dir = 'east' if direction == 'up' else 'west'
+    with _sig_lock:
+        candidate = (_sig_confirmed.get(f'{area}|{berth}|{sig_dir}')
+                     or _sig_confirmed.get(f'{area}|{berth}'))
+    if not candidate:
+        return None
+    with _sf_lock:
+        sf = _sf_state.get((area, candidate['addr']))
+    if not sf:
+        return None
+    try:
+        return 'red' if not ((int(sf['data'], 16) >> candidate['bit']) & 1) else 'off'
+    except (ValueError, TypeError):
+        return None
+
+
+def _td_is_post_house(t):
+    """Whether a fresh TD berth physically proves this train is past house."""
+    d = t.get('td_dist_mi')
+    age = t.get('td_berth_age')
+    if d is None or age is None or age > 300:
+        return False
+    if t.get('direction') == 'down':
+        return d > 0.05
+    if t.get('direction') == 'up':
+        return d < -0.05
+    return False
+
+
+def _td_berth_rejects_station(binfo, age_s):
+    """Whether fresh TD position conclusively contradicts an RTT station flag.
+
+    The house is approximately 0.2 miles east of Twyford platforms.  A TD
+    berth more than half a mile away is independent physical evidence that a
+    train is not at the station, irrespective of RTT's lagging AT_PLATFORM
+    status or a stale forecast departure.
+    """
+    if not binfo or age_s is None or age_s >= 300:
+        return False
+    distance = binfo.get('dist_mi')
+    return distance is not None and abs(distance) > 0.5
+
+
+def _finalise_train_state(t, now):
+    """Derive one explicit operational state for /api/trains.
+
+    This is intentionally the only place that turns timing and TD evidence
+    into a state.  Browser clients consume the result rather than trying to
+    infer passage from a single mutable ETA.
+    """
+    display_ts = t.get('display_pass_ts') or t.get('house_pass_ts') or 0
+    observed_ts = t.get('observed_pass_ts') or 0
+    source = t.get('pass_time_source') or 'schedule'
+    if t.get('cancelled'):
+        state = 'cancelled'
+    elif t.get('at_station'):
+        state = 'at_station'
+    elif observed_ts and observed_ts <= now:
+        state = 'passed'
+    elif _td_is_post_house(t):
+        state = 'passed'
+        t.setdefault('passed_evidence', 'td_post_house')
+    elif t.get('held'):
+        sig_state = _confirmed_signal_state(
+            t.get('td_area', ''), t.get('td_berth', ''), t.get('direction', ''))
+        if sig_state:
+            t['signal_ahead_state'] = sig_state
+            t['signal_mapping_tier'] = 'confirmed'
+        state = 'held_at_red' if sig_state == 'red' else 'held'
+    elif (t.get('td_berth_age') is not None and t.get('td_berth_age') < 150
+          and t.get('td_eta_s') is not None and t.get('td_eta_s') > 0):
+        state = 'approaching'
+    elif display_ts and source in ('td_eta', 'rtt_forecast') and -15 <= display_ts - now <= 20:
+        state = 'passing'
+    elif display_ts and display_ts < now - 60:
+        # A timetable-only record that should already have passed must not
+        # occupy the headline row until the broad retention filter expires.
+        state = 'stale'
+    elif source == 'rtt_forecast':
+        state = 'forecast'
+    else:
+        state = 'scheduled'
+
+    if state == 'approaching' and display_ts and -15 <= display_ts - now <= 20:
+        state = 'passing'
+    t['movement_state'] = state
+    t['pass_confidence'] = ('observed' if state == 'passed' and (observed_ts or t.get('passed_evidence'))
+                            else 'live_estimate' if source == 'td_eta'
+                            else 'realtime_forecast' if source == 'rtt_forecast'
+                            else 'schedule')
+    if display_ts:
+        if state == 'passed':
+            t['seconds_since_passed'] = max(0, int(now - (observed_ts or display_ts)))
+        else:
+            t['seconds_to_house'] = int(display_ts - now)
+    t.setdefault('track_confidence', 'booked_or_heuristic')
+    t.setdefault('track_source', 'schedule')
+    return t
+
+
+_TRAIN_V2_ONLY_FIELDS = frozenset({
+    'scheduled_pass_ts', 'forecast_pass_ts', 'observed_pass_ts', 'berth_eta_pass_ts',
+    'display_pass_ts', 'pass_time_source', 'passed_evidence', 'movement_state',
+    'pass_confidence', 'seconds_since_passed', 'seconds_to_house', 'run_key',
+    'current_track', 'current_track_source', 'track_confidence', 'track_source',
+    'signal_ahead_state', 'signal_mapping_tier', 'calibration_applied_s',
+    'legacy_house_pass_ts', 'legacy_track', 'legacy_twy_actual',
+    'legacy_twy_arr_actual', 'legacy_twy_dep_actual',
+    'twy_forecast', 'twy_arr_forecast', 'twy_dep_forecast',
+})
+
+
+def _legacy_train_projection(t):
+    """Return the pre-v2 API shape for an opt-in-safe shadow rollout."""
+    out = {k: v for k, v in t.items() if k not in _TRAIN_V2_ONLY_FIELDS}
+    out['house_pass_ts'] = t.get('legacy_house_pass_ts') or t.get('house_pass_ts') or 0
+    out['track'] = t.get('legacy_track') or t.get('track')
+    if 'legacy_twy_actual' in t:
+        out['twy_actual'] = t['legacy_twy_actual']
+    if 'legacy_twy_arr_actual' in t:
+        out['twy_arr_actual'] = t['legacy_twy_arr_actual']
+    if 'legacy_twy_dep_actual' in t:
+        out['twy_dep_actual'] = t['legacy_twy_dep_actual']
+    return out
+
+
+def _legacy_headline_eligible(t, now):
+    """Exact selection window used by the pre-v2 browser clients."""
+    if t.get('cancelled'):
+        return False
+    ts = t.get('legacy_house_pass_ts') or t.get('house_pass_ts') or 0
+    if not ts:
+        return False
+    if t.get('at_station'):
+        grace = 600
+    elif t.get('legacy_twy_actual') or t.get('twy_actual'):
+        grace = 45 if t.get('direction') == 'up' else 20
+    else:
+        grace = 100
+    return ts >= now - grace
+
+
+def _v2_headline_eligible(t, now):
+    if t.get('cancelled') or t.get('movement_state') == 'stale':
+        return False
+    ts = t.get('display_pass_ts') or t.get('house_pass_ts') or 0
+    if not ts:
+        return False
+    state = t.get('movement_state')
+    if state == 'passed':
+        return now - ts <= 20
+    if state in ('at_station', 'held', 'held_at_red'):
+        return True
+    return ts >= now - 15
+
+
+def _headline_run_keys(trains, now, model):
+    """Return the one selected run per physical row for shadow diagnostics."""
+    rows = {'ur': [], 'dr': [], 'um': [], 'dm': []}
+    for t in trains:
+        track = (t.get('legacy_track') if model == 'legacy' else t.get('track'))
+        direction = t.get('direction')
+        if direction not in ('up', 'down') or track not in ('Main', 'Relief'):
+            continue
+        key = ('u' if direction == 'up' else 'd') + ('m' if track == 'Main' else 'r')
+        eligible = (_legacy_headline_eligible(t, now) if model == 'legacy'
+                    else _v2_headline_eligible(t, now))
+        if eligible:
+            rows[key].append(t)
+    result = {}
+    for key, candidates in rows.items():
+        if candidates:
+            timestamp = (lambda t: t.get('legacy_house_pass_ts') or t.get('house_pass_ts') or 0)
+            if model != 'legacy':
+                timestamp = lambda t: t.get('display_pass_ts') or t.get('house_pass_ts') or 0
+            result[key] = min(candidates, key=timestamp).get('run_key') or candidates[0].get('uid')
+        else:
+            result[key] = None
+    return result
+
+
+def _train_shadow_summary(trains, now):
+    """Small, non-sensitive comparison payload enabled only by ``shadow=1``."""
+    legacy = _headline_run_keys(trains, now, 'legacy')
+    v2 = _headline_run_keys(trains, now, 'v2')
+    disagreements = [key for key in legacy if legacy[key] != v2[key]]
+    return {
+        'legacy_headlines': legacy,
+        'v2_headlines': v2,
+        'disagreement_rows': disagreements,
+        'disagreement_count': len(disagreements),
+    }
+
+
+_HOUSE_TRACK_ROWS = {
+    'Up Relief': 'ur', 'Down Relief': 'dr', 'Up Main': 'um', 'Down Main': 'dm',
+}
+
+
+def _evidence_append(entry):
+    """Append a small audit record; failure must never affect train display."""
+    try:
+        with open(TRAIN_EVIDENCE_FILE, 'a') as f:
+            f.write(json.dumps(entry, separators=(',', ':')) + '\n')
+    except Exception as e:
+        print(f'Train evidence write failed: {e}')
+
+
+def _evidence_headlines(trains, now, model):
+    """Compact selected-run facts, sufficient to score a later crossing."""
+    run_keys = _headline_run_keys(trains, now, model)
+    result = {}
+    for row, run_key in run_keys.items():
+        selected = None
+        for t in trains:
+            key = t.get('run_key') or t.get('uid')
+            if key == run_key:
+                selected = t
+                break
+        if not selected:
+            result[row] = None
+            continue
+        if model == 'legacy':
+            pass_ts = selected.get('legacy_house_pass_ts') or selected.get('house_pass_ts') or 0
+            source = ('legacy_actual_or_forecast' if selected.get('legacy_twy_actual')
+                      else 'legacy_schedule_or_td')
+        else:
+            pass_ts = selected.get('display_pass_ts') or selected.get('house_pass_ts') or 0
+            source = selected.get('pass_time_source') or 'schedule'
+        result[row] = {
+            'run_key': run_key,
+            'uid': selected.get('uid', ''),
+            'headcode': selected.get('headcode', ''),
+            'pass_ts': int(pass_ts) if pass_ts else 0,
+            'state': selected.get('movement_state', '') if model == 'v2' else '',
+            'source': source,
+        }
+    return result
+
+
+def _evidence_record_snapshot(trains, now):
+    """Store changed choices (and a one-minute heartbeat) for TD scoring."""
+    global _evidence_last_signature, _evidence_last_record_ts
+    record = {
+        'kind': 'decision', 'ts': int(now),
+        'legacy': _evidence_headlines(trains, now, 'legacy'),
+        'v2': _evidence_headlines(trains, now, 'v2'),
+    }
+    signature = json.dumps({'legacy': record['legacy'], 'v2': record['v2']},
+                           sort_keys=True, separators=(',', ':'))
+    with _evidence_lock:
+        if signature == _evidence_last_signature and now - _evidence_last_record_ts < 60:
+            return False
+        _evidence_last_signature = signature
+        _evidence_last_record_ts = now
+        _evidence_recent.append(record)
+        _evidence_append(record)
+    return True
+
+
+def _evidence_score_house_crossing(headcode, event_ts, track):
+    """Score the last pre-crossing selections against physical TD evidence.
+
+    TD crossing is truth for identity/line/passage, but not a reason to update
+    selection rules directly.  Scores are retained as evidence for a later,
+    separately reviewed learning promotion.
+    """
+    row = _HOUSE_TRACK_ROWS.get(track)
+    if not row or not headcode or not event_ts:
+        return []
+    crossing_key = (headcode, int(event_ts), row)
+    with _evidence_lock:
+        if crossing_key in _evidence_scored_crossings:
+            return []
+        candidates = list(_evidence_recent)
+        _evidence_scored_crossings.append(crossing_key)
+    decision = next((d for d in reversed(candidates)
+                     if d['ts'] <= event_ts and event_ts - d['ts'] <= _EVIDENCE_LOOKBACK_S), None)
+    if not decision:
+        return []
+    scores = []
+    for model in ('legacy', 'v2'):
+        selected = (decision.get(model) or {}).get(row)
+        selected_hc = (selected or {}).get('headcode', '')
+        pass_ts = (selected or {}).get('pass_ts') or 0
+        score = {
+            'kind': 'score', 'event': 'td_house_crossing', 'ts': int(event_ts),
+            'decision_ts': decision['ts'], 'headcode': headcode, 'row': row,
+            'model': model, 'selected_headcode': selected_hc,
+            'selected_run_key': (selected or {}).get('run_key', ''),
+            'selected_state': (selected or {}).get('state', ''),
+            'source': (selected or {}).get('source', ''),
+            'correct_headline': bool(selected_hc == headcode),
+            'eta_error_s': int(pass_ts - event_ts) if pass_ts else None,
+        }
+        scores.append(score)
+        _evidence_append(score)
+    return scores
+
+
+def _evidence_record_manual_observation(observation):
+    """Record a heard-pass button press and score the preceding headlines.
+
+    It remains a separate truth source from raw TD: manual evidence must be
+    auditable and must never masquerade as a Train Describer message.
+    """
+    now = int(observation['ts'])
+    with _evidence_lock:
+        _evidence_append({'kind': 'manual_observation', 'event': 'heard_pass', **observation})
+        decisions = list(_evidence_recent)
+    decision = next((d for d in reversed(decisions)
+                     if d['ts'] <= now and now - d['ts'] <= _EVIDENCE_LOOKBACK_S), None)
+    if not decision:
+        return []
+    scores = []
+    for model in ('legacy', 'v2'):
+        selected = (decision.get(model) or {}).get(observation['line'])
+        selected_hc = (selected or {}).get('headcode', '')
+        pass_ts = (selected or {}).get('pass_ts') or 0
+        score = {
+            'kind': 'score', 'event': 'manual_heard_pass', 'ts': now,
+            'decision_ts': decision['ts'], 'headcode': observation['headcode'],
+            'row': observation['line'], 'model': model,
+            'selected_headcode': selected_hc,
+            'selected_run_key': (selected or {}).get('run_key', ''),
+            'selected_state': (selected or {}).get('state', ''),
+            'source': (selected or {}).get('source', ''),
+            'correct_headline': bool(selected_hc == observation['headcode']),
+            'eta_error_s': int(pass_ts - now) if pass_ts else None,
+            'truth_source': 'manual_heard_pass',
+        }
+        scores.append(score)
+        _evidence_append(score)
+    return scores
+
+
+def _evidence_metrics(limit=2000):
+    """Summarise persisted independent scores; deliberately no model tuning."""
+    try:
+        with open(TRAIN_EVIDENCE_FILE) as f:
+            lines = collections.deque(f, maxlen=limit)
+    except FileNotFoundError:
+        lines = []
+    scores = []
+    manual_observations = 0
+    decisions = 0
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if entry.get('kind') == 'decision':
+            decisions += 1
+        elif entry.get('kind') == 'manual_observation':
+            manual_observations += 1
+        elif entry.get('kind') == 'score' and entry.get('event') == 'td_house_crossing':
+            scores.append(entry)
+    models = {}
+    for model in ('legacy', 'v2'):
+        entries = [s for s in scores if s.get('model') == model]
+        errors = [abs(s['eta_error_s']) for s in entries if s.get('eta_error_s') is not None]
+        models[model] = {
+            'crossings_scored': len(entries),
+            'correct_headlines': sum(bool(s.get('correct_headline')) for s in entries),
+            'correct_rate': round(sum(bool(s.get('correct_headline')) for s in entries) / len(entries), 3) if entries else None,
+            'median_abs_eta_error_s': int(sorted(errors)[len(errors) // 2]) if errors else None,
+        }
+    source_stats = {}
+    for score in (s for s in scores if s.get('model') == 'v2' and s.get('source')):
+        stat = source_stats.setdefault(score['source'], {'n': 0, 'correct': 0, 'abs_errors': []})
+        stat['n'] += 1
+        stat['correct'] += bool(score.get('correct_headline'))
+        if score.get('eta_error_s') is not None:
+            stat['abs_errors'].append(abs(score['eta_error_s']))
+    for stat in source_stats.values():
+        errors = sorted(stat.pop('abs_errors'))
+        stat['correct_rate'] = round(stat['correct'] / stat['n'], 3)
+        stat['median_abs_eta_error_s'] = int(errors[len(errors) // 2]) if errors else None
+    return {'decisions_logged': decisions, 'crossings_scored': len(scores) // 2,
+            'manual_observations': manual_observations,
+            'models': models, 'v2_by_source': source_stats}
+
+
 def _save_sig_learned():
     try:
         with _sig_lock:
@@ -2655,8 +3221,22 @@ def _save_sig_learned():
                 'step_stats': _sig_step_stats,
                 'confirmed': _sig_confirmed,
             }
-        with open(_SIG_FILE, 'w') as f:
-            json.dump(data, f)
+        # A direct write can leave a partial JSON document if the process is
+        # interrupted (and makes a live copy unsafe).  Replace only after the
+        # complete document is flushed in the same directory.
+        fd, tmp_path = tempfile.mkstemp(prefix='.signals_learned.', dir=APP_DIR)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, _SIG_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
+            raise
     except Exception as e:
         print(f'signal-learner save failed: {e}')
 
@@ -3429,6 +4009,7 @@ class _NRListener:
             with _td_house_lock:
                 _td_house_events[hc] = {'ts': evt['ts'], 'track': track, 'event': event_type}
             if event_type == 'at_house':
+                _evidence_score_house_crossing(hc, evt['ts'], track)
                 with _lock:
                     _rtt_trains_ts = 0   # force immediate RTT refresh
 
@@ -3689,6 +4270,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         qs     = parse_qs(parsed.query)
         if parsed.path == '/api/departures':
             self._departures(qs)
+        elif parsed.path == '/api/weather':
+            self._weather()
         elif parsed.path == '/api/flights':
             self._flights(qs)
         elif parsed.path == '/api/buses/departures':
@@ -3711,12 +4294,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._airline_logo(qs)
         elif parsed.path == '/api/aircraft-info':
             self._aircraft_info(qs)
-        elif parsed.path == '/api/aircraft-info-test':
-            self._aircraft_info_test(qs)
         elif parsed.path == '/api/airport-name':
             self._airport_name(qs)
         elif parsed.path == '/api/radio/resolve':
             self._radio_resolve(qs)
+        elif parsed.path == '/api/radio/stream':
+            self._radio_stream(qs)
         elif parsed.path == '/api/radio/nowplaying':
             self._radio_nowplaying(qs)
         elif parsed.path == '/api/radio/nowplaying-rp':
@@ -3729,24 +4312,61 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._static('/aircraft.html')
         elif parsed.path == '/trains':
             self._static('/trains.html')
+        elif parsed.path == '/train-shadow':
+            self._static('/train-shadow.html')
         elif parsed.path == '/lineside':
             self._static('/lineside.html')
         elif parsed.path == '/now':
             self._static('/now.html')
+        elif parsed.path == '/nearby':
+            self._static('/nearby.html')
         elif parsed.path == '/api/trains':
             self._trains(qs)
+        elif parsed.path == '/api/train-evidence':
+            self._train_evidence(qs)
         elif parsed.path == '/api/nrcc':
             self._nrcc(qs)
         elif parsed.path == '/api/td-log':
             self._td_log(qs)
         elif parsed.path == '/api/td-live':
             self._td_live(qs)
-        elif parsed.path == '/api/calibrate':
-            self._calibrate(qs)
         elif parsed.path == '/api/calibration':
             self._calibration_stats(qs)
         else:
             self._static(parsed.path)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != '/api/calibrate':
+            self._respond(404, 'text/plain', b'Not found')
+            return
+        try:
+            length = min(int(self.headers.get('Content-Length', '0')), 4096)
+        except ValueError:
+            self._respond(400, 'text/plain', b'Bad request')
+            return
+        qs = parse_qs(self.rfile.read(length).decode('utf-8'))
+        self._calibrate(qs)
+
+    def _weather(self):
+        key = ('weather',)
+        now = time.time()
+        with _lock:
+            cached = _cache.get(key)
+            if cached and now - cached[0] < 600:
+                self._json(cached[1])
+                return
+        try:
+            req = urllib.request.Request(WEATHER_URL, headers={'User-Agent': 'Joggler-Dashboard/1.0'})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+        except Exception as e:
+            print(f'weather fetch failed: {e}', flush=True)
+            self._respond(502, 'text/plain', b'Weather unavailable')
+            return
+        with _lock:
+            _cache[key] = (now, data)
+        self._json(data)
 
     def _departures(self, qs):
         station  = (qs.get('station', ['TWY'])[0].strip().upper())[:3]
@@ -4142,7 +4762,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not re.match(r'^[A-Z0-9]{2,3}$', iata):
             self._respond(400, 'text/plain', b'Bad iata')
             return
-        logo_dir = '/home/gduthie/twyford-dashboard/logos'
+        logo_dir = os.path.join(APP_DIR, 'logos')
         os.makedirs(logo_dir, exist_ok=True)
         path = os.path.join(logo_dir, iata + '.png')
         if not os.path.exists(path):
@@ -4163,7 +4783,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'image/png')
             self.send_header('Content-Length', str(len(data)))
             self.send_header('Cache-Control', 'public, max-age=86400')
-            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(data)
         except Exception:
@@ -4174,7 +4793,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not re.match(r'^[0-9a-f]{6}$', hex_code):
             self._respond(400, 'text/plain', b'Bad hex')
             return
-        cache_dir = '/home/gduthie/twyford-dashboard/aircraft-info'
+        cache_dir = os.path.join(APP_DIR, 'aircraft-info')
         os.makedirs(cache_dir, exist_ok=True)
         cache_path = os.path.join(cache_dir, hex_code + '.json')
         if os.path.exists(cache_path):
@@ -4286,6 +4905,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _cache[key] = (now, data)
         self._json(data)
 
+    def _radio_stream(self, qs):
+        """Relay an allow-listed HTTP radio stream over this HTTPS origin."""
+        url = qs.get('url', [''])[0]
+        parsed = urlparse(url)
+        if parsed.scheme != 'http' or not parsed.hostname or not _radio_stream_host_allowed(parsed.hostname):
+            self._respond(403, 'text/plain', b'Radio stream not allowed')
+            return
+        try:
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Joggler-Dashboard/1.0', 'Icy-MetaData': '0'})
+            upstream = urllib.request.urlopen(req, timeout=15)
+            ctype = upstream.headers.get_content_type() or 'audio/mpeg'
+            self.send_response(200)
+            self.send_header('Content-Type', ctype)
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Accel-Buffering', 'no')
+            self.end_headers()
+            while True:
+                chunk = upstream.read(65536)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            print(f'radio stream relay failed: {e}', flush=True)
+            if not self.wfile.closed:
+                self._respond(502, 'text/plain', b'Radio stream unavailable')
+
     def _radio_nowplaying_rp(self, qs):
         chan = qs.get('chan', ['0'])[0]
         key = ('radio_np_rp', chan)
@@ -4343,9 +4992,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
         _nr_touch()
         try:
             data = _rtt_build_trains()
-            self._json(data)
+            model = qs.get('model', [_TRAIN_MODEL_DEFAULT])[0].lower()
+            if model not in ('legacy', 'v2'):
+                self._respond(400, 'text/plain', b'model must be legacy or v2')
+                return
+            trains = data.get('trains', [])
+            result = {
+                'trains': ([_legacy_train_projection(t) for t in trains]
+                           if model == 'legacy' else trains),
+                'ts': data.get('ts'),
+                'model': model,
+            }
+            # Diagnostics are deliberately opt-in so ordinary browser polling
+            # stays as small as before. They contain run keys only, not feed
+            # credentials or raw TD history.
+            if qs.get('shadow', ['0'])[0] == '1':
+                result['shadow'] = _train_shadow_summary(trains, time.time())
+            self._json(result)
         except Exception as e:
             self._respond(502, 'text/plain', str(e).encode())
+
+    def _train_evidence(self, qs):
+        try:
+            limit = min(max(int(qs.get('n', ['2000'])[0]), 1), 10000)
+        except ValueError:
+            self._respond(400, 'text/plain', b'bad n')
+            return
+        self._json(_evidence_metrics(limit))
 
     def _nrcc(self, qs):
         """Return NRCC disruption messages for Twyford from Darwin, cached 5 min."""
@@ -4433,10 +5106,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return None
 
         predicted_ts = _f('predicted_ts')
+        # Ignore obviously forged/stale estimates.  The client only presents
+        # trains near the house, so a calibration must be within 30 minutes of
+        # the server's current time to influence the learned offsets.
+        if predicted_ts is None or abs(now - predicted_ts) > 1800:
+            self._respond(400, 'text/plain', b'bad predicted time'); return
+        headcode = (qs.get('headcode', [''])[0] or '').upper()
+        if not re.match(r'^[0-9A-Z]{4}$', headcode):
+            self._respond(400, 'text/plain', b'bad headcode'); return
         entry = {
             'ts':           now,
             'line':         line,
-            'headcode':     qs.get('headcode', [''])[0],
+            'headcode':     headcode,
             'dest':         qs.get('dest', [''])[0],
             'predicted_ts': predicted_ts,
             'offset_s':     round(now - predicted_ts, 1) if predicted_ts else None,
@@ -4452,6 +5133,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     f.write(json.dumps(entry) + '\n')
             except Exception:
                 pass
+        # A calibration click is explicit human passage evidence. It continues
+        # to feed the established robust ETA-offset learner above, and is also
+        # kept in the evidence store so shadow accuracy can be evaluated
+        # against a source independent of both RTT and TD.
+        _evidence_record_manual_observation(entry)
         self._json({'ok': True, 'entry': entry})
 
     def _calibration_stats(self, qs):
@@ -4509,7 +5195,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))
-        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(body)
 
@@ -4518,13 +5203,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    pass
+    daemon_threads = True
 
 
 if __name__ == '__main__':
     _load_env()
+    threading.Thread(target=_load_airport_names, daemon=True).start()
     threading.Thread(target=_nr_idle_watcher, daemon=True).start()
     threading.Thread(target=_cif_refresh_loop, daemon=True).start()
     threading.Thread(target=_chain_refresh_loop, daemon=True).start()
     threading.Thread(target=_sig_refresh_loop, daemon=True).start()
-    ThreadedServer(('0.0.0.0', 5001), Handler).serve_forever()
+    bind_host = os.environ.get('JOGGLER_BIND_HOST', '0.0.0.0')
+    try:
+        port = int(os.environ.get('JOGGLER_PORT', '5001'))
+    except ValueError:
+        raise SystemExit('JOGGLER_PORT must be an integer')
+    print(f'Listening on {bind_host}:{port}; state directory: {APP_DIR}', flush=True)
+    ThreadedServer((bind_host, port), Handler).serve_forever()

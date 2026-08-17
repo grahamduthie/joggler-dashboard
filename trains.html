@@ -302,6 +302,7 @@ main {
 
 <div id="alert"><span class="tag">⚠ DISRUPTION</span><span class="msg" id="alert-msg"></span></div>
 
+<script src="/train-display.js"></script>
 <script>
 'use strict';
 
@@ -375,11 +376,7 @@ function placeName(s) {
 
 /* ── Time helpers ───────────────────────────────────────── */
 function trainMs(t) {
-  if (t.house_pass_ts) return t.house_pass_ts * 1000;
-  if (!t.twy_sched) return 0;
-  let ms = new Date(t.twy_sched).getTime();
-  if (!t.twy_actual && t.late_min > 0) ms += t.late_min * 60000;
-  return ms;
+  return TrainDisplay.passMs(t);
 }
 function fmtHM(msOrIso) {
   const d = new Date(msOrIso);
@@ -391,9 +388,14 @@ function fmtHM(msOrIso) {
 let trains = [];
 let lastFetch = 0;
 let nrccMsgs = [];
+const trainParams = new URLSearchParams(location.search);
+// Production stays on the legacy projection until the shadow window is signed
+// off. Add ?train_model=v2&train_shadow=1 when validating the new model.
+const trainModel = trainParams.get('train_model') === 'v2' ? 'v2' : 'legacy';
+const trainShadow = trainParams.get('train_shadow') === '1' ? '&shadow=1' : '';
 
 function fetchTrains() {
-  fetch('/api/trains').then(r => r.json()).then(d => {
+  fetch('/api/trains?model=' + trainModel + trainShadow).then(r => r.json()).then(d => {
     trains = d.trains || [];
     lastFetch = Date.now();
     render();
@@ -408,14 +410,7 @@ function fetchNrcc() {
 
 /* ── Per-track selection ────────────────────────────────── */
 function trackKey(t) {
-  if (!t.direction || !t.track) return null;
-  return (t.direction === 'up' ? 'u' : 'd') + (t.track === 'Main' ? 'm' : 'r');
-}
-/* grace: how long a train stays "current" after its pass moment */
-function graceMs(t) {
-  if (t.at_station) return 600000; // dwelling at the platform — stay current until it actually departs
-  if (t.twy_actual) return t.direction === 'up' ? 45000 : 20000;
-  return 100000;
+  return TrainDisplay.trackKey(t);
 }
 
 /* ── Rendering ──────────────────────────────────────────── */
@@ -429,11 +424,11 @@ function render() {
     if (!k || !byKey[k]) continue;
     const ms = trainMs(t);
     if (!ms || ms > now + 65 * 60000) continue;
-    if (ms < now - 150000) continue;
+    if (t.movement_state === 'stale') continue;
     byKey[k].push(t);
   }
   for (const k of KEYS) {
-    byKey[k].sort((a, b) => trainMs(a) - trainMs(b));
+    byKey[k].sort(TrainDisplay.compareCandidates);
     renderTrack(k, byKey[k], now);
   }
   document.getElementById('stale').style.visibility =
@@ -446,10 +441,10 @@ function renderTrack(key, list, now) {
   const eta  = document.getElementById('eta-' + key);
 
   /* headline: first non-cancelled still within its grace window */
-  const live = list.filter(t => !t.cancelled);
+  const live = list.filter(t => TrainDisplay.isHeadlineEligible(t, now));
   let t = null;
   for (const c of live) {
-    if (trainMs(c) >= now - graceMs(c)) { t = c; break; }
+    t = c; break;
   }
   if (!t) {
     row.style.setProperty('--spine', 'var(--text-faint)');
@@ -518,23 +513,8 @@ function renderTrack(key, list, now) {
     (nextHtml ? '<div class="t-next">' + nextHtml + '</div>' : '');
 
   /* countdown + status */
-  let countHtml, countCls = '', passing = false;
-  if (t.cancelled) {
-    countHtml = 'CANC'; countCls = 'gone';
-  } else if (t.at_station) {
-    countHtml = 'AT STATION'; countCls = 'stn';
-  } else if (t.held) {
-    countHtml = 'HELD'; countCls = 'held';
-  } else if (diff <= 25000 && diff > -45000) {
-    countHtml = 'NOW'; countCls = 'now'; passing = true;
-  } else if (diff <= 0) {
-    countHtml = 'PASSED'; countCls = 'gone';
-  } else if (diff < 90000) {
-    countHtml = Math.max(1, Math.round(diff / 1000)) + '<span class="unit">sec</span>';
-  } else {
-    countHtml = Math.round(diff / 60000) + '<span class="unit">min</span>';
-  }
-  row.classList.toggle('passing', passing);
+  const count = TrainDisplay.countdown(t, now);
+  row.classList.toggle('passing', count.passing);
 
   let statusHtml;
   if (t.cancelled) {
@@ -542,14 +522,16 @@ function renderTrack(key, list, now) {
   } else {
     const bits = [];
     bits.push(fmtHM(ms));
-    if (t.twy_actual) { /* confirmed */ }
+    if (t.pass_confidence === 'observed') bits.push('<span class="ontime">observed</span>');
+    else if (t.pass_confidence === 'live_estimate') bits.push('<span class="ontime">live estimate</span>');
+    else if (t.pass_confidence === 'realtime_forecast') bits.push('<span class="est">forecast</span>');
     else if (t.late_min == null) bits.push('<span class="est">estimated</span>');
     else if (t.late_min >= 1) bits.push('<span class="late">+' + t.late_min + ' min</span>');
     else bits.push('<span class="ontime">on time</span>');
     statusHtml = bits.join(' · ');
   }
   eta.innerHTML =
-    '<div class="t-count ' + countCls + '">' + countHtml + '</div>' +
+    '<div class="t-count ' + count.cls + '">' + count.html + '</div>' +
     '<div class="t-status">' + statusHtml + '</div>';
 }
 

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Train Shadow Monitor</title>
+<style>
+  :root { --ink:#07130f; --panel:#10251e; --line:#315f4c; --paper:#e4ead6; --muted:#9cb3a2; --good:#7ee38a; --warn:#ffcd5a; --bad:#ff715b; --blue:#76d4e8; }
+  * { box-sizing:border-box; } body { margin:0; min-height:100vh; color:var(--paper); background:radial-gradient(circle at 15% 0%,#1d4736 0,transparent 33rem),var(--ink); font:15px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  main { max-width:1120px; margin:auto; padding:clamp(18px,4vw,46px) clamp(16px,4vw,34px) 48px; }
+  header { display:flex; align-items:end; justify-content:space-between; gap:18px; padding-bottom:23px; border-bottom:1px solid var(--line); }
+  h1 { margin:0; color:#fff9df; font-family:Georgia,serif; font-weight:400; font-size:clamp(2rem,6vw,4.5rem); line-height:.9; letter-spacing:-.06em; }
+  h1 span { display:block; margin-top:12px; color:var(--good); font:600 11px/1.2 ui-monospace,SFMono-Regular,monospace; letter-spacing:.18em; text-transform:uppercase; }
+  #health { min-width:160px; padding:11px 13px; border:1px solid var(--line); text-align:right; font-size:11px; letter-spacing:.1em; text-transform:uppercase; } .pulse { display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:var(--good);box-shadow:0 0 14px var(--good); }
+  .intro { max-width:730px; margin:26px 0 20px; color:var(--muted); } .intro b{color:var(--paper);font-weight:600}
+  #summary { display:flex; flex-wrap:wrap; gap:9px; margin:0 0 22px; } .chip{padding:8px 10px;border:1px solid var(--line);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.chip strong{color:var(--good)}.chip.bad strong{color:var(--bad)}
+  #rows { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; } .row { position:relative; min-height:184px; overflow:hidden; padding:17px; border:1px solid var(--line); background:linear-gradient(115deg,rgba(25,57,44,.78),rgba(8,20,15,.94)); } .row::after { content:""; position:absolute; inset:auto -16px 8px 36%; height:1px; background:var(--line); transform:rotate(-8deg); opacity:.65; } .row.mismatch{border-color:var(--bad);box-shadow:inset 4px 0 var(--bad)}.row.match{box-shadow:inset 4px 0 var(--good)}
+  .line { color:var(--blue); font-size:11px; letter-spacing:.16em; text-transform:uppercase; } .state { margin:13px 0 4px; font-family:Georgia,serif; color:#fff9df; font-size:29px; line-height:1; } .meta { position:relative; z-index:1; color:var(--muted); font-size:12px; } .compare { position:relative; z-index:1; display:grid; grid-template-columns:1fr auto 1fr; gap:10px; margin-top:17px; padding-top:11px; border-top:1px solid rgba(156,179,162,.22); font-size:11px; } .compare div:last-child{text-align:right}.compare b{display:block;color:var(--paper);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.arrow{align-self:center;color:var(--good)}.mismatch .arrow{color:var(--bad)}
+  #events { margin-top:20px; border:1px solid var(--line); background:#091810; } #events h2 { margin:0; padding:11px 14px; border-bottom:1px solid var(--line); color:var(--muted); font-size:11px; letter-spacing:.14em; text-transform:uppercase; } #event-list { min-height:45px; padding:13px 14px; color:var(--muted); font-size:12px; } .event-bad{color:var(--bad)}
+  footer { margin-top:18px; color:#708a79; font-size:11px; } a { color:var(--blue); } @media(max-width:680px){header{align-items:start;flex-direction:column}#health{text-align:left}#rows{grid-template-columns:1fr}.row{min-height:164px}}
+</style>
+</head>
+<body>
+<main>
+  <header><div><h1>Shadow board<span>Train accuracy v2 • non-visible validation</span></h1></div><div id="health"><span class="pulse"></span><span id="health-text">Connecting</span></div></header>
+  <p class="intro">This temporary operational page compares the <b>legacy</b> headline selected for each physical line with the opt-in <b>v2 evidence model</b>. It polls every 10 seconds and does not alter kiosk behaviour.</p>
+  <section id="summary" aria-live="polite"></section>
+  <section id="rows" aria-live="polite"></section>
+  <section id="events"><h2>Changes seen this session</h2><div id="event-list">Waiting for the first comparison…</div></section>
+  <footer>Data: <a href="/api/trains?model=v2&amp;shadow=1">v2 shadow API</a> · normal displays remain on legacy until the observation window is signed off.</footer>
+</main>
+<script>
+'use strict';
+const lines = {ur:'UP RELIEF',dr:'DOWN RELIEF',um:'UP MAIN',dm:'DOWN MAIN'};
+let previous = null, events = [];
+const keyFor = t => t && t.uid ? t.uid : (t && t.headcode ? t.headcode : '—');
+const pick = (trains, key, v2, selected) => (trains || []).filter(t => {
+  const track = t.track === 'Main' ? 'm' : 'r'; const direction = t.direction === 'up' ? 'u' : 'd';
+  return direction + track === key && (!selected || (t.run_key || t.uid) === selected) && (!v2 || t.movement_state !== 'stale');
+}).sort((a,b) => (v2 ? a.display_pass_ts : a.house_pass_ts) - (v2 ? b.display_pass_ts : b.house_pass_ts))[0];
+function time(ts) { return ts ? new Date(ts * 1000).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—'; }
+function draw(legacy, v2, evidence) {
+  const shadow = v2.shadow || {}; const differences = shadow.disagreement_rows || [];
+  const v2Metrics = (evidence.models || {}).v2 || {}; const rate = v2Metrics.correct_rate == null ? 'awaiting crossings' : Math.round(v2Metrics.correct_rate * 100) + '%';
+  document.getElementById('summary').innerHTML = '<div class="chip">v2 rows <strong>' + v2.trains.length + '</strong></div><div class="chip ' + (differences.length ? 'bad' : '') + '">headline differences <strong>' + differences.length + '</strong></div><div class="chip">v2 TD match <strong>' + rate + '</strong></div><div class="chip">scored crossings <strong>' + (evidence.crossings_scored || 0) + '</strong></div><div class="chip">updated <strong>' + new Date().toLocaleTimeString('en-GB') + '</strong></div>';
+  document.getElementById('rows').innerHTML = Object.entries(lines).map(([key,label]) => {
+    const old = pick(legacy.trains, key, false, (shadow.legacy_headlines || {})[key]), next = pick(v2.trains, key, true, (shadow.v2_headlines || {})[key]); const different = differences.includes(key);
+    const state = next ? (next.movement_state || 'scheduled').replaceAll('_',' ') : 'no train due';
+    const detail = next ? [next.headcode || 'unknown', next.pass_time_source || 'schedule', time(next.display_pass_ts || next.house_pass_ts)].join(' · ') : 'No v2 candidate';
+    return '<article class="row ' + (different ? 'mismatch' : 'match') + '"><div class="line">' + label + '</div><div class="state">' + state + '</div><div class="meta">' + detail + '</div><div class="compare"><div>LEGACY<b>' + keyFor(old) + '</b></div><div class="arrow">' + (different ? '≠' : '＝') + '</div><div>V2<b>' + keyFor(next) + '</b></div></div></article>';
+  }).join('');
+  const signature = JSON.stringify(shadow.legacy_headlines || {}) + JSON.stringify(shadow.v2_headlines || {});
+  if (previous && previous !== signature) { events.unshift({at:new Date().toLocaleTimeString('en-GB'), differences}); events = events.slice(0,8); }
+  previous = signature;
+  document.getElementById('event-list').innerHTML = events.length ? events.map(e => '<div class="' + (e.differences.length ? 'event-bad' : '') + '">' + e.at + ' — ' + (e.differences.length ? 'difference on ' + e.differences.join(', ') : 'headline selection changed, still aligned') + '</div>').join('') : 'No headline changes observed in this browser session.';
+}
+async function refresh() {
+  try { const [legacy,v2,evidence] = await Promise.all([fetch('/api/trains?model=legacy').then(r=>r.json()),fetch('/api/trains?model=v2&shadow=1').then(r=>r.json()),fetch('/api/train-evidence').then(r=>r.json())]); if (!legacy.trains || !v2.trains) throw Error('invalid response'); draw(legacy,v2,evidence); document.getElementById('health-text').textContent='live · 10 sec poll'; }
+  catch (e) { document.querySelector('.pulse').style.background='var(--bad)'; document.getElementById('health-text').textContent='feed unavailable'; }
+}
+refresh(); setInterval(refresh,10000);
+</script>
+</body>
+</html>

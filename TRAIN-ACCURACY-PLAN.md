@@ -1,0 +1,876 @@
+# Plan: Make `/trains` and `/now` Accurate and Self-Correcting
+
+Status: **Core correctness implementation is deployed to cloud production in non-visible shadow mode. V2 is currently less accurate than legacy and must not be promoted.**
+
+Created: 2026-08-16
+
+Primary files:
+
+- `transport-proxy.py` — source aggregation, train identity, position, timing, state and API
+- `trains.html` — four-line train display
+- `now.html` — combined aircraft/train display; currently duplicates the train-selection logic
+- `lineside.html` — useful reference implementation for physical passed-house detection
+- `PROJECT.md` — architecture and operational documentation
+- `SIGNALS-PLAN.md` — confirmed berth-exit-to-signal learner design
+
+This document is intended to be executable by a future Codex instance. It records the observed
+failure modes, the target model, the order of work, validation requirements and deployment
+constraints. Do not treat it as evidence that any of the changes below have already shipped.
+
+## Implementation status — 2026-08-16
+
+Implemented locally in this worktree:
+
+- RTT actual and forecast times are now separate; a forecast no longer populates `twy_actual`.
+- The train model carries scheduled, forecast, TD-ETA and observed pass timestamps plus source and
+  confidence fields.
+- TD house crossings override forecasts and become immutable observed passage evidence.
+- Calibration cannot alter an observed pass time.
+- `/api/trains` now returns an explicit movement state, post-house evidence, run key, track source
+  and track confidence.
+- A distant TD berth records `current_track` but only changes the displayed track within the
+  final 1.6-mile approach; this is a conservative interim topology guard.
+- Confirmed learned signal mappings can qualify `held_at_red`.
+- `/trains` and `/now` use the same new `train-display.js` helpers and no longer keep a cached
+  prediction in NOW for the old 45–100 second grace.
+- Focused regression tests cover forecast/actual separation, calibration protection, physical
+  passage state and confirmed-red holds.
+
+Still pending from this plan: full run-aware source merging, crossover-by-crossover topology,
+replay fixtures, source-specific recalibration and the cloud shadow/release window. These remain
+required before calling the programme fully complete.
+
+### Pre-release controls now implemented
+
+- `/api/trains` defaults to `model=legacy`, a projection matching the deployed browser contract.
+- `model=v2` exposes the provenance/state model; `shadow=1` adds a compact, per-track comparison
+  of legacy and v2 headline run keys without changing the visible display.
+- `/trains` and `/now` remain legacy by default. Append
+  `?train_model=v2&train_shadow=1` to validate the v2 view on either page.
+- `deployment/train-accuracy-shadow.sh` tests, backs up and deploys only the four train files;
+  it is intentionally separate from the whole-worktree cloud deployment script.
+
+### Shadow release record
+
+- **2026-08-16 19:24 UTC:** `train-accuracy-shadow-20260816T192428Z` deployed to
+  `cloud.gdx.org.uk`. Supervisor `joggler` restarted cleanly; public legacy and v2 endpoints
+  each returned 29 trains, with **0** current headline-row disagreements.
+- Cloud rollback backup:
+  `/home/gduthie/joggler/release-backups/train-accuracy-shadow-20260816T192428Z`.
+- The ordinary kiosk pages still request `model=legacy`; no visible behaviour has changed.
+- **2026-08-16 19:27 UTC:** temporary monitor deployed at
+  `https://nearby.gdx.org.uk/train-shadow` in
+  `train-accuracy-shadow-20260816T192735Z`. Public check: 31 legacy rows, 31 v2 rows and **0**
+  current headline-row disagreements. Latest rollback backup:
+  `/home/gduthie/joggler/release-backups/train-accuracy-shadow-20260816T192735Z`.
+- **2026-08-16 19:39 UTC:** evidence and metrics collector deployed in
+  `train-accuracy-shadow-20260816T193917Z`. The cloud append-only evidence log was created and
+  recorded its first decision snapshot; no independent TD house crossing had yet occurred to
+  score. Latest rollback backup:
+  `/home/gduthie/joggler/release-backups/train-accuracy-shadow-20260816T193917Z`.
+- **2026-08-16 20:04 UTC:** `/lineside` heard-pass calibration presses added to the evidence
+  collector in `train-accuracy-shadow-20260816T200451Z`. They remain separate manual truth
+  records while continuing to update the robust timing-offset learner. Latest rollback backup:
+  `/home/gduthie/joggler/release-backups/train-accuracy-shadow-20260816T200451Z`.
+- **2026-08-16 21:55 UTC — first meaningful evidence gate:** 29 independent TD house crossings
+  score legacy at 26/29 (89.7%) and v2 at 22/29 (75.9%), both with a 13-second median absolute
+  ETA error. V2's `td_eta` choices are 21/23 correct (91.3%), but its RTT forecast fallback is
+  only 1/5 correct (1,614-second median error) and its one schedule fallback is wrong. Keep v2
+  shadow-only. Diagnose fallback eligibility/ranking and the separate 9U95 TD-ETA mis-rank before
+  attempting a cutover. See `OVERNIGHT-HANDOFF-2026-08-16.md` for the exact scored cases and
+  morning procedure.
+
+## 1. Goal
+
+Make the four train rows answer these questions reliably:
+
+1. What is the next real train to pass the house on each physical line?
+2. Where is it now, and how strong is that evidence?
+3. Is it approaching, held, at Twyford station, passing now, or already past?
+4. When is it likely to pass, without allowing an estimate to override a physical observation?
+
+The specific reported symptoms are:
+
+- the wrong train is sometimes selected as the headline train;
+- `NOW` sometimes continues flashing long after the train has physically passed;
+- `/trains` and `/now` contain duplicated selection logic and can drift independently;
+- live TD and learned signal evidence is not fully used to qualify the displayed state.
+
+## 2. Confirmed findings from the 2026-08-16 review
+
+### 2.1 RTT forecasts are stored as actuals
+
+`_rtt_normalise()` currently does this for a Twyford RTT result:
+
+```python
+twy_actual = actual_iso or forecast_iso
+```
+
+It similarly fills `twy_arr_actual` and `twy_dep_actual` with either `realtimeActual` or
+`realtimeForecast`. A forecast is therefore truthy in every place that asks whether an actual
+time exists.
+
+Consequences:
+
+- `_td_enrich_trains()` does not replace the forecast-derived time with a live berth ETA because
+  its refinement path is guarded by `not t.get('twy_actual')`;
+- a genuine TD `at_house` event does not write the observed passage time for the same reason;
+- frontends use the short “actual” grace window for a forecast;
+- “confirmed” is easy to misread as physically observed, when it often means only that RTT
+  returned the service in its Twyford location query.
+
+`PROJECT.md` already documents that `twy_actual` carries a forecast until the time is in the
+past. That convention is the root problem and should be retired rather than worked around again.
+
+### 2.2 Calibration is applied to observed passage times
+
+The pipeline computes or observes `house_pass_ts`, then applies `_CALIB_OFFSETS` to every train
+with a timestamp. There is no provenance check.
+
+At review time, before the cloud migration, the Pi had these applied offsets:
+
+| Line | Applied offset |
+|---|---:|
+| Up Relief | +15.5 s |
+| Down Relief | -6.85 s |
+| Up Main | +30.95 s |
+| Down Main | +18.9 s |
+
+If a TD house-crossing event records the true passage at `t0`, Up Main becomes `t0 + 30.95s`.
+The frontend’s current `NOW` tail is another 45 seconds, so flashing can continue for roughly
+76 seconds after the physical passage.
+
+Calibration is valid only for a prediction. It must never modify an observed RTT actual, TRUST
+movement actual, TD zero-crossing, or post-house physical observation.
+
+The existing calibration sample set is also noisy and may mix pre-correction errors with
+post-correction residuals. Once timestamp semantics are fixed, old offsets must not be trusted
+without re-evaluation.
+
+### 2.3 `/trains` and `/now` ignore physical passed-house evidence
+
+`lineside.html` already has `hasPassedHouse()` and `msSincePassed()` logic. It uses signed TD
+distance and direction to remove a train shortly after it is physically beyond the house,
+independently of its predicted timestamp.
+
+`trains.html` and `now.html` do not use that evidence. They derive the row state from:
+
+```javascript
+diff = trainMs(t) - Date.now()
+```
+
+and display `NOW` for `-45s < diff <= +25s`. They therefore continue to trust an inaccurate
+timestamp after the physical position has disproved it.
+
+The durable fix is to calculate passage state in the backend and expose it to every frontend.
+Porting the `lineside.html` test to both pages is an acceptable short-term safety fix, but must
+not become a third duplicated state machine.
+
+### 2.4 Headline selection is timestamp-only
+
+For each line, the frontend:
+
+1. filters by direction/track and a broad time window;
+2. sorts by `house_pass_ts`;
+3. selects the first non-cancelled train still inside `graceMs()`.
+
+It does not rank physical evidence. A stale schedule-only train can therefore block a train that
+has a fresh TD position. A forecast is treated more like an actual than its provenance warrants.
+
+### 2.5 A distant live line can incorrectly decide the line at the house
+
+`_td_enrich_trains()` currently lets any SMART berth line override the inferred `track`. The
+current line is physical ground truth for where the train is, but not necessarily for which line
+it will use past the house if one or more crossovers remain ahead.
+
+During the review, live train `2N78` was assigned Down Main from a berth approximately 15.3 miles
+east of the house. Its original service classification was Relief. Its distant current line does
+not prove its eventual line at Twyford.
+
+Line-at-house inference must be topology-aware and must state its confidence.
+
+### 2.6 Record identity is too headcode-centric
+
+Several joins and suppression checks are keyed primarily by headcode. Headcodes are reused, can
+change during a journey, and can identify different workings at different times of day. CIF
+selection has already been improved to choose the closest scheduled time, but the general merge
+pipeline still needs a stable run identity.
+
+No duplicate headcodes or UIDs were present in the live API snapshot taken during the review, so
+duplication was not the immediate cause of that snapshot’s selection. It remains a structural
+risk and a likely explanation for intermittent wrong identity/route details.
+
+### 2.7 “Confirmed” has multiple incompatible meanings
+
+At present `confirmed=True` can mean one or more of:
+
+- the service appeared in the RTT Twyford query;
+- there is a recent TD berth for its headcode;
+- TRUST reported it at Twyford;
+- the backend detected a physical house crossing.
+
+These must be separate evidence facts. A single Boolean is not adequate for selection or UI.
+
+## 3. Current data flow
+
+The existing pipeline in `_rtt_build_trains()` is approximately:
+
+```text
+RTT Twyford query ─┐
+RTT Reading query ├─> normalise ─> corridor filters ─┐
+TRUST movements ──┤                                  │
+CIF schedules ────┤                                  ├─> headcode/time dedup
+TD berth buffer ──┘                                  │
+                                                     ├─> house_pass_ts
+TD berth/house enrichment ───────────────────────────┤
+manual calibration offset ───────────────────────────┤
+cancellation/identity-change filters ────────────────┤
+freshness filter/sort ────────────────────────────────┘
+                                                     │
+                                                     v
+                                               /api/trains
+                                                 /       \
+                                           trains.html  now.html
+```
+
+The core design mistake is collapsing all source timestamps into `house_pass_ts` too early,
+then asking the browser to reconstruct operational state from that one value.
+
+## 4. Design principles and invariants
+
+Future work must preserve these rules:
+
+1. **Observation beats prediction.** A post-house TD position or zero-crossing can never be
+   moved back into the future by a timetable, forecast, speed model or calibration.
+2. **Keep provenance.** Schedule, forecast, estimate and observation must remain distinct.
+3. **State is backend-owned.** `/trains`, `/now` and future clients must receive the same selected
+   state rather than independently inferring it.
+4. **A live position proves present location, not necessarily future route.** Track-at-house
+   requires topology-aware inference.
+5. **Prefer omission to a confident false statement.** Ambiguous identity or line can be shown
+   as unknown/estimated; it must not silently become authoritative.
+6. **Use confirmed signal mappings only for operational decisions.** Tentative signal mappings
+   remain display/debug information.
+7. **Retain useful schedule coverage.** Live TD should improve timetable predictions, not make
+   the display empty whenever the TD feed is briefly unavailable.
+8. **Do not regress stopping trains.** A Down stopper that has passed the house on arrival may
+   legitimately remain `at_station` until departure; “passed house” and “current row relevance”
+   are related but not identical for a station call.
+
+## 5. Target backend model
+
+### 5.1 Preserve separate time facts
+
+Each merged run should carry these fields internally. The public API may omit raw fields that
+are not useful to clients, but keeping them during the merge is important.
+
+| Field | Meaning | May calibration alter it? |
+|---|---|---|
+| `scheduled_pass_ts` | Published or derived working time at the house | No; retain raw |
+| `forecast_pass_ts` | RTT/TRUST forecast adjusted to the house | Yes, only through an explicit prediction model |
+| `berth_eta_pass_ts` | ETA produced from current TD berth and speed/transit model | Yes |
+| `observed_pass_ts` | Physical house crossing or authoritative actual | Never |
+| `display_pass_ts` | Selected timestamp for presentation | Derived from the fields above |
+| `pass_time_source` | `td_crossing`, `td_post_house`, `trust_actual`, `rtt_actual`, `td_eta`, `rtt_forecast`, `schedule`, `cif` | N/A |
+| `pass_confidence` | `observed`, `live_estimate`, `realtime_forecast`, `schedule` | N/A |
+
+Do not reuse `twy_actual` for forecasts. During migration, either:
+
+- replace it with `twy_forecast` and a genuine `twy_actual`; or
+- retain it only as a compatibility field generated from the new model, with no internal logic
+  reading it.
+
+### 5.2 Introduce an explicit lifecycle
+
+The backend should return `movement_state` from this controlled vocabulary:
+
+- `scheduled` — timetable only, not yet inside useful live range;
+- `forecast` — realtime forecast exists but no corridor TD evidence;
+- `approaching` — fresh TD movement on the approach side of the house;
+- `held` — fresh location but no movement, with no confirmed red-signal evidence;
+- `held_at_red` — current berth’s confirmed exit signal is red;
+- `at_station` — calling at Twyford and currently dwelling;
+- `passing` — inside the small presentation window around an imminent/observed crossing;
+- `passed` — physical or authoritative evidence says it is beyond the house;
+- `stale` — evidence is too old to select as the headline train;
+- `cancelled` — cancelled and retained only if the UI explicitly wants it.
+
+Recommended state precedence:
+
+```text
+cancelled
+  > at_station
+  > observed passed/passing
+  > held_at_red
+  > held
+  > approaching
+  > forecast
+  > scheduled
+  > stale
+```
+
+For a Down stopping service, an observed house crossing on arrival must not remove it while it
+is still `at_station`. Once departure is observed/forecast to have occurred and the station
+occupancy no longer supports the dwell, it can leave the row.
+
+### 5.3 Record passage as a durable event
+
+When `_detect_house_event()` returns `at_house`:
+
+- persist or retain `observed_pass_ts` for that run/headcode;
+- invalidate the train cache;
+- never overwrite it with a forecast;
+- never calibrate it;
+- expose `passed_evidence='td_crossing'`;
+- after the configured visual grace, ensure it cannot remain the headline unless it is a
+  stopping train still at Twyford.
+
+If the exact zero-crossing was missed but a fresh TD position is physically post-house, record
+`passed_evidence='td_post_house'`. Its timestamp may be bounded rather than exact: the crossing
+occurred between the preceding and current CA events. Use the most recent defensible bound for
+UI state, but do not label the estimated instant as an exact observed timestamp.
+
+### 5.4 Create a stable run key
+
+Build a `run_key` from the strongest available identity:
+
+1. RTT/CIF schedule UID + operating date, when present;
+2. otherwise headcode + operating date + expected Twyford time bucket + direction;
+3. include origin/destination when available to disambiguate reused headcodes.
+
+Do not use headcode alone when joining a TD sighting to a scheduled run. Candidate matching must
+check:
+
+- expected time proximity;
+- direction compatibility;
+- corridor position compatibility;
+- origin/destination or UID where available;
+- known TRUST identity changes.
+
+If no scheduled candidate is safe, retain a TD-only run with unknown identity rather than
+attaching the wrong route.
+
+### 5.5 Merge evidence before deciding the display record
+
+Refactor `_rtt_build_trains()` conceptually into:
+
+1. collect source observations;
+2. normalise each source without destroying provenance;
+3. form/locate run entities;
+4. merge source evidence into each run;
+5. calculate corridor eligibility;
+6. calculate current physical state and line-at-house confidence;
+7. calculate ETA/display time;
+8. rank/select candidates;
+9. serialize the API.
+
+Avoid progressively mutating a single `house_pass_ts` as each source is encountered. That makes
+the final value depend on pipeline order and hides why it changed.
+
+## 6. Track-at-house inference
+
+Return both:
+
+- `track`: `Main` or `Relief`;
+- `track_confidence`: `physical_final`, `physical_pre_junction`, `booked`, `heuristic`, `unknown`;
+- optionally `track_source` and `current_track` separately.
+
+Rules:
+
+1. A berth after the final possible crossover before the house gives `physical_final`.
+2. A berth farther away reports `current_track`, but does not automatically overwrite the
+   predicted `track` at the house.
+3. A measured transition through a known crossover updates the predicted house track.
+4. Inside the final approach, physical topology wins over booked RTT/CIF data.
+5. Outside the reliable topology corridor, use booked/inferred track and lower confidence.
+
+Use the existing `BERTH_MI`/`_BERTH_MI`, learned berth chain and junction layout documented in
+`JUNCTIONS-PLAN.md`. Do not introduce a single arbitrary mileage cutoff if the topology can say
+whether a crossover remains available.
+
+## 7. Candidate ranking and row selection
+
+Prefer ranking in the backend, returning either a `display_rank` or already grouped candidates
+per line. A suggested evidence ranking is:
+
+1. fresh live TD train approaching on a physically final line;
+2. fresh live TD train on a plausible approach line;
+3. stopping train genuinely at Twyford;
+4. realtime RTT forecast consistent with live upstream evidence;
+5. schedule-only passenger service;
+6. unconfirmed CIF freight path.
+
+Within an evidence tier, use `display_pass_ts`. Never allow a schedule-only overdue train to
+block a fresh live approaching train. A past train is eligible only for a short presentation
+grace or a genuine station dwell.
+
+Return a short `selection_reason` in debug/shadow mode, for example:
+
+```json
+{
+  "selection_reason": "fresh_td_final_approach",
+  "pass_time_source": "td_eta",
+  "track_source": "berth_after_ruscombe_crossover"
+}
+```
+
+## 8. ETA calculation and calibration
+
+### 8.1 Source priority
+
+Recommended display-time priority:
+
+1. `observed_pass_ts` for recent/past state;
+2. fresh post-house TD evidence for `passed` state;
+3. fresh TD berth ETA while approaching;
+4. authoritative realtime forecast;
+5. schedule plus known lateness;
+6. raw schedule/CIF path.
+
+The source priority for state is not identical to the source priority for a future ETA. A train
+can be physically observed at a berth while the realtime feed still supplies the better model
+for a station dwell; preserve both facts.
+
+### 8.2 Rebuild calibration semantics
+
+Before applying existing calibration offsets to the new model:
+
+1. mark old calibration entries with the model version that generated `predicted_ts`, or treat
+   all existing entries as legacy;
+2. prevent calibration from affecting `observed_pass_ts`;
+3. log both raw prediction and already-applied correction so new samples are not residuals mixed
+   with old raw errors;
+4. use robust statistics per line and prediction source, not one offset for every source;
+5. require a larger clean sample than four if automatic correction is retained;
+6. report median absolute error and sample spread, not just median bias.
+
+A single line offset may not be appropriate for RTT forecasts, schedule offsets, passenger TD
+speed models and freight TD speed models. Prefer source-specific calibration if the evidence
+shows materially different errors.
+
+### 8.3 Use learned transit times where possible
+
+The CA berth-chain learner already records per-berth transit EWMA and sample counts. A future
+enhancement should estimate ETA by summing learned downstream transit times along the most likely
+path, with separate buckets where data supports them:
+
+- direction;
+- Main/Relief;
+- passenger/freight;
+- optionally stopping/non-stopping.
+
+Keep the constant-speed model as fallback. Do not begin this refinement until lifecycle and
+timestamp provenance are correct; otherwise improved ETA arithmetic will still feed the wrong
+state machine.
+
+## 9. Use of the signal learner
+
+The signal learner had 318 confirmed mappings at review time, including 258 in D1/D6. It can
+improve status accuracy, but should not directly predict a release time.
+
+For a train occupying berth `B` and moving in direction `D`:
+
+1. find only a **confirmed** learned exit-signal mapping for `(area, B, D)`;
+2. read the live signal bit;
+3. if red and the train has remained in the berth beyond a modest threshold, set
+   `movement_state='held_at_red'`;
+4. if off/proceed, expose `signal_ahead_state='off'`, but do not promise immediate movement;
+5. never use a tentative mapping for row selection, ETA, or held-state decisions.
+
+Useful API fields:
+
+```json
+{
+  "signal_ahead_state": "red",
+  "signal_mapping_tier": "confirmed",
+  "held_at_red": true
+}
+```
+
+The learner distinguishes only red/on from off/proceed. It does not distinguish green, single
+yellow, double yellow, or junction feathers.
+
+## 10. Frontend changes
+
+### 10.1 Stop deriving operational state from one timestamp
+
+`trains.html` and `now.html` should consume:
+
+- `movement_state`;
+- `display_pass_ts`;
+- `pass_time_source`;
+- `pass_confidence`;
+- `seconds_to_house` if approaching;
+- `observed_pass_ts` or `seconds_since_passed` if passed;
+- `track_confidence`.
+
+`NOW` should be possible only when:
+
+- state is `passing`; or
+- state is `approaching` and a high-quality prediction is inside the lead window.
+
+Once state becomes physically `passed`, stop `NOW` immediately and use at most a 15–20 second
+non-flashing “PASSED” grace. Do not preserve the current 45-second flashing tail after an
+observed crossing.
+
+### 10.2 Share train presentation logic
+
+The current train-side functions in `trains.html` and `now.html` are nearly copied verbatim.
+Extract a small static `train-display.js` module containing pure helpers for:
+
+- track key;
+- state/countdown label;
+- candidate ordering fallback;
+- time formatting;
+- confidence/status text.
+
+Keep page-specific DOM construction in each HTML file. Serve the shared file through the existing
+static handler and ensure it works in the Joggler’s Chromium version without a build step.
+
+If introducing a shared file is operationally undesirable, add parity tests that load both
+implementations and assert identical selection/state outputs. Sharing is preferable.
+
+### 10.3 Make confidence visible but quiet
+
+Suggested status language:
+
+- observed: `passed 19:42:13` or a small solid live indicator;
+- live ETA: `~19:42 · live position`;
+- realtime forecast: `exp 19:42`;
+- schedule only: `sched 19:42`;
+- held at confirmed red: `HELD AT RED`;
+- ambiguous track: avoid a confident line claim or use a subtle estimate marker.
+
+The four-row display must remain glanceable. Do not turn it into a diagnostics screen.
+
+## 11. Implementation phases
+
+### Phase 0 — Capture fixtures and add diagnostics
+
+Before changing behaviour:
+
+1. Save anonymisation-unnecessary JSON fixtures from `/api/trains`, `/api/td-live` and relevant
+   TD events for representative cases.
+2. Add an optional debug/shadow output containing source timestamps, chosen source, state,
+   track source and selection reason.
+3. Put debug output behind an environment flag or query parameter; do not bloat the normal UI.
+4. Add deterministic clock injection to pure calculation functions so tests do not depend on
+   wall time.
+
+Required fixtures:
+
+- Up Main express passing normally;
+- Down Main express with Reading-derived prediction;
+- Up and Down Twyford stopping services;
+- delayed service whose scheduled Twyford slot is already past;
+- train held for several minutes at a red signal;
+- train changing Main/Relief near a junction;
+- CIF freight path that does not run;
+- live TD-only freight/ECS working;
+- reused headcode with two same-day schedules;
+- TRUST identity change;
+- missed exact house zero-crossing but fresh post-house berth;
+- TD feed disconnect/reconnect.
+
+### Phase 1 — Separate timestamp provenance
+
+1. Change `_rtt_normalise()` to keep actual and forecast separate.
+2. Add the target time fields and `pass_time_source`.
+3. Update all internal consumers; do not leave truthiness checks on legacy `twy_actual`.
+4. Make TD/authoritative observations immutable winners.
+5. Apply calibration only to eligible prediction sources.
+6. Keep compatibility serialization temporarily if another page still expects old fields.
+
+This phase should directly address the longest `NOW` errors.
+
+### Phase 2 — Backend lifecycle and physical passage
+
+1. Move passed-house logic into a pure backend function.
+2. Incorporate both exact `at_house` events and signed post-house position.
+3. Define the stopping-train dwell exception explicitly.
+4. Return `movement_state`, `seconds_to_house`, `seconds_since_passed` and evidence source.
+5. Ensure cache invalidation occurs on state-changing TD events.
+
+### Phase 3 — Run identity, deduplication and evidence ranking
+
+1. Create `run_key` and source-record matching.
+2. Replace broad `train_hcs` suppression with run-aware matching.
+3. Merge identity changes into the active run where safe.
+4. Rank candidates by evidence before time.
+5. Ensure a schedule-only overdue record cannot block a fresh TD candidate.
+6. Preserve an unmatched TD-only train rather than assigning uncertain identity.
+
+### Phase 4 — Track-at-house topology
+
+1. Separate `current_track` from predicted `track` at the house.
+2. Model whether a crossover remains between the current berth and house.
+3. Update track confidence after observed crossover transitions.
+4. Verify all four lines against `lineside.html` berth cells and real traffic.
+
+### Phase 5 — Frontend migration
+
+1. Make `/trains` consume backend state.
+2. Add the short observed-passage grace and remove timestamp-only `NOW` persistence.
+3. Apply identical behaviour to `/now` through the shared helper.
+4. Keep the last-fetch/no-data indicator independent from train prediction confidence.
+5. Add restrained source/confidence labels.
+
+### Phase 6 — Signal-qualified holds and ETA refinement
+
+1. Add confirmed-signal `held_at_red` qualification.
+2. Collect clean prediction errors under the new model.
+3. Reassess or reset legacy calibration offsets.
+4. Consider chain-transit ETA sums after the state model is stable.
+
+## 12. Test plan
+
+### 12.1 Backend unit tests
+
+Extract pure functions and test at least:
+
+1. A future RTT forecast is never classified as actual.
+2. A TD `at_house` event replaces every estimate.
+3. Calibration does not alter an observed timestamp.
+4. A post-house berth makes state `passed` even if the forecast is in the future.
+5. An Up/Down stopper may remain `at_station` after house passage until departure.
+6. A stale schedule-only train loses to a fresh live approaching train.
+7. A distant current Main berth does not automatically make track-at-house Main.
+8. A final-approach crossover updates track-at-house correctly.
+9. Two same-headcode workings do not merge when their times/routes differ.
+10. A TRUST identity change does not leave the old run as the headline.
+11. Confirmed red signal qualifies a hold; tentative signal does not.
+12. Feed staleness yields `stale`, not a false observed state.
+
+### 12.2 Frontend tests
+
+Using fixed API fixtures and a controllable clock:
+
+1. `/trains` and `/now` select the same run for each line.
+2. `NOW` never renders for `passed`, `held`, `held_at_red`, `at_station` or `stale`.
+3. An observed pass changes to `PASSED` immediately and leaves after the configured grace.
+4. Forecast and schedule labels are visually distinct from observations.
+5. The next live train replaces the prior train without an empty or stale interval.
+6. No row continues flashing due solely to calibration.
+
+### 12.3 Replay/integration tests
+
+Build a small replay harness that feeds timestamped RTT/TD/TRUST/CIF fixtures through the merge
+and state functions. Assert the selected run and state at each point in the event timeline.
+
+Do not require live Network Rail access for correctness tests. Live feeds are for final shadow
+validation, not the only reproducibility mechanism.
+
+## 13. Shadow-mode validation
+
+Run the new model alongside the old one without changing the visible display for at least one
+busy weekday and, ideally, 48 hours.
+
+Log only changes and disagreements, not every one-second tick:
+
+```json
+{
+  "ts": 0,
+  "line": "um",
+  "old_headcode": "1A00",
+  "new_headcode": "1B00",
+  "old_state": "now",
+  "new_state": "passed",
+  "reason": "post_house_td"
+}
+```
+
+Track these metrics:
+
+- selection disagreements per line;
+- number and duration of NOW periods after physical passage;
+- ETA error against TD house crossings/manual heard-pass events;
+- wrong-line corrections after final-approach TD evidence;
+- duplicate/ambiguous run joins;
+- schedule-only headline duration after its predicted time;
+- percentage of headline trains with fresh live evidence;
+- false disappearance of genuine stopping/held trains.
+
+Review disagreements manually against `/lineside`, TD berths and, where available, heard-pass
+calibrations. Do not automatically treat the old display as ground truth.
+
+### Current cloud procedure
+
+The first cloud release is a **non-visible shadow release**, not a cutover:
+
+```bash
+./deployment/train-accuracy-shadow.sh
+```
+
+It runs the focused tests, copies only `transport-proxy.py`, `trains.html`, `now.html` and
+`train-display.js`, backs up the prior cloud versions under `release-backups/`, restarts
+Supervisor and checks both API models. Normal kiosk URLs continue to request `model=legacy`.
+
+During the observation window, compare these opt-in pages against `/lineside` while recording
+the returned `shadow.disagreement_rows`:
+
+```text
+https://nearby.gdx.org.uk/trains?train_model=v2&train_shadow=1
+https://nearby.gdx.org.uk/now?train_model=v2&train_shadow=1
+```
+
+The compact monitor URL is `https://nearby.gdx.org.uk/train-shadow`. It is temporary,
+`noindex`, and polls both API models directly; remove its route and `train-shadow.html` after
+the shadow window concludes.
+
+Observe at least one busy weekday (preferably 48 hours), including a stopping service, a fast
+Main-line pass, a held train and a physical post-house TD crossing. Only then switch the default
+frontend request to `model=v2`; retain `model=legacy` as the rollback switch for the first week.
+
+**Current gate (2026-08-16): do not use elapsed time alone as a promotion criterion.** V2 must
+first beat legacy on independent TD crossings, including its fallback cases. The present 75.9%
+v2 result is a regression against legacy's 89.7%, despite the strong TD-only subset.
+
+## 13.1 Evidence and metrics feedback loop
+
+`train-evidence.jsonl` is an append-only cloud runtime file, deliberately excluded from normal
+deployments and git. A changed model decision, plus a one-minute unchanged heartbeat, records the
+four legacy and v2 headline choices. When TD detects an independent `at_house` crossing, the
+backend scores the most recent pre-crossing decision for both models on the physical row:
+
+- whether its headline headcode matched the crossing train;
+- its ETA error in seconds; and
+- for v2, the time-source class (`td_eta`, RTT forecast, schedule, etc.).
+
+Each `/lineside` **heard it pass** calibration press is also saved as a separate,
+high-confidence `manual_observation` in this evidence log and scores both preceding headline
+models. It continues to feed the existing robust per-line calibration-offset learner. Manual
+observations never overwrite or pretend to be raw TD events.
+
+`/api/train-evidence` returns aggregate crossing accuracy and median absolute ETA error by model
+and v2 time source. `/train-shadow` displays the v2 TD-match rate and crossing count.
+
+This is **evidence collection, not autonomous tuning**. A future learning change may only promote
+a source/reliability or route/timing adjustment after enough independent crossings demonstrate an
+improvement. TD crossing evidence, fresh post-house berths, RTT actuals and explicit heard-pass
+presses are valid truth sources; a displayed prediction is never used to validate itself.
+
+## 14. Acceptance criteria
+
+The improvement is ready to replace the current model when:
+
+1. A physically observed post-house train never displays `NOW`.
+2. `PASSED` remains for no more than 20 seconds, except an explicitly modelled station dwell.
+3. Calibration never changes an observed timestamp.
+4. `/trains` and `/now` select the same run and state from the same API response.
+5. A fresh live approaching train always outranks a stale schedule-only candidate on its line.
+6. No run is merged solely by headcode when multiple plausible same-day workings exist.
+7. Track-at-house claims identify their source/confidence and agree with final-approach TD
+   evidence in at least 99% of observed passages during shadow validation.
+8. The system survives loss of RTT or TD by degrading to lower-confidence schedule/forecast
+   output without inventing an observation.
+9. Stopping trains remain visible for their genuine dwell and leave promptly after departure.
+10. There are no duplicate headline records for one physical train after a headcode change.
+
+## 15. Deployment and rollback
+
+The normal live service runs on the cloud VM at:
+
+```text
+host: cloud.gdx.org.uk
+user: gduthie
+directory: /home/gduthie/joggler
+service: joggler (Supervisor)
+backend: 127.0.0.1:8002
+public URL: https://dashboard.gdx.org.uk/
+release command: ./deployment/cloud-deploy.sh
+```
+
+The Raspberry Pi dashboard is a temporary rollback path only. Do not make ordinary releases to
+it. Its runtime learner state may be useful for recovery, but it is not the production source of
+truth.
+
+Important: before release, compare the local train-related files with the deployed cloud copy,
+and preserve any unrelated local worktree changes. A future Codex must:
+
+1. inspect `git status` and preserve all existing changes;
+2. compare the specific train-related code in local and deployed cloud copies before deployment;
+3. use `./deployment/cloud-deploy.sh` for the normal release path rather than ad-hoc copying;
+4. never overwrite cloud runtime state files (`.env`, `berth_chain.json`,
+   `signals_learned.json`, calibration logs, tokens or downloaded reference data);
+5. back up the deployed application files being replaced;
+6. syntax-check and run fixture tests locally;
+7. deploy backend and both frontends as one compatible version;
+8. verify Supervisor health and the cloud `/api/trains` JSON after restart;
+9. retain a feature flag for old/new selection during shadow mode and initial rollout;
+10. roll back application files, not runtime learner state, if the new model fails.
+
+Do not copy the 18 MB `signals_learned.json` through an unsafe live write path. The backend now
+uses atomic replacement locally; preserve that behaviour.
+
+## 16. Suggested file-level changes
+
+### `transport-proxy.py`
+
+- refactor `_rtt_normalise()` to preserve actual/forecast provenance;
+- introduce run/evidence structures or clearly separated dictionaries;
+- refactor `_rtt_build_trains()` into collection, merge, state, ranking and serialization stages;
+- make `_td_enrich_trains()` attach evidence rather than overwrite a universal timestamp;
+- create pure passage-state and track-at-house functions;
+- restrict calibration by `pass_time_source`;
+- add confirmed-signal lookup for `held_at_red`;
+- add optional debug/shadow serialization;
+- invalidate the cache on every physical state transition that affects selection.
+
+### `trains.html`
+
+- remove local operational-state inference once backend fields exist;
+- render backend lifecycle and confidence;
+- shorten observed-passage grace;
+- consume shared train-display helpers.
+
+### `now.html`
+
+- use exactly the same train selection/state helper as `/trains`;
+- retain page-specific compact wording/layout only.
+
+### `lineside.html`
+
+- keep as the physical topology/position reference;
+- eventually consume the same backend passage state where appropriate;
+- do not remove its richer berth-panel behaviour merely to force UI uniformity.
+
+### New test/support files
+
+Suggested layout without adding a build system:
+
+```text
+tests/
+  test_train_model.py
+  fixtures/trains/
+    normal_up_main.json
+    down_stopper.json
+    delayed_forecast.json
+    held_red.json
+    crossover.json
+    reused_headcode.json
+    identity_change.json
+    missed_crossing.json
+train-display.js
+```
+
+Use Python’s standard `unittest` unless the repository adopts `pytest` deliberately. Avoid adding
+a large dependency solely for this work.
+
+## 17. Recommended execution order for a future Codex
+
+1. Read this file, the train sections of `PROJECT.md`, `SIGNALS-PLAN.md`, and relevant current
+   code in all four primary files.
+2. Inspect local dirty changes and compare the deployed cloud versions read-only.
+3. Capture fixtures before altering semantics.
+4. Add failing tests for forecast-vs-actual, calibration-on-observation, and post-house NOW.
+5. Implement Phase 1 and Phase 2 behind a feature flag.
+6. Run local tests and a short live shadow comparison.
+7. Implement run identity/ranking and track topology with new fixtures for every discovered case.
+8. Migrate `/trains` and `/now` together.
+9. Run the full shadow window and calculate acceptance metrics.
+10. Enable the new model, monitor disagreements/errors, and update `PROJECT.md` with the final
+    shipped semantics and date.
+
+The highest-value, lowest-risk first release is: separate forecast from actual, prevent
+calibration of observations, and make physical post-house evidence terminate `NOW`. Do those
+before tuning speed constants or adding more timetable heuristics.
