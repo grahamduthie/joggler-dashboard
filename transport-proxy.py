@@ -3248,10 +3248,17 @@ _TRAIN_V2_ONLY_FIELDS = frozenset({
 
 
 def _legacy_train_projection(t):
-    """Return the pre-v2 API shape for an opt-in-safe shadow rollout."""
+    """Return the legacy selection with presentation-only evidence metadata.
+
+    ``house_pass_ts`` and ``track`` deliberately retain the legacy projection;
+    these two added fields let clients describe the confidence of that choice
+    without opting them into v2's selection or state behaviour.
+    """
     out = {k: v for k, v in t.items() if k not in _TRAIN_V2_ONLY_FIELDS}
     out['house_pass_ts'] = t.get('legacy_house_pass_ts') or t.get('house_pass_ts') or 0
     out['track'] = t.get('legacy_track') or t.get('track')
+    out['display_time_source'] = t.get('pass_time_source') or 'schedule'
+    out['display_confidence'] = t.get('pass_confidence') or 'schedule'
     if 'legacy_twy_actual' in t:
         out['twy_actual'] = t['legacy_twy_actual']
     if 'legacy_twy_arr_actual' in t:

@@ -66,6 +66,18 @@
     return {html:Math.round(diff / 60000) + '<span class="unit">min</span>', cls:'', passing:false};
   }
 
+  // A timetable slot tells us when a train was planned, not that it is at the
+  // house. Keep legacy candidate selection untouched, but never animate NOW
+  // for a schedule-only entry that happens to be due.
+  function presentationCountdown(t, now) {
+    const count = countdown(t, now);
+    if (count.passing && t && t.display_time_source === 'schedule') {
+      return {html:'DUE', cls:'due', passing:false};
+    }
+    return count;
+  }
+
   global.TrainDisplay = {passMs, trackKey, isHeadlineEligible, compareCandidates, countdown,
+                         presentationCountdown,
                          OBSERVED_GRACE_MS};
 }(window));

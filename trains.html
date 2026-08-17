@@ -236,6 +236,8 @@ main {
 .t-status .late   { color: var(--late); }
 .t-status .cancel { color: var(--cancel); }
 .t-status .est    { color: var(--text-faint); }
+.t-status .live   { color: var(--live); }
+.t-count.due      { color: var(--text-faint); }
 
 /* empty state */
 .t-empty {
@@ -423,6 +425,20 @@ function fmtHM(msOrIso) {
   return isNaN(d) ? '—'
     : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
 }
+function evidenceLabel(t) {
+  switch (t.display_time_source) {
+    case 'td_crossing': return '<span class="ontime">observed</span>';
+    case 'td_eta': return '<span class="live">live TD</span>';
+    case 'rtt_actual': return '<span class="ontime">observed</span>';
+    case 'rtt_forecast': return '<span class="est">forecast</span>';
+    case 'schedule': return '<span class="est">timetable</span>';
+    default:
+      if (t.pass_confidence === 'observed') return '<span class="ontime">observed</span>';
+      if (t.pass_confidence === 'live_estimate') return '<span class="live">live TD</span>';
+      if (t.pass_confidence === 'realtime_forecast') return '<span class="est">forecast</span>';
+      return '<span class="est">estimated</span>';
+  }
+}
 
 /* ── State ──────────────────────────────────────────────── */
 let trains = [];
@@ -548,7 +564,7 @@ function renderTrack(key, list, now) {
     (nextHtml ? '<div class="t-next">' + nextHtml + '</div>' : '');
 
   /* countdown + status */
-  const count = TrainDisplay.countdown(t, now);
+  const count = TrainDisplay.presentationCountdown(t, now);
   row.classList.toggle('passing', count.passing);
 
   let statusHtml;
@@ -557,12 +573,9 @@ function renderTrack(key, list, now) {
   } else {
     const bits = [];
     bits.push(fmtHM(ms));
-    if (t.pass_confidence === 'observed') bits.push('<span class="ontime">observed</span>');
-    else if (t.pass_confidence === 'live_estimate') bits.push('<span class="ontime">live estimate</span>');
-    else if (t.pass_confidence === 'realtime_forecast') bits.push('<span class="est">forecast</span>');
-    else if (t.late_min == null) bits.push('<span class="est">estimated</span>');
-    else if (t.late_min >= 1) bits.push('<span class="late">+' + t.late_min + ' min</span>');
-    else bits.push('<span class="ontime">on time</span>');
+    bits.push(evidenceLabel(t));
+    if (t.late_min >= 1) bits.push('<span class="late">+' + t.late_min + ' min</span>');
+    else if (t.display_time_source === 'rtt_actual') bits.push('<span class="ontime">on time</span>');
     statusHtml = bits.join(' · ');
   }
   eta.innerHTML =

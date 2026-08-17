@@ -51,6 +51,12 @@ body {
   font-family: var(--cond); font-weight: 700; font-size: 24px;
   letter-spacing: .12em; color: var(--amber);
 }
+#back {
+  display: none;
+  color: var(--amber); text-decoration: none;
+  font-family: var(--cond); font-weight: 600; font-size: 16px;
+  letter-spacing: .08em;
+}
 #topbar .subtitle {
   font-family: var(--cond); font-weight: 500; font-size: 15px;
   letter-spacing: .14em; color: var(--dim);
@@ -240,11 +246,21 @@ body {
 .pw-diesel   { background: #9a9a9a; }
 .pw-electric { background: #e8c34a; }
 .pw-bimode   { background: #4ac0c0; }
+
+/* ── O2 Joggler launch ───────────────────────────────────────────
+   The page remains a fixed, proportionally scaled schematic. The flag is
+   supplied only by the dashboard's Joggler launcher, preserving all other
+   800px-wide and normal-device views. */
+html.joggler #back { display: inline; }
+html.joggler #topbar { gap: 13px; padding: 0 14px; }
+html.joggler #topbar .subtitle { font-size: 14px; }
+html.joggler #power-legend { gap: 8px; }
 </style>
 </head>
 <body>
 
 <div id="topbar">
+  <a id="back" href="/" onmousedown="window.location.href='/'">← HOME</a>
   <span class="title">LINESIDE</span>
   <span class="subtitle">TWYFORD BERTH PANEL · READING ⇄ MAIDENHEAD · TD D1/D6</span>
   <span id="power-legend">
@@ -303,6 +319,13 @@ body {
 'use strict';
 
 const ACTIVE_LAYOUT = window.LINESIDE_LAYOUT_V2;
+const params = new URLSearchParams(window.location.search);
+if (params.get('joggler') === '1') {
+  document.documentElement.classList.add('joggler');
+  const back = document.getElementById('back');
+  back.href = 'https://dashboard.gdx.org.uk/';
+  back.setAttribute('onmousedown', "window.location.href='https://dashboard.gdx.org.uk/'");
+}
 const LAYOUT_ID = ACTIVE_LAYOUT.id;
 const LAYOUT_READING = ACTIVE_LAYOUT.reading;
 const LAYOUT_RUNNING_EXCLUSIONS = new Set([
@@ -1019,6 +1042,16 @@ function trainMs(t) {
   if (!t.twy_actual && t.late_min > 0) ms += t.late_min * 60000;
   return ms;
 }
+function evidenceLabel(t) {
+  switch (t.display_time_source) {
+    case 'td_crossing': return '<span class="live">● OBSERVED</span>';
+    case 'td_eta': return '<span class="live">● LIVE TD</span>';
+    case 'rtt_actual': return '<span class="ontime">OBSERVED</span>';
+    case 'rtt_forecast': return '<span class="est">FORECAST</span>';
+    case 'schedule': return '<span class="est">TIMETABLE</span>';
+    default: return t.source === 'td' ? '<span class="live">● LIVE TD</span>' : '<span class="est">TIMETABLE</span>';
+  }
+}
 const fmtHM = v => {
   const d = new Date(v);
   return isNaN(d) ? '—' : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
@@ -1467,8 +1500,11 @@ function renderAppr() {
       live = '<span class="live">● ' + esc(t.td_berth || '?') + ' · ' +
         (t.td_place ? esc(placeName(t.td_place)) + ' · ' : '') + mi.toFixed(1) + ' mi</span>';
     } else {
-      live = '<span class="est">~ schedule</span>';
+      live = '';
     }
+    const evidence = (p && p.age_s < 150) || (t.td_dist_mi != null && !t.twy_actual)
+      ? '<span class="live">● LIVE TD</span>'
+      : evidenceLabel(t);
 
     // Power-type dot mirrors the berth-diagram cap stripe so the two views
     // read as one system: same colour means the same thing everywhere.
@@ -1482,6 +1518,9 @@ function renderAppr() {
                  t.origin ? esc('from ' + shortPlace(t.origin)) : '',
                  t.call_type === 'STOP' ? esc('stops' + (t.platform ? ' p' + t.platform : '')) : '',
                  t.source === 'td' ? 'TD-only' : '',
+                 // Explicitly name the evidence basis rather than implying a
+                 // timetable prediction is a physical sighting.
+                 evidence,
                  live,
                  schedT + ' ' + stat]
                 .filter(Boolean).join(' <span class="sep">·</span> ');

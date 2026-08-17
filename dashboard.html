@@ -2117,15 +2117,15 @@ applyProfile();
     font-family: 'DejaVu Sans Mono', monospace;
     min-width: 90px; text-align: center;
   }
-  /* Passing-train board launcher: visible only on the Joggler's train view. */
-  #trans-trackboard-btn {
-    display: none; height: 26px; margin-right: 6px; padding: 0 8px;
+  /* Nearby-view launchers: visible only on the Joggler's train view. */
+  .trans-nearby-btn {
+    display: none; height: 26px; margin-right: 4px; padding: 0 7px;
     border: 1px solid #9a6710; border-radius: 4px; background: #342406;
     color: #ffd071; font-family: inherit; font-size: 11px; font-weight: bold;
     cursor: none; -webkit-tap-highlight-color: transparent;
   }
-  html.profile-joggler #trans-trackboard-btn { display: block; }
-  #trans-trackboard-btn:active { background: #5a3b08; color: #ffffff; }
+  html.profile-joggler .trans-nearby-btn { display: block; }
+  .trans-nearby-btn:active { background: #5a3b08; color: #ffffff; }
   /* Save / Cancel */
   .ts-btns { display: flex; gap: 12px; margin-top: auto; flex-shrink: 0; }
   .ts-btn {
@@ -2592,7 +2592,9 @@ applyProfile();
           <div id="trans-train-station">Loading&#8230;</div>
           <span class="tch" id="tch-status">STATUS</span>
           <span class="tch" id="tch-plat">PLT</span>
-          <button id="trans-trackboard-btn" onmousedown="openNearbyTrainBoard()">Passing trains</button>
+          <button class="trans-nearby-btn" onmousedown="openNearbyView('now')">Now</button>
+          <button class="trans-nearby-btn" onmousedown="openNearbyView('lineside')">Lineside</button>
+          <button class="trans-nearby-btn" onmousedown="openNearbyView('trains')">Passing trains</button>
           <button id="trans-gear-btn" onmousedown="transShowSettings()">&#9881;</button>
         </div>
         <div id="trans-board">
@@ -4948,11 +4950,12 @@ applyProfile();
     document.getElementById('trans-settings').classList.remove('active');
   }
 
-  // The dedicated Nearby board is tuned separately for the Joggler's 800×480
-  // display.  The query flag also gives its back button a route home here.
-  function openNearbyTrainBoard() {
+  // Dedicated Nearby boards are tuned separately for the Joggler's 800×480
+  // display. The explicit flag keeps their normal-browser presentation intact
+  // and gives their back buttons a route home here.
+  function openNearbyView(view) {
     if (!document.documentElement.classList.contains('profile-joggler')) return;
-    window.location.href = 'https://nearby.gdx.org.uk/trains?joggler=1';
+    window.location.href = 'https://nearby.gdx.org.uk/' + view + '?joggler=1';
   }
 
   function transSaveSettings() {

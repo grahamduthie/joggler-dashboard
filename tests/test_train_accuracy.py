@@ -17,6 +17,23 @@ SPEC.loader.exec_module(proxy)
 
 
 class TrainAccuracyTests(unittest.TestCase):
+    def test_legacy_projection_exposes_presentation_evidence_only(self):
+        train = {
+            'house_pass_ts': 1_000,
+            'legacy_house_pass_ts': 900,
+            'track': 'Main',
+            'legacy_track': 'Relief',
+            'pass_time_source': 'td_eta',
+            'pass_confidence': 'live_estimate',
+            'movement_state': 'approaching',
+        }
+        result = proxy._legacy_train_projection(train)
+        self.assertEqual(result['house_pass_ts'], 900)
+        self.assertEqual(result['track'], 'Relief')
+        self.assertEqual(result['display_time_source'], 'td_eta')
+        self.assertEqual(result['display_confidence'], 'live_estimate')
+        self.assertNotIn('movement_state', result)
+
     def test_rtt_forecast_is_not_stored_as_actual(self):
         service = {
             'scheduleMetadata': {

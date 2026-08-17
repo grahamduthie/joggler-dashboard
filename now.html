@@ -257,7 +257,8 @@ header {
 @keyframes pulse { 50% { opacity: 0.55; } }
 .t-count.now { animation: pulse 1.2s ease-in-out infinite; }
 .t-status { font-size: clamp(11px, 2vh, 20px); font-variant-numeric: tabular-nums; color: var(--text-dim); }
-.t-status .ontime { color: var(--ontime); } .t-status .late { color: var(--late); } .t-status .cancel { color: var(--cancel); } .t-status .est { color: var(--text-faint); }
+.t-status .ontime { color: var(--ontime); } .t-status .late { color: var(--late); } .t-status .cancel { color: var(--cancel); } .t-status .est { color: var(--text-faint); } .t-status .live { color: var(--live); }
+.t-count.due { color: var(--text-faint); }
 .t-empty { grid-column: 2 / 4; display: flex; align-items: center; font-family: var(--cond); font-weight: 500; font-size: clamp(16px, 3.2vh, 32px); letter-spacing: 0.1em; color: var(--text-faint); }
 
 /* ── Alert strip ────────────────────────────────────────── */
@@ -270,6 +271,35 @@ header {
 #alert.show { display: flex; }
 #alert .tag { font-family: var(--cond); font-weight: 700; letter-spacing: 0.08em; flex: 0 0 auto; }
 #alert .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── O2 Joggler launch ───────────────────────────────────────────
+   Deliberately opt-in: `?joggler=1` is set only by the dashboard's
+   Joggler-profile launcher, so an 800px-wide normal browser remains unchanged. */
+html.joggler header { min-height: 34px; padding: 5px 0; gap: 10px; }
+html.joggler #back { left: 12px; font-size: 16px; }
+html.joggler #title { font-size: 19px; letter-spacing: 0.22em; }
+html.joggler #clock { font-size: 30px; }
+html.joggler #date { display: none; }
+html.joggler .pane { padding: 7px 14px; }
+html.joggler .pane-label { margin-bottom: 5px; font-size: 18px; }
+html.joggler .ac-header { padding: 7px 10px; margin-bottom: 7px; }
+html.joggler .ac-logo { height: 43px; }
+html.joggler .ac-flight-num { font-size: 48px; }
+html.joggler .ac-airline-name { font-size: 14px; }
+html.joggler .ac-type-right { font-size: 12px; }
+html.joggler .ac-route { padding: 5px 10px 8px; }
+html.joggler .ac-airport { font-size: 32px; }
+html.joggler .ac-times { font-size: 14px; }
+html.joggler .ac-flight-info { font-size: 11px; }
+html.joggler .ac-stat-card { padding: 5px 7px; }
+html.joggler .ac-stat-label { font-size: 9px; }
+html.joggler .ac-stat-value { font-size: 24px; }
+html.joggler .ac-stat-unit { font-size: 9px; }
+html.joggler #rail-content { gap: 4px; }
+html.joggler .t-dest { font-size: 31px; }
+html.joggler .t-count { font-size: 35px; }
+html.joggler .t-sub { font-size: 11px; }
+html.joggler #alert { padding: 4px 12px; font-size: 12px; }
 
 /* ── Narrow / portrait: stack instead of split ─────────────── */
 @media (max-aspect-ratio: 95/100) {
@@ -363,6 +393,13 @@ function esc(s) {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 document.body.classList.add('hidecursor');
+const params = new URLSearchParams(window.location.search);
+if (params.get('joggler') === '1') {
+  document.documentElement.classList.add('joggler');
+  const back = document.getElementById('back');
+  back.href = 'https://dashboard.gdx.org.uk/';
+  back.setAttribute('onmousedown', "window.location.href='https://dashboard.gdx.org.uk/'");
+}
 
 function tick() {
   const d = new Date();
@@ -879,6 +916,20 @@ function fmtHM(msOrIso) {
   const d = new Date(msOrIso);
   return isNaN(d) ? '—' : d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
 }
+function evidenceLabel(t) {
+  switch (t.display_time_source) {
+    case 'td_crossing': return '<span class="ontime">observed</span>';
+    case 'td_eta': return '<span class="live">live TD</span>';
+    case 'rtt_actual': return '<span class="ontime">observed</span>';
+    case 'rtt_forecast': return '<span class="est">forecast</span>';
+    case 'schedule': return '<span class="est">timetable</span>';
+    default:
+      if (t.pass_confidence === 'observed') return '<span class="ontime">observed</span>';
+      if (t.pass_confidence === 'live_estimate') return '<span class="live">live TD</span>';
+      if (t.pass_confidence === 'realtime_forecast') return '<span class="est">forecast</span>';
+      return '<span class="est">estimated</span>';
+  }
+}
 function trackKey(t) {
   return TrainDisplay.trackKey(t);
 }
@@ -991,19 +1042,16 @@ function renderTrack(key, list, now) {
     '</div>';
   fitText(main.querySelector('.t-dest'));
 
-  const count = TrainDisplay.countdown(t, now);
+  const count = TrainDisplay.presentationCountdown(t, now);
   row.classList.toggle('passing', count.passing);
 
   let statusHtml;
   if (t.cancelled) statusHtml = '<span class="cancel">cancelled</span>';
   else {
     const bits = [fmtHM(ms)];
-    if (t.pass_confidence === 'observed') bits.push('<span class="ontime">observed</span>');
-    else if (t.pass_confidence === 'live_estimate') bits.push('<span class="ontime">live estimate</span>');
-    else if (t.pass_confidence === 'realtime_forecast') bits.push('<span class="est">forecast</span>');
-    else if (t.late_min == null) bits.push('<span class="est">estimated</span>');
-    else if (t.late_min >= 1) bits.push('<span class="late">+' + t.late_min + ' min</span>');
-    else bits.push('<span class="ontime">on time</span>');
+    bits.push(evidenceLabel(t));
+    if (t.late_min >= 1) bits.push('<span class="late">+' + t.late_min + ' min</span>');
+    else if (t.display_time_source === 'rtt_actual') bits.push('<span class="ontime">on time</span>');
     statusHtml = bits.join(' · ');
   }
   eta.innerHTML = '<div class="t-count ' + count.cls + '">' + count.html + '</div><div class="t-status">' + statusHtml + '</div>';
