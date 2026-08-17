@@ -291,6 +291,45 @@ class TrainAccuracyTests(unittest.TestCase):
             with proxy._td_lock:
                 proxy._td_buffer[:] = old_buffer
 
+    def test_cif_recognised_passenger_stock_ignores_headcode_digit(self):
+        old_pax_best = proxy._cif_pax_best
+        try:
+            proxy._cif_pax_best = lambda hc: {'timing_load': '387', 'power_type': 'EMU'}
+            # '3' is not in the ordinary-passenger '129' set and is not ECS
+            # ('5') either -- exactly the gap 3T60 fell into.
+            self.assertTrue(proxy._cif_is_recognised_passenger_stock('3T60'))
+            proxy._cif_pax_best = lambda hc: {'timing_load': '', 'power_type': 'D'}
+            self.assertFalse(proxy._cif_is_recognised_passenger_stock('4L33'))
+            proxy._cif_pax_best = lambda hc: None
+            self.assertFalse(proxy._cif_is_recognised_passenger_stock('3T60'))
+        finally:
+            proxy._cif_pax_best = old_pax_best
+
+    def test_td_synthesis_recognises_stock_class_over_unmapped_headcode_digit(self):
+        # Reported live 2026-08-17: 3T60 (Reading Traincare Depot -> Paddington,
+        # a genuine Class 387 EMU per CIF) showed 'passenger': False and was
+        # styled/labelled as freight, purely because '3' isn't in the '129'
+        # ordinary-passenger digit set and isn't ECS ('5') either.
+        old_info = proxy._berth_info
+        old_pax_best = proxy._cif_pax_best
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '1646', 'to': '1640',
+                                     'descr': '3T60', 'ts': 995}]
+        try:
+            proxy._berth_info = lambda area, berth: {
+                'line': 'Main', 'dist_mi': 0.25, 'dir': 'up', 'stanme': 'TWYFORD'}
+            proxy._cif_pax_best = lambda hc, *a: {'timing_load': '387', 'power_type': 'EMU'}
+            trains = []
+            proxy._td_enrich_trains(trains, 1_000)
+            self.assertEqual(len(trains), 1)
+            self.assertIs(trains[0]['passenger'], True)
+        finally:
+            proxy._berth_info = old_info
+            proxy._cif_pax_best = old_pax_best
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
     def test_speed_class_bucket_uses_timing_load_class_when_available(self):
         old_pax_best = proxy._cif_pax_best
         try:
@@ -530,6 +569,49 @@ class TrainAccuracyTests(unittest.TestCase):
             self.assertEqual(skip_log[0]['reason'], 'outside_corridor')
         finally:
             proxy._berth_info = old_info
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
+    def test_light_locomotive_is_no_longer_excluded_from_corridor_synthesis(self):
+        # Reported live 2026-08-17: 0Z47 (a light-engine move, headcode class
+        # '0') physically passed the house and never appeared -- '0' used to
+        # be excluded from corridor synthesis bundled with the Henley branch
+        # (2H) exclusion, on the wrong assumption that both never reach the
+        # main corridor. A light engine genuinely can run on the main lines,
+        # unlike a Henley shuttle.
+        old_info = proxy._berth_info
+        old_pax_best = proxy._cif_pax_best
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '1646', 'to': '1640',
+                                     'descr': '0Z47', 'ts': 995}]
+        try:
+            proxy._berth_info = lambda area, berth: {
+                'line': 'Main', 'dist_mi': 0.25, 'dir': 'up', 'stanme': 'TWYFORD'}
+            proxy._cif_pax_best = lambda hc, *a: None
+            skip_log = []
+            trains = []
+            proxy._td_enrich_trains(trains, 1_000, skip_log=skip_log)
+            self.assertEqual(skip_log, [])
+            self.assertEqual(len(trains), 1)
+            self.assertEqual(trains[0]['headcode'], '0Z47')
+        finally:
+            proxy._berth_info = old_info
+            proxy._cif_pax_best = old_pax_best
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
+    def test_henley_branch_is_still_excluded_from_corridor_synthesis(self):
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '1636', 'to': '1632',
+                                     'descr': '2H37', 'ts': 995}]
+        try:
+            skip_log = []
+            proxy._td_enrich_trains([], 1_000, skip_log=skip_log)
+            self.assertEqual(len(skip_log), 1)
+            self.assertEqual(skip_log[0]['reason'], 'henley_branch')
+        finally:
             with proxy._td_lock:
                 proxy._td_buffer[:] = old_buffer
 

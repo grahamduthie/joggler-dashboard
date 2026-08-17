@@ -1,5 +1,30 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
+**2026-08-17 — light locomotive moves (headcode class '0') were excluded from the corridor
+entirely.** Reported live: 0Z47 physically passed the house and never appeared on `/trains` or
+`/lineside`. Both `_td_enrich_trains`'s corridor synthesis and the Reading RTT-predictor loop
+skipped any headcode starting `'0'`, bundled into the same check as the Henley branch (`'2H'`)
+exclusion under a single "out of scope" assumption. That's wrong for light engines specifically:
+a Henley shuttle genuinely never leaves the branch, but a light locomotive can and does run on the
+main corridor like anything else. Fixed by dropping the `'0'` half of both checks, keeping only
+the Henley exclusion (still correct -- that branch really is out of scope). `_td_unmatched`'s
+`henley_or_light_loco` skip reason is renamed `henley_branch` to match.
+
+**2026-08-17 — ECS-as-freight fix generalised: any headcode digit, not just '5'.** Reported live:
+3T60 (Reading Traincare Depot -> Paddington, CIF-identified as a genuine Class 387 EMU) showed
+`'passenger': false` and was styled/labelled as freight -- the same bug class as the ECS fix
+earlier the same day, but on headcode digit `'3'`, which nobody had checked (the crude
+`hc[:1] in '129'` fallback only recognises the ordinary-passenger digits, and `_nr_ecs_hc` only
+recognises `'5'`). Added `_cif_is_recognised_passenger_stock(hc)`, factored out of
+`_speed_class_bucket`'s existing `_TIMING_LOAD_CLASS` check: if CIF resolves a known passenger
+EMU/IET fleet number (345/387/800/802) for a working, that's now trusted over any headcode-digit
+guess, in all three places `passenger`/`is_passenger` gets set from a heuristic rather than a real
+identity. Deliberately **not** added to the two TRUST-buffer *visibility* gates
+(`_nr_freight_hc(hc) or _nr_ecs_hc(hc)`, merge filter and `freight_only` STANOX check) -- those
+exist to keep ordinary RTT-covered passenger trains out of the TRUST supplementary path
+entirely, and nearly every ordinary passenger working resolves a stock class too, so admitting on
+that basis there would have flooded TRUST with RTT duplicates instead of fixing anything.
+
 **2026-08-17 — held-berth ETA could beat a train's own booked departure.** Reported live: 9U87
 showed "passing in ~4 min" while confirmed sitting at Reading -- its origin -- with its booked
 Reading departure still ~13 min away. Root cause in `_td_enrich_trains`'s berth-eta refinement:

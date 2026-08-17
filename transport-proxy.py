@@ -1553,8 +1553,8 @@ def _rtt_build_trains():
         # train's own direction (UP +, DOWN −), so both directions are kept.
         t = _rtt_normalise(svc, confirmed=False)
         hc = t['headcode']
-        if not t['twy_sched'] or hc.startswith('2H') or hc[:1] == '0':
-            continue                      # no time / Henley branch / light-loco-bus moves
+        if not t['twy_sched'] or hc.startswith('2H'):
+            continue                      # no time / Henley branch -- never reaches this corridor
         if t['op_code'] == 'HX':          # Heathrow Express — own track, not via Twyford
             continue
         if (t.get('line_code') or '') == 'BUS':
@@ -1871,6 +1871,24 @@ def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age
 
 
 _CLASS_SPEED_MIN_N = 5   # samples required before a learned class speed is trusted
+
+
+def _cif_is_recognised_passenger_stock(hc):
+    """True if CIF's own Timing Load resolves to a known passenger EMU/IET
+    fleet number (_TIMING_LOAD_CLASS: 345/387/800/802), regardless of what
+    headcode digit convention the working happens to run under.
+
+    The crude `hc[:1] in '129'` passenger heuristic used elsewhere only knows
+    about the common ordinary/express passenger digits. A depot-to-service
+    stock move can run under other digits too -- confirmed live 2026-08-17:
+    3T60 (Reading Traincare Depot -> Paddington, CIF-identified as a genuine
+    Class 387 EMU) got 'passenger': False purely because '3' isn't in '129',
+    the same class of bug as the ECS ('5') case fixed earlier that day, just
+    on a digit nobody had checked. No freight service runs 345/387/800/802
+    stock, so trusting a resolved class here can't misfire the other way.
+    """
+    pax = _cif_pax_best(hc) if hc else None
+    return bool(pax and _TIMING_LOAD_CLASS.get(pax.get('timing_load') or ''))
 
 
 def _speed_class_bucket(hc, is_passenger):
@@ -2426,9 +2444,17 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
                 skip_log.append({'headcode': hc, 'area': pos['area'],
                                   'berth': pos.get('to'), 'reason': reason})
 
-        if hc.startswith('2H') or hc[:1] == '0':
-            _skip('henley_or_light_loco')
-            continue          # Henley branch shuttle / light-loco-bus moves
+        if hc.startswith('2H'):
+            _skip('henley_branch')
+            continue          # Henley branch shuttle -- physically never reaches this corridor
+        # NOTE: headcode class '0' (light locomotive) used to be excluded here
+        # too, bundled with Henley under the same "out of scope" assumption.
+        # That's wrong for a light engine running on the MAIN corridor -- it
+        # physically passes the house like anything else, unlike a Henley
+        # shuttle which genuinely never leaves the branch. Reported live
+        # 2026-08-17: 0Z47 passed the house and never appeared, because of
+        # exactly this. Removed; light engines now flow through the same
+        # corridor synthesis as everything else.
         # 600s, not the old 180s: a train held at a red signal for several minutes —
         # e.g. approach control near a busy station, a real and unremarkable
         # occurrence on this corridor (see SIGNALS-PLAN.md's signalling research) —
@@ -2528,8 +2554,11 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
         # as the TRUST-buffer entry above: it's a real unit running empty, not
         # a freight service, but not an ordinary booked passenger service
         # either. None routes it to the passenger-side speed/bucket defaults
-        # (_lookup_speed_mph, _speed_class_bucket) without misreporting it.
+        # (_lookup_speed_mph, _speed_class_bucket) without misreporting it. A
+        # CIF-recognised passenger stock class overrides the digit guess
+        # entirely -- see _cif_is_recognised_passenger_stock.
         passenger = (who['passenger'] if 'passenger' in who
+                     else True if _cif_is_recognised_passenger_stock(hc)
                      else None if _nr_ecs_hc(hc) else hc[:1] in '129')
         line = info.get('line') or ''
         is_main = (line == 'Main') if line else (hc[:1] == '1')
@@ -2730,7 +2759,9 @@ def _ca_observe_class_speed(area, frm, to, hc, dt):
     line = ti.get('line') or fi.get('line') or ''
     if line not in ('Main', 'Relief'):
         return
-    is_passenger = None if _nr_ecs_hc(hc) else (hc[:1] in '129' if hc else None)
+    is_passenger = (True if _cif_is_recognised_passenger_stock(hc)
+                     else None if _nr_ecs_hc(hc)
+                     else (hc[:1] in '129' if hc else None))
     key = (_speed_class_bucket(hc, is_passenger), line)
     with _chain_lock:
         cur = _ca_class_speed.get(key)
@@ -4418,7 +4449,11 @@ class _NRListener:
                     # None here (not False) leaves the freight/ECS distinction to
                     # isEcsHc()/isFreightHc() on the frontend, which already check
                     # the headcode directly rather than trusting this flag for ECS.
-                    'passenger':  None if _nr_ecs_hc(reporting_hc) else False,
+                    # A CIF-recognised passenger stock class (e.g. a depot move
+                    # under a digit other than the usual ECS '5') overrides this
+                    # entirely -- see _cif_is_recognised_passenger_stock.
+                    'passenger':  (True if _cif_is_recognised_passenger_stock(reporting_hc)
+                                    else None if _nr_ecs_hc(reporting_hc) else False),
                     'call_type':  'PASS',
                     'direction':  'up' if direction == 'UP' else 'down',
                     'track':      'Main' if is_main else 'Relief',
