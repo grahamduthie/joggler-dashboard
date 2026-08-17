@@ -1411,7 +1411,7 @@ function renderAppr() {
       // name it instead of the generic HELD when we know it's one of those.
       const heldPlace = placeName(t.td_place || (lp && lp.place) || '');
       eta = heldPlace.startsWith('Reading') ? 'AT RDG'
-          : heldPlace === 'Maidenhead'      ? 'AT MDN'
+          : heldPlace === 'Maidenhead'      ? 'AT MAI'
           : 'HELD';
       etaCls = 'warn';
     }

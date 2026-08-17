@@ -1187,7 +1187,7 @@ using fresh `tdPos` each time, it just wasn't being asked to redraw with it ofte
 
 `renderAppr()`'s status word used a generic `HELD` for every dwelling/held train, and `AT STN`
 specifically for one at Twyford. Most "held" trains are just sitting in a platform at Reading or
-Maidenhead (not stuck at a signal), so those two now get their own status: `AT RDG` / `AT MDN`,
+Maidenhead (not stuck at a signal), so those two now get their own status: `AT RDG` / `AT MAI`,
 via `placeName(t.td_place)` matched against `'Reading'`/`'Reading W'` (from `STANME`'s Reading-
 area entries, hence `startsWith`) or `'Maidenhead'`. Genuine mid-corridor signal holds still show
 `HELD`. `AT STN` renamed `AT TWY` for symmetry with the new place-named states.
