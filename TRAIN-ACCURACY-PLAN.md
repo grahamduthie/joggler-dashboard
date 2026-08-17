@@ -1,5 +1,23 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
+**2026-08-17 — ECS-as-freight fixed at its actual root, closing the gap the earlier speed-learner
+fix (below) only partly covered.** That fix made `_speed_class_bucket` trust a *recognised* CIF
+timing-load class over the crude `hc[:1]` heuristic, but only helps when CIF resolves one; a
+5xxx ECS working CIF can't identify still fell back to `is_passenger`, which was itself wrong at
+the source: `_nr_freight_hc` (`transport-proxy.py`) included `'5'` in its freight range, disagreeing
+with the frontend's own `isFreightHc`/`isFrtHc` (which have always excluded it), and every ECS
+working seen via the TRUST buffer got `'passenger': False` hardcoded regardless. Fixed by
+correcting `_nr_freight_hc` to `hc[0] in '4678'` and adding a proper `_nr_ecs_hc`; the two gates
+that used to rely on `'5'` being (wrongly) included for ECS *visibility* -- the TRUST buffer's RTT
+dedup filter and the `freight_only` STANOX watch gate -- now check `_nr_freight_hc(hc) or
+_nr_ecs_hc(hc)` explicitly, so nothing regresses. `passenger` is now `None` (not `False`) for ECS
+everywhere it's set from a headcode heuristic rather than a real RTT/CIF identity, which routes it
+to the passenger-side ETA speed/bucket defaults without misreporting it as an ordinary booked
+service either. The frontend needed no changes: `opInfo()` on all three pages already checked
+`isEcsHc()` before any freight logic, so the *label* was already correct -- this was purely a
+backend data-correctness bug in a field (`passenger`) that fed the ETA speed model and the
+learner, not the display.
+
 **2026-08-17 — Up Relief root cause found and fixed, via the candidate-logging instrumentation
 added earlier the same day.** Once real crossings had accumulated with `candidates` data, every
 v2-wrong Up Relief pick showed the identical shape: the correct train sitting at TD berth `1630`

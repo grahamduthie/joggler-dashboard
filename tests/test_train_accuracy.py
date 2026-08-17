@@ -215,6 +215,50 @@ class TrainAccuracyTests(unittest.TestCase):
         finally:
             proxy._cif_pax_best = old_pax_best
 
+    def test_nr_freight_hc_excludes_ecs(self):
+        for hc in ('4L33', '6A01', '7B02', '8C03'):
+            self.assertTrue(proxy._nr_freight_hc(hc), hc)
+        self.assertFalse(proxy._nr_freight_hc('5387'))
+        self.assertFalse(proxy._nr_freight_hc('1A00'))
+        self.assertFalse(proxy._nr_freight_hc('2P40'))
+
+    def test_nr_ecs_hc_matches_only_class_5(self):
+        self.assertTrue(proxy._nr_ecs_hc('5387'))
+        self.assertFalse(proxy._nr_ecs_hc('4L33'))
+        self.assertFalse(proxy._nr_ecs_hc('1A00'))
+        self.assertFalse(proxy._nr_ecs_hc(''))
+        self.assertFalse(proxy._nr_ecs_hc(None))
+
+    def test_speed_class_bucket_treats_unresolved_ecs_as_passenger_not_freight(self):
+        old_pax_best = proxy._cif_pax_best
+        try:
+            proxy._cif_pax_best = lambda hc: None   # CIF has no schedule for this working
+            self.assertEqual(proxy._speed_class_bucket('5387', None), 'passenger_other')
+        finally:
+            proxy._cif_pax_best = old_pax_best
+
+    def test_td_synthesis_marks_unidentified_ecs_passenger_neither_true_nor_false(self):
+        # An ECS headcode with no RTT/CIF identity (`who` empty) previously fell
+        # back to hc[:1] in '129', which is False for '5' -- misreporting it as
+        # freight. It should route to the passenger-side ETA speed defaults
+        # without claiming it's an ordinary booked passenger service either.
+        old_info = proxy._berth_info
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D6', 'from': '0596', 'to': '0592',
+                                     'descr': '5Z87', 'ts': 995}]
+        try:
+            proxy._berth_info = lambda area, berth: {
+                'line': 'Main', 'dist_mi': 3.0, 'dir': 'up', 'stanme': 'X'}
+            trains = []
+            proxy._td_enrich_trains(trains, 1_000)
+            self.assertEqual(len(trains), 1)
+            self.assertIsNone(trains[0]['passenger'])
+        finally:
+            proxy._berth_info = old_info
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
     def test_speed_class_bucket_uses_timing_load_class_when_available(self):
         old_pax_best = proxy._cif_pax_best
         try:

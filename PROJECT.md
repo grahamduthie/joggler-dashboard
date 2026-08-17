@@ -957,9 +957,16 @@ The proxy uses two mechanisms:
    live movement events. `freight_only: False` — all train types are captured; passenger
    trains are deduplicated against RTT by headcode+time matching. Headcodes beginning `9`
    (departmental/engineering) are excluded from the TRUST freight buffer (`_nr_freight_hc`
-   checks `hc[0] in '45678'` only) to avoid duplicating engineering trains that also appear
-   in RTT. STANOX 87014 (Twyford stops) triggers immediate RTT cache invalidation so
-   confirmed pass times appear within 1–2 s of TRUST.
+   checks `hc[0] in '4678'` only) to avoid duplicating engineering trains that also appear
+   in RTT. ECS (`hc[0]=='5'`) is deliberately a separate check, `_nr_ecs_hc` — it's a real
+   unit running empty, not freight, and neither `_nr_freight_hc` nor the frontend's own
+   `isFreightHc` have ever treated it as freight; `_nr_freight_hc` used to disagree with the
+   frontend by including `'5'` in its range, which put `'passenger': False` on the train
+   object for every ECS working seen via TRUST (fixed 2026-08-17). Both call sites that used
+   to rely on that inclusion for ECS visibility (this buffer's merge filter, and the
+   `freight_only` gate on watched STANOXes below) now check `_nr_freight_hc(hc) or
+   _nr_ecs_hc(hc)` explicitly instead. STANOX 87014 (Twyford stops) triggers immediate RTT
+   cache invalidation so confirmed pass times appear within 1–2 s of TRUST.
    **TRUST `actual_timestamp` is London LOCAL wall-clock encoded as epoch-ms-as-if-UTC** (the
    well-known NROD quirk; fixed 2026-07-06 — treating it as UTC had put every freight pass an
    hour in the future during BST). Buffer entries are deduplicated against trains already in the

@@ -1583,8 +1583,10 @@ def _rtt_build_trains():
         hc = entry.get('headcode', '')
         if hc.startswith('2H'):
             continue   # Henley branch — excluded everywhere
-        if not _nr_freight_hc(hc):
-            continue   # Passenger trains come from RTT, not TRUST buffer
+        if not (_nr_freight_hc(hc) or _nr_ecs_hc(hc)):
+            continue   # Ordinary passenger trains come from RTT, not TRUST buffer.
+                       # ECS also doesn't come from RTT (not a public timetable
+                       # service), so it needs this path exactly like freight does.
         ets = _iso_to_ts(entry.get('twy_sched', ''))
         if any(abs(ets - x) < 600 for x in existing_hc.get(hc, [])):
             continue   # same working already tracked via RTT
@@ -2502,7 +2504,13 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
                 and not _passes_twyford(direction, who['origin'], who['dest'])):
             _skip('endpoints_dont_pass_twyford')
             continue
-        passenger = who['passenger'] if 'passenger' in who else (hc[:1] in '129')
+        # ECS (hc[:1]=='5') is neither True nor False here for the same reason
+        # as the TRUST-buffer entry above: it's a real unit running empty, not
+        # a freight service, but not an ordinary booked passenger service
+        # either. None routes it to the passenger-side speed/bucket defaults
+        # (_lookup_speed_mph, _speed_class_bucket) without misreporting it.
+        passenger = (who['passenger'] if 'passenger' in who
+                     else None if _nr_ecs_hc(hc) else hc[:1] in '129')
         line = info.get('line') or ''
         is_main = (line == 'Main') if line else (hc[:1] == '1')
         res = _berth_eta_to_house_s(pos['area'], pos['to'], direction,
@@ -2702,7 +2710,7 @@ def _ca_observe_class_speed(area, frm, to, hc, dt):
     line = ti.get('line') or fi.get('line') or ''
     if line not in ('Main', 'Relief'):
         return
-    is_passenger = hc[:1] in '129' if hc else None
+    is_passenger = None if _nr_ecs_hc(hc) else (hc[:1] in '129' if hc else None)
     key = (_speed_class_bucket(hc, is_passenger), line)
     with _chain_lock:
         cur = _ca_class_speed.get(key)
@@ -3568,7 +3576,19 @@ def _detect_house_event(area, frm, to):
 
 
 def _nr_freight_hc(hc):
-    return bool(hc) and hc[0] in '45678'
+    # '5' (ECS -- empty coaching stock) deliberately excluded: it's a real
+    # passenger unit running empty, not freight, and running at passenger-
+    # like speeds, not freight ones. Matches the frontend's own isFreightHc/
+    # isFrtHc, which have always excluded it -- this function previously
+    # didn't, and disagreeing here fed 'passenger': False straight onto the
+    # train object for every ECS working seen via TRUST (see _nr_ecs_hc's
+    # call sites). Use _nr_ecs_hc alongside this wherever the old bugged
+    # range's inclusion of ECS was actually load-bearing for visibility.
+    return bool(hc) and hc[0] in '4678'
+
+
+def _nr_ecs_hc(hc):
+    return bool(hc) and hc[0] == '5'
 
 
 # ── CIF Freight Schedule (pre-arrival visibility) ──────────────────────────
@@ -4326,7 +4346,8 @@ class _NRListener:
                 # TRUST train_id is 10 chars: 2-char schedule prefix + 4-char headcode + 4-char suffix.
                 # e.g. "731G21MR25" → prefix "73", headcode "1G21", suffix "MR25".
                 info = _NR_STANOX_WATCH[stanox]
-                if info.get('freight_only', True) and not _nr_freight_hc(reporting_hc):
+                if (info.get('freight_only', True)
+                        and not (_nr_freight_hc(reporting_hc) or _nr_ecs_hc(reporting_hc))):
                     continue
                 direction = body.get('direction_ind', '').upper()
                 platform  = body.get('platform', '').strip()
@@ -4373,7 +4394,11 @@ class _NRListener:
                     'headcode':   reporting_hc,
                     'op_code':    '',
                     'op_name':    '',
-                    'passenger':  False,
+                    # ECS is neither freight nor an ordinary passenger service --
+                    # None here (not False) leaves the freight/ECS distinction to
+                    # isEcsHc()/isFreightHc() on the frontend, which already check
+                    # the headcode directly rather than trusting this flag for ECS.
+                    'passenger':  None if _nr_ecs_hc(reporting_hc) else False,
                     'call_type':  'PASS',
                     'direction':  'up' if direction == 'UP' else 'down',
                     'track':      'Main' if is_main else 'Relief',
