@@ -1,0 +1,145 @@
+{
+  "schema": 1,
+  "purpose": "Reviewed OpenStreetMap geometry anchors for Lineside layout reconciliation. Not a runtime data source.",
+  "source": {
+    "provider": "OpenStreetMap contributors",
+    "licence": "ODbL 1.0",
+    "retrieved_at": "2026-08-16T21:18:34Z",
+    "overpass_endpoint": "https://overpass-api.de/api/interpreter",
+    "coverage": "Reading east throat to Maidenhead and the Twyford corridor",
+    "query_summary": "railway=signal nodes and railway=rail ways; selected named siding ways and the Kennet Bridge four-track cross-section fetched with full geometry"
+  },
+  "signal_anchors": [
+    {
+      "osm_node": 11998904318,
+      "ref": "T 1650",
+      "berth": "1650",
+      "line": "um",
+      "direction": "up",
+      "route_ref": "gwml_um",
+      "lat": 51.463698,
+      "lon": -0.9025316,
+      "td_signal": {"area": "D1", "address": "4A", "bit": 2, "direction": "east", "tier": "confirmed"},
+      "confidence": "osm-name-route-plus-learner-confirmed",
+      "use": "geometry_only"
+    },
+    {
+      "osm_node": 11998904319,
+      "ref": "T 1646",
+      "berth": "1646",
+      "line": "um",
+      "direction": "up",
+      "route_ref": "gwml_um",
+      "lat": 51.4685644,
+      "lon": -0.8845455,
+      "td_signal": {"area": "D1", "address": "4A", "bit": 1, "direction": "east", "tier": "confirmed"},
+      "confidence": "osm-name-route-plus-learner-confirmed",
+      "use": "geometry_only"
+    },
+    {
+      "osm_node": 11998904320,
+      "ref": "T 1640",
+      "berth": "1640",
+      "line": "um",
+      "direction": "up",
+      "route_ref": "gwml_um",
+      "lat": 51.474772,
+      "lon": -0.8649386,
+      "td_signal": {"area": "D1", "address": "4A", "bit": 0, "direction": "east", "tier": "confirmed"},
+      "confidence": "osm-name-route-plus-learner-confirmed",
+      "use": "geometry_only"
+    },
+    {
+      "osm_node": 11998904321,
+      "ref": "T 1626",
+      "berth": "1626",
+      "line": "um",
+      "direction": "up",
+      "route_ref": "gwml_um",
+      "lat": 51.4816025,
+      "lon": -0.8439294,
+      "td_signal": {"area": "D1", "address": "49", "bit": 5, "direction": "east", "tier": "confirmed"},
+      "confidence": "osm-name-route-plus-learner-confirmed",
+      "use": "geometry_only"
+    },
+    {
+      "osm_node": 11998904326,
+      "ref": "T 1602",
+      "berth": "1602",
+      "line": "um",
+      "direction": "up",
+      "route_ref": "gwml_um",
+      "lat": 51.5058839,
+      "lon": -0.7686764,
+      "td_signal": {"area": "D6", "address": "16", "bit": 0, "direction": "east", "tier": "confirmed"},
+      "confidence": "osm-name-route-plus-learner-confirmed",
+      "use": "geometry_only"
+    }
+  ],
+  "signal_position_audit": {
+    "display_version": "v1/v2 shared fixed-grid renderer as reviewed 2026-08-16",
+    "method": "Compared OSM longitude separations for the five named Up Main signals with their current SVG dot positions. The dots are attached to the exit edge of the corresponding berth cell.",
+    "finding": "The displayed dot spacings do not preserve the physical relative spacings, so they must not be used as a cross-line geographic reference until the layout uses projected OSM/path coordinates.",
+    "up_main_named_signal_spacing": [
+      {"from": "1650", "to": "1646", "osm_distance_km_approx": 1.25, "current_svg_gap_px_approx": 128},
+      {"from": "1646", "to": "1640", "osm_distance_km_approx": 1.36, "current_svg_gap_px_approx": 25},
+      {"from": "1640", "to": "1626", "osm_distance_km_approx": 1.46, "current_svg_gap_px_approx": 46},
+      {"from": "1626", "to": "1602", "osm_distance_km_approx": 5.22, "current_svg_gap_px_approx": 310}
+    ],
+    "safe_interpretation": "Signal state, direction and berth-boundary association remain valid. Only their displayed geographic spacing is unvalidated.",
+    "required_before_promotion": "Place each row on projected path coordinates or along-track chainage, then retain each signal dot at its established berth exit boundary. Do not infer unlabelled signal locations from TD signal bits alone."
+  },
+  "track_anchors": [
+    {
+      "name": "Kennet Loop",
+      "osm_ways": [167584119, 198517358, 198517359],
+      "service": "siding",
+      "maxspeed": "25 mph",
+      "geometry": [
+        [51.4586253, -0.9469669],
+        [51.4586751, -0.9463059],
+        [51.458699, -0.945787],
+        [51.4587157, -0.9450911],
+        [51.4587401, -0.944084],
+        [51.4587526, -0.9433891],
+        [51.4587765, -0.9417133],
+        [51.4587871, -0.9412749],
+        [51.4588148, -0.9402437],
+        [51.4588739, -0.936635]
+      ],
+      "td_berths": ["1679"],
+      "confidence": "learner-branch-and-dwell-plus-smart-plus-osm",
+      "use": "topology_and_geometry",
+      "review": {
+        "learner_route": "1665 -> 1669 -> 1677 is the dominant Down Relief path; 1669 -> 1679 -> 1687 is the sparse long-dwell branch.",
+        "geometry_finding": "The mapped loop is a continuous approximately 0.7 km road. It must not be drawn as a short local V or hump between adjacent berth cells.",
+        "adjacent_mapped_tracks": [8120919, 198517352, 198517355, 198517356, 386445349, 167584113],
+        "rendering_status": "The temporary v2 loop is only an occupancy separation. A surveyed/projection-based long-loop drawing remains required before promoting v2.",
+        "shared_smart_label": "SMART resolves both 1669 and 1679 to KEN BG LP. The 3150 normal-flow, 31.5-second samples for 1669 versus 36, 424-second samples for 1679 distinguish the physical loop berth from the through berth."
+      }
+    },
+    {
+      "name": "Maidenhead Turnback Siding",
+      "osm_ways": [949041172],
+      "service": "siding",
+      "geometry": [
+        [51.5168479, -0.7310676],
+        [51.5169466, -0.7305548],
+        [51.5176003, -0.7273305],
+        [51.5177625, -0.7265679],
+        [51.5178159, -0.726319],
+        [51.5179473, -0.7257775]
+      ],
+      "td_berths": ["R578", "0578"],
+      "confidence": "name-matched-smart-plus-osm",
+      "use": "topology_and_geometry"
+    }
+  ],
+  "limitations": [
+    "OSM signal refs identify physical geometry anchors only; they do not identify Network Rail SF address/bit mappings.",
+    "Do not auto-accept OSM edits or infer unmapped TD berth positions from an adjacent OSM line without learner and SMART evidence.",
+    "A named OSM siding can still form the observed TD route; its OSM service classification must not be used to discard a high-confidence TD transition.",
+    "For Kennet Loop, use the full three-way geometry and a coordinate projection before changing the visual route again.",
+    "This compact snapshot intentionally contains reviewed anchors, not a full live OSM extract."
+  ]
+}

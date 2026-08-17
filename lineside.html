@@ -247,6 +247,7 @@ body {
 <div id="topbar">
   <span class="title">LINESIDE</span>
   <span class="subtitle">TWYFORD BERTH PANEL · READING ⇄ MAIDENHEAD · TD D1/D6</span>
+  <span id="layout-status" aria-live="polite"></span>
   <span id="power-legend">
     <span><i class="pw-diesel"></i>Diesel/DMU</span>
     <span><i class="pw-electric"></i>Electric/EMU</span>
@@ -298,8 +299,24 @@ body {
   </div>
 </div>
 
+<script src="/lineside-layout-v2.js"></script>
 <script>
 'use strict';
+
+/* V2 is an opt-in display-only shadow.  It uses exactly the same TD and train
+   APIs as v1, so removing ?layout=v2 is an immediate rollback. */
+const layoutRequest = new URLSearchParams(window.location.search).get('layout');
+const ACTIVE_LAYOUT = layoutRequest === 'v2' && window.LINESIDE_LAYOUT_V2
+  ? window.LINESIDE_LAYOUT_V2 : null;
+const LAYOUT_ID = ACTIVE_LAYOUT ? ACTIVE_LAYOUT.id : 'v1';
+const LAYOUT_READING = ACTIVE_LAYOUT && ACTIVE_LAYOUT.reading
+  ? ACTIVE_LAYOUT.reading : {removeFromRunningLine: [], stationBerthsAdd: []};
+const LAYOUT_RUNNING_EXCLUSIONS = new Set([
+  ...(LAYOUT_READING.removeFromRunningLine || []),
+  ...((ACTIVE_LAYOUT && ACTIVE_LAYOUT.runningLineExclusions) || [])
+]);
+const LAYOUT_SIDINGS = ACTIVE_LAYOUT && ACTIVE_LAYOUT.sidings ? ACTIVE_LAYOUT.sidings : [];
+const LAYOUT_BERTH_X = ACTIVE_LAYOUT && ACTIVE_LAYOUT.berthX ? ACTIVE_LAYOUT.berthX : null;
 
 /* ═════════ Berth layout (derived from learned TD CA chains + SMART) ═════════
    Cell order is geographic WEST → EAST.  Berth IDs are unique across D1/D6 in
@@ -318,7 +335,8 @@ const LINES = [
    // and they're never shared with UM's own throat berths, so a train appearing here has
    // already committed to Up Relief vs Up Main before it even reaches 1676. Placeholder
    // distances (west of 1676's 5.1) — logical order only, not surveyed, per Graham's ask.
-   west:['1694','1698','1696','1676','1668','1664','1660','1652','1648','1644','1642'],
+   west:['1694','1698','1696','1676','1668','1664','1660','1652','1648','1644','1642']
+     .filter(b => !LAYOUT_RUNNING_EXCLUSIONS.has(b)),
    twy:['1630'],
    east:['1628','1624','1622','1620','1616','1612','1608','1604','0598','0594'],
    // Platform 5 (0576) is the Up Relief LOOP, drawn ABOVE Platform 4 (0574,
@@ -338,21 +356,24 @@ const LINES = [
    // 1695/1693/1697 (Phase C): the Reading throat for Down Relief — berth_chain.json
    // shows 1687 (down-direction, i.e. arriving FROM these) steps on to them 154/167/189
    // times respectively, no single dominant path (unlike UR/UM's throats).
-   west:['1695','1693','1697','1687','1677','1669','1665','1661','1657'],
+   west:['1695','1693','1697','1687','1677','1669','1665','1661','1657']
+     .filter(b => !LAYOUT_RUNNING_EXCLUSIONS.has(b)),
    twy:['1637'],
    east:['1635','1631','1627','1623','1611','1607','1603','0595'],
    maid:['0577'], stub:['0571']},
   {key:'um', y:264, main:true,  dir:'up',   name:'UP MAIN',     plat:'2',
    // 1690/1688 (Phase C): Up Main's Reading throat (feeds 1672, 365/384 occurrences;
    // a third code, 1686, was seen only once — too rare to bother modelling).
-   west:['1690','1688','1672','1666','1662','1658','1650','1646','1640'],
+   west:['1690','1688','1672','1666','1662','1658','1650','1646','1640']
+     .filter(b => !LAYOUT_RUNNING_EXCLUSIONS.has(b)),
    twy:['1626'],
    east:['1618','1614','1610','1606','1602','0596','0592'],
    maid:['0570'], stub:['0566']},
   {key:'dm', y:320, main:true,  dir:'down', name:'DOWN MAIN',   plat:'1',
    // 1685 (Phase C): Down Main's Reading throat — overwhelmingly dominant path out of
    // 1675 (801 occurrences; a rare 5x path to 1689 wasn't worth a cell for).
-   west:['1685','1675','1667','1663','1659'],
+   west:['1685','1675','1667','1663','1659']
+     .filter(b => !LAYOUT_RUNNING_EXCLUSIONS.has(b)),
    twy:['1655'],
    east:['1633','1629','1625','1621','1609','1605','1601','0593'],
    maid:['0573'], stub:['0569']},
@@ -409,14 +430,14 @@ const BRANCH_CELLS = [
 const STAB_CELL = {berths:['0580','0582','0584','0586','0588','0590','6296'],
                    x:[860,950], y:104, cap:'CROSSRAIL STABLING', capAbove:true};
 
-/* Trains inside Reading station show as chips in the Reading box. 1685/1686/1688/1694/
-   1697/1698 moved OUT (2026-07-09, JUNCTIONS-PLAN.md Phase C) — these are the Reading
-   throat berths just outside the old diagram edge where a train already commits to a
-   specific running line (see LINES west arrays below), so they now render as real cells
-   instead of anonymous chips. */
+/* Trains inside Reading station show as chips in the Reading box. V1 preserves
+   the historical classification. V2 keeps the platform/throat fan in this
+   box: learned CA transitions prove those roads converge on the four approach
+   anchors, rather than forming a fictitious serial sequence outside Reading. */
 const READ_BERTHS = ['1684','1702','1706',
   '1708','1709','1711','1716','1718','1721','1724','1727','1730','1731','1732','1733',
-  '1740','SSTE','A701','B701','C701','A703','B703','C703','A705','B705','C705','R701'];
+  '1740','SSTE','A701','B701','C701','A703','B703','C703','A705','B705','C705','R701']
+  .concat(LAYOUT_READING.stationBerthsAdd || []);
 
 /* Berths that straddle the house (UM crossing is at 1640/1626, per observation;
    the others are the first section east of the Twyford platforms) */
@@ -560,6 +581,29 @@ for (const ln of LINES) {
     urStubRef = refOf(ln.stub);
   }
 }
+// V2 can replace only the reviewed geographic columns after the legacy grid
+// has created every cell.  This keeps v1 byte-for-byte behaviour while letting
+// v2 align confirmed four-line junctions without pretending every berth is a
+// surveyed distance measurement.
+if (LAYOUT_BERTH_X) {
+  for (const [berth, cx] of Object.entries(LAYOUT_BERTH_X)) {
+    const cell = BERTH_CELL[berth];
+    if (cell && Number.isFinite(cx)) cell.x = cx - CELL_W / 2;
+  }
+  // Manual review columns must retain the renderer's fundamental invariant:
+  // boxes on one running line never overlap.  Preserve the line's established
+  // geographic order and nudge only a colliding later box to the next gap.
+  for (const ln of LINES) {
+    let prevRight = -Infinity;
+    const inOrder = ln.west.concat(ln.twy, ln.east, ln.maid, ln.stub);
+    for (const berth of inOrder) {
+      const cell = BERTH_CELL[berth];
+      if (!cell) continue;
+      if (cell.x < prevRight + 3) cell.x = prevRight + 3;
+      prevRight = cell.x + cell.w;
+    }
+  }
+}
 // Branch/siding cells are also CELL_W now (2026-07-09, were their own wider hand-tuned
 // widths — up to 74px for chevron visibility). c.x[0]/c.x[1] still define the slot used
 // for caption centring below; only the cell itself shrinks, centred within that slot.
@@ -568,6 +612,18 @@ for (const c of BRANCH_CELLS)
            key: 'br', dir: c.dir});
 addCell({berths: STAB_CELL.berths, x: STAB_CELL.x[0] + (STAB_CELL.x[1]-STAB_CELL.x[0]-CELL_W)/2,
          y: STAB_CELL.y, w: CELL_W, key: 'st'});
+// V2-only sidings are separately connected to their through line. They must
+// never be added to a LINES[].west/east array: doing that would turn a loop
+// into a fictitious serial berth and distort both the track geometry and its
+// signal position.
+for (const siding of LAYOUT_SIDINGS) {
+  const from = BERTH_CELL[siding.fromBerth], to = BERTH_CELL[siding.toBerth];
+  const line = LINES.find(ln => ln.key === siding.line);
+  if (!from || !to || !line || !siding.berths || !siding.berths.length) continue;
+  const cx = ((from.x + from.w / 2) + (to.x + to.w / 2)) / 2;
+  addCell({berths:siding.berths, x:cx - CELL_W / 2, y:line.y + siding.offsetY,
+           w:CELL_W, key:'br', dir:line.dir, siding});
+}
 
 const LINE_OF = {};   // row key → line def
 for (const ln of LINES) LINE_OF[ln.key] = ln;
@@ -643,14 +699,28 @@ function drawStatic() {
 
   /* Turnback siding connectors — fed by BOTH Platform 3 (Down Relief) and
      Platform 4 (Up Relief), west of the station; trains reverse here and
-     re-emerge onto Platform 4 */
-  g.appendChild(el('line', {x1:1050, y1:188, x2:1086, y2:208,
-    stroke:'#0c2226', 'stroke-width':7}));
-  g.appendChild(el('line', {x1:1050, y1:172, x2:1102, y2:152,
-    stroke:'#0c2226', 'stroke-width':7}));
-  for (const seg of [[1050,188,1086,208],[1050,172,1102,152]])
-    g.appendChild(el('line', {x1:seg[0], y1:seg[1], x2:seg[2], y2:seg[3],
-      stroke:C_RELIEF, 'stroke-width':1, opacity:0.35}));
+     re-emerge onto Platform 4.  V2 extends both leads to the actual turnback
+     berth; their station ends land in the clear approach gaps. */
+  if (LAYOUT_ID === 'v2') {
+    const turnback = BERTH_CELL.R578;
+    const urGap = (BERTH_CELL['0594'].x + CELL_W + BERTH_CELL['0574'].x) / 2;
+    const drGap = (BERTH_CELL['0595'].x + CELL_W + BERTH_CELL['0577'].x) / 2;
+    const turnbackX = turnback.x + turnback.w;
+    for (const seg of [[turnbackX,180,drGap,208],[turnbackX,180,urGap,152]]) {
+      g.appendChild(el('line', {x1:seg[0], y1:seg[1], x2:seg[2], y2:seg[3],
+        stroke:'#0c2226', 'stroke-width':7}));
+      g.appendChild(el('line', {x1:seg[0], y1:seg[1], x2:seg[2], y2:seg[3],
+        stroke:C_RELIEF, 'stroke-width':1, opacity:0.35}));
+    }
+  } else {
+    g.appendChild(el('line', {x1:1050, y1:188, x2:1086, y2:208,
+      stroke:'#0c2226', 'stroke-width':7}));
+    g.appendChild(el('line', {x1:1050, y1:172, x2:1102, y2:152,
+      stroke:'#0c2226', 'stroke-width':7}));
+    for (const seg of [[1050,188,1086,208],[1050,172,1102,152]])
+      g.appendChild(el('line', {x1:seg[0], y1:seg[1], x2:seg[2], y2:seg[3],
+        stroke:C_RELIEF, 'stroke-width':1, opacity:0.35}));
+  }
 
   /* Marlow branch (via Furze Platt/Cookham) — joins the loop east of the
      crossover, closest to the platform, so it can only reach Platform 5 */
@@ -661,6 +731,37 @@ function drawStatic() {
   for (const seg of [[956,70,1060,70],[1060,70,1060,128]])
     g.appendChild(el('line', {x1:seg[0], y1:seg[1], x2:seg[2], y2:seg[3],
       stroke:C_RELIEF, 'stroke-width':1, opacity:0.4}));
+
+  /* V2 siding/loop geometry. 1669 is the normal Down Relief flow; 1679 is
+     the sparse, long-dwell branch from it. This deliberately separates loop
+     occupancy from the through line. It is NOT a surveyed representation:
+     OSM shows the real loop is about 0.7 km, so this temporary shape must not
+     be promoted without the projection work. */
+  for (const cell of CELLS) {
+    if (!cell.siding) continue;
+    const from = BERTH_CELL[cell.siding.fromBerth];
+    const to = BERTH_CELL[cell.siding.toBerth];
+    if (!from || !to) continue;
+    const x1 = from.x + from.w / 2, x2 = to.x + to.w / 2;
+    const y = cell.y;
+    // A siding loop has a short parallel road, not a sharp V.  Keep its
+    // horizontal portion clear of the berth cell and between the two relief
+    // tracks (the Kennet example is above the Down Relief).
+    const lead = Math.min(16, Math.abs(x1 - x2) / 3);
+    const points = `${x1},${from.y} ${x1-lead},${y} ${x2+lead},${y} ${x2},${to.y}`;
+    for (const [stroke, width, opacity] of [['#0c2226', 7, 1], [C_RELIEF, 1, 0.4]]) {
+      g.appendChild(el('polyline', {points,
+        fill:'none', stroke, 'stroke-width':width, opacity}));
+    }
+  }
+  // The Kennet Loop occupies the inter-relief space.  Its west lead passes
+  // behind the Down Relief caption at this diagram scale, so redraw that
+  // caption in the foreground rather than allowing the route to obscure it.
+  if (LAYOUT_ID === 'v2') {
+    const dr = LINES.find(ln => ln.key === 'dr');
+    g.appendChild(el('text', Object.assign({x:120, y:dr.y-15, fill:C_RELIEF,
+      opacity:0.85, 'font-size':11}, capFont), '← DOWN RELIEF'));
+  }
 
   /* captions for branch/stub cells */
   for (const c of BRANCH_CELLS.concat([STAB_CELL])) {
@@ -718,12 +819,9 @@ function drawStatic() {
      own data — see below) and Ruscombe Jn (UR<->UM: ur:1622<->um:1618, 4x; DR<->DM:
      dm:1625<->dr:1631, 23x) — see JUNCTIONS-PLAN.md Phase B.
 
-     Connectors run cell-BOUNDARY to cell-boundary (using BERTH_CELL, already built above),
-     not a symmetric offset around one shared centre point as the first version of this did
-     — that made it ambiguous whether the junction was before or after the berth it cut
-     through the middle of. exitX/entryX below are the same "downstream edge" / "upstream
-     edge" convention renderSignals() already uses for signal dots, so a connector always
-     touches the side of a cell a train actually crosses through, not its middle. */
+     In v2, connectors meet the running tracks in the clear gaps BETWEEN berth cells.
+     A crossover is track geometry, not part of a berth, so it must not terminate on a
+     box or be drawn vertically. V1 retains its legacy rendering for rollback. */
   function exitX(berth, dir) {
     const c = BERTH_CELL[berth];
     return dir === 'up' ? c.x + c.w : c.x;
@@ -736,32 +834,54 @@ function drawStatic() {
     g.appendChild(el('line', {x1, y1, x2, y2, stroke:'#0c2226', 'stroke-width':7}));
     g.appendChild(el('line', {x1, y1, x2, y2, stroke:C_RELIEF, 'stroke-width':1, opacity:0.4}));
   }
-  // Twyford West UM<->UR: verified against Traksy_TwyfordJn.png (2026-07-09) to slope
-  // bottom-left to top-right — i.e. UM's (bottom row) end is LEFT of UR's (top row) end,
-  // the opposite pairing (entry/exit swapped) from the "logical" exit-of-source ->
-  // entry-of-destination convention used below for Ruscombe, which sloped the wrong way
-  // here specifically.
-  connector(entryX('1646', 'up'), 264, exitX('1642', 'up'), 152);
-  // Twyford West UM<->DM: not yet seen in berth_chain.json (may be a rare reversing move),
-  // added on Graham's identification from the screenshot. No confirmed berth pair to anchor
-  // to, so this is a straight vertical placeholder at the same x as the UM<->UR crossover
-  // above (same junction cluster) rather than a derived boundary — revisit once a real
-  // move through it is observed.
-  { const tw = exitX('1646', 'up');
-    connector(tw, 264, tw, 320); }
-  // Ruscombe UR<->UM (exit of source -> entry of destination, the "logical" direction —
-  // not flagged as wrong, unlike Twyford West above).
-  connector(exitX('1622', 'up'), 152, entryX('1618', 'up'), 264);
-  // Ruscombe DM<->DR.
-  connector(exitX('1625', 'down'), 320, entryX('1631', 'down'), 208);
+  function gapX(leftBerth, rightBerth) {
+    const left = BERTH_CELL[leftBerth], right = BERTH_CELL[rightBerth];
+    return (left.x + left.w + right.x) / 2;
+  }
+  let twyWestX, ruscombeUpX, ruscombeDnX;
+  if (LAYOUT_ID === 'v2') {
+    // A crossover may join adjacent tracks only.  The Tracksy topology at
+    // Twyford/Ruscombe shows the apparent UR<->UM and DR<->DM movements as
+    // paired crossovers with a short run on the intervening Relief/Main track;
+    // never draw an impossible line straight across an intervening track.
+    // Twyford West is one eastward three-leg ladder in the Tracksy reference:
+    // DM -> UM -> DR -> UR. Reverse movements use the same physical ladder
+    // in reverse, so there is no direct two-row crossover in either direction.
+    const twDm = 460;  // clear DM gap east of 1659
+    const twUmIn = gapX('1646', '1640');
+    const twUmOut = 535;
+    const twDrIn = 550, twDrOut = 560; // clear DR gap east of 1657
+    const twUr = 570;  // clear UR gap east of 1642
+    connector(twDm, 320, twUmIn, 264);
+    connector(twUmOut, 264, twDrIn, 208);
+    connector(twDrOut, 208, twUr, 152);
+    // Ruscombe is one eastward crossover ladder in the Tracksy reference:
+    // UR -> DR, then DR -> UM, then UM -> DM.  Each pair of endpoints leaves
+    // a short visible run on the intermediate running track.
+    const ruUr = gapX('1622', '1620');
+    const ruDrIn = 795, ruDrOut = 805;
+    const ruUmIn = 810, ruUmOut = 815;
+    const ruDm = gapX('1621', '1609');
+    connector(ruUr, 152, ruDrIn, 208);
+    connector(ruDrOut, 208, ruUmIn, 264);
+    connector(ruUmOut, 264, ruDm, 320);
+    twyWestX = (twDm + twUr) / 2;
+    ruscombeUpX = (ruUr + ruUmIn) / 2;
+    ruscombeDnX = (ruUmOut + ruDm) / 2;
+  } else {
+    connector(entryX('1646', 'up'), 264, exitX('1642', 'up'), 152);
+    { const tw = exitX('1646', 'up'); connector(tw, 264, tw, 320); }
+    connector(exitX('1622', 'up'), 152, entryX('1618', 'up'), 264);
+    connector(exitX('1625', 'down'), 320, entryX('1631', 'down'), 208);
+    twyWestX = (entryX('1646', 'up') + exitX('1642', 'up')) / 2;
+    ruscombeUpX = (exitX('1622', 'up') + entryX('1618', 'up')) / 2;
+    ruscombeDnX = (exitX('1625', 'down') + entryX('1631', 'down')) / 2;
+  }
   // Caption x-positions derived from the connectors' own endpoints (BERTH_CELL-based,
   // per above) rather than a separate segCenter/BERTH_MI lookup — segCenter no longer
   // exists now that cell layout is UR-reference-grid + snap-to-nearest (2026-07-09)
   // rather than a shared distance scale, so this keeps captions consistent with where
   // the connectors they label actually are.
-  const twyWestX    = (entryX('1646', 'up') + exitX('1642', 'up')) / 2;
-  const ruscombeUpX = (exitX('1622', 'up') + entryX('1618', 'up')) / 2;
-  const ruscombeDnX = (exitX('1625', 'down') + entryX('1631', 'down')) / 2;
 
   /* junction captions */
   g.appendChild(el('text', Object.assign({x:150, y:362, fill:'#4a5f82', 'font-size':9},
@@ -1015,7 +1135,12 @@ function renderPanel() {
   let houseGlow = false;
   for (const hc in tdPos) {
     const p = tdPos[hc];
-    if (READ_SET[p.berth]) { reading.push(p); continue; }
+    // V2 also trusts live TD/SMART's Reading location tag. This keeps a
+    // previously unknown platform berth in the station box (with its TD
+    // platform number) rather than silently drawing it on a guessed approach.
+    if (READ_SET[p.berth] || (LAYOUT_ID === 'v2' && p.area === 'D1' && p.place === 'READNG')) {
+      reading.push(p); continue;
+    }
     const cell = BERTH_CELL[p.berth];
     if (!cell) continue;
     if (!byCell.has(cell)) byCell.set(cell, []);
@@ -1475,7 +1600,11 @@ function logCalibration(lineKey) {
     params.set('td_berth', lp.berth || '');
     if (lp.dist_mi != null) params.set('dist_mi', String(lp.dist_mi));
   }
-  fetch('/api/calibrate?' + params.toString()).then(r => r.json()).then(d => {
+  fetch('/api/calibrate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: params.toString()
+  }).then(r => r.json()).then(d => {
     if (d && d.entry) {
       calibLog.unshift(d.entry);
       if (calibLog.length > 300) calibLog.length = 300;
@@ -1559,6 +1688,11 @@ window.addEventListener('resize', scaleToWindow);
 
 /* ── Boot ── */
 scaleToWindow();
+if (LAYOUT_ID === 'v2') {
+  const badge = document.getElementById('layout-status');
+  badge.textContent = 'GEOMETRY V2 · SHADOW';
+  badge.style.cssText = 'color:#ffb000;font:600 10px "IBM Plex Mono",monospace;letter-spacing:.08em';
+}
 drawStatic();
 fetchTrains(); fetchTd(); fetchNrcc(); fetchCalibration();
 setInterval(fetchTrains, 15000);

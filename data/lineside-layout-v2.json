@@ -1,0 +1,80 @@
+{
+  "id": "v2",
+  "status": "shadow",
+  "description": "First reviewed geometry correction. Display-only; no TD, learner, signal or train-model behaviour changes.",
+  "source": {
+    "kind": "live TD plus SMART berth metadata",
+    "observed_at": "2026-08-16T20:08:46Z",
+    "evidence": "D1/1696 received a CC interpose for 9U95; SMART identifies it as Reading platform 14. Independent Tracksy observation confirmed the train at Reading platform 14."
+  },
+  "reading": {
+    "approach_anchor_berths": {
+      "up_relief": "1676",
+      "up_main": "1672",
+      "down_relief": "1687",
+      "down_main": "1675"
+    },
+    "remove_from_running_line": ["1694", "1698", "1696", "1690", "1688", "1695", "1693", "1697", "1685"],
+    "station_berths_add": ["1694", "1698", "1696", "1690", "1688", "1695", "1693", "1697", "1685"],
+    "berths": {
+      "1696": {
+        "location": "Reading platform 14",
+        "kind": "platform",
+        "confidence": "confirmed",
+        "render": "reading_station"
+      },
+      "1694": {
+        "kind": "Reading platform/throat departure",
+        "confidence": "learner-confirmed",
+        "evidence": "1694 -> 1676: 575 learned CA transitions",
+        "render": "reading_station"
+      },
+      "1698": {
+        "kind": "Reading platform/throat departure",
+        "confidence": "learner-confirmed",
+        "evidence": "1698 -> 1676: 1452 learned CA transitions",
+        "render": "reading_station"
+      },
+      "1690": {
+        "kind": "Reading platform/throat departure",
+        "confidence": "learner-confirmed",
+        "evidence": "1690 -> 1672: 1964 learned CA transitions",
+        "render": "reading_station"
+      },
+      "1688": {
+        "kind": "Reading platform/throat departure",
+        "confidence": "learner-confirmed",
+        "evidence": "1688 -> 1672: 2098 learned CA transitions",
+        "render": "reading_station"
+      }
+    }
+  },
+  "running_line_exclusions": ["1679"],
+  "sidings": [
+    {
+      "id": "kennet-loop-siding",
+      "berths": ["1679"],
+      "from_berth": "1669",
+      "to_berth": "1687",
+      "line": "dr",
+      "offset_y": -28,
+      "confidence": "learner-confirmed",
+      "evidence": "1669 is the normal Down Relief route (3150 dwell samples, 31.5 s mean; dominant 1665 -> 1669 -> 1677). 1679 branches from 1669, has only 36 dwell samples with a 424 s mean, and rejoins toward 1687. Although SMART assigns both to KEN BG LP, the learner's branching and dwell evidence identifies 1679 as the loop/stabling berth."
+    }
+  ],
+  "alignment": {
+    "mode": "review_columns_not_distance_survey",
+    "evidence": [
+      "Learner-confirmed Reading approach anchors 1676/1687/1672/1675",
+      "Twyford West crossover 1642 <-> 1646",
+      "Ruscombe crossovers 1622 <-> 1618 and 1631 <-> 1625",
+      "Field observation: the house lies immediately east of Twyford and is straddled by the Up Main 1640/1626 progression"
+    ],
+    "limitations": "Intermediate columns are deliberate schematic interpolation. They improve line-to-line alignment and local topology but do not claim surveyed berth spacing."
+  },
+  "geometry_rules": {
+    "crossovers": "Connect running-track gaps, never berth cells; use diagonal leads only.",
+    "multi_track_moves": "A move across two rows is represented by adjacent-track crossover ladders and short runs on intermediate tracks; never by a direct connector.",
+    "turnback_leads": "Maidenhead turnback leads must run from the platform approach gaps to the turnback berth."
+  }
+}
