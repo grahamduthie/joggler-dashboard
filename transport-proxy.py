@@ -2376,19 +2376,39 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
                 )
                 if res is not None:
                     eta_s, held = res
+                    candidate_ts = int(now + eta_s)
+                    source = 'td_eta'
                     if held:
                         # Dwelling at a station / held at a signal: floor the ETA
                         # (can't pass before the travel time) and flag it.
                         t['held'] = True
+                        # A held berth position alone can't tell "waiting for
+                        # its own booked departure" (e.g. sitting at its ORIGIN
+                        # platform before orig_dep) apart from "held mid-journey
+                        # at a signal" -- constant-speed-from-here math treats
+                        # both as "about to depart right now", which for the
+                        # first case can produce a schedule-impossible ETA (a
+                        # train confirmed at Reading, its origin, shown passing
+                        # in ~4 min while not booked to leave Reading for
+                        # another ~13 min -- reported live, 2026-08-17, 9U87).
+                        # RTT's forecast/schedule already encodes the real
+                        # booked departure and any known running delay, so
+                        # never let a held berth ETA imply an EARLIER house
+                        # pass than that -- take whichever is later.
+                        floor_ts, floor_source = t.get('forecast_pass_ts') or 0, 'rtt_forecast'
+                        if not floor_ts:
+                            floor_ts, floor_source = t.get('scheduled_pass_ts') or 0, 'schedule'
+                        if floor_ts and floor_ts > candidate_ts:
+                            candidate_ts, source = floor_ts, floor_source
                     # Live berth position is authoritative over a schedule or
                     # forecast, whether it is approaching (+) or past (−).
                     # It is still an ETA, not an observed crossing unless the
                     # dedicated zero-crossing detector recorded one above.
-                    t['berth_eta_pass_ts'] = int(now + eta_s)
-                    t['display_pass_ts'] = int(now + eta_s)
-                    t['pass_time_source'] = 'td_eta'
+                    t['berth_eta_pass_ts'] = candidate_ts
+                    t['display_pass_ts'] = candidate_ts
+                    t['pass_time_source'] = source
                     t['house_pass_ts'] = t['display_pass_ts']
-                    t['td_eta_s'] = int(eta_s)
+                    t['td_eta_s'] = int(candidate_ts - now)
     # Synthesise entries for trains PHYSICALLY inside the Reading↔Maidenhead
     # corridor that no schedule source matched.  A live berth fix strictly
     # between Maidenhead and the house (Down) or between Reading and the house

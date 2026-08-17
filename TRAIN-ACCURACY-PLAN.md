@@ -1,5 +1,18 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
+**2026-08-17 — held-berth ETA could beat a train's own booked departure.** Reported live: 9U87
+showed "passing in ~4 min" while confirmed sitting at Reading -- its origin -- with its booked
+Reading departure still ~13 min away. Root cause in `_td_enrich_trains`'s berth-eta refinement:
+a held/dwelling berth position alone can't distinguish "waiting for its own booked departure at
+its origin platform" from "held mid-journey at a signal", and the constant-speed-from-here math in
+`_berth_eta_to_house_s` treats both as "about to depart right now". Fixed by never letting a
+`held=True` result imply a house-pass earlier than the train's own `forecast_pass_ts`/
+`scheduled_pass_ts` (RTT already encodes the real booked departure and any known running delay) --
+take whichever is later, and set `pass_time_source` to whichever supplied the winning number so
+the evidence log stays honest about where a clamped ETA actually came from. Applies uniformly to
+every held case, not just origin-platform dwelling, since a mid-journey held train's naive
+full-speed-from-here ETA can be similarly optimistic once a signal delay outlasts it.
+
 **2026-08-17 — ECS-as-freight fixed at its actual root, closing the gap the earlier speed-learner
 fix (below) only partly covered.** That fix made `_speed_class_bucket` trust a *recognised* CIF
 timing-load class over the crude `hc[:1]` heuristic, but only helps when CIF resolves one; a

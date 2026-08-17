@@ -92,6 +92,38 @@ class TrainAccuracyTests(unittest.TestCase):
         train = {'display_pass_ts': 954, 'movement_state': 'passing'}
         self.assertTrue(proxy._v2_headline_eligible(train, 1_000))
 
+    def test_held_berth_eta_cannot_beat_the_trains_own_booked_departure(self):
+        # Reported live 2026-08-17: 9U87 was confirmed sitting at Reading
+        # (its ORIGIN, D1/1696, 5.1 mi out) 144s after being first seen there
+        # -- long enough to be flagged held -- and the constant-speed-from-
+        # here math showed it passing the house in ~4 min, while its own
+        # booked departure from Reading was still ~13 min away. A train
+        # can't leave its origin before the booked time, so the held ETA
+        # must never imply an earlier house-pass than the RTT forecast.
+        old_info = proxy._berth_info
+        old_pax_best = proxy._cif_pax_best
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '', 'to': '1696',
+                                     'descr': '9U87', 'ts': 856}]
+        try:
+            proxy._berth_info = lambda area, berth: {
+                'line': 'Relief', 'dist_mi': 5.1, 'dir': 'up', 'stanme': 'READNG'}
+            proxy._cif_pax_best = lambda hc: None
+            train = {'headcode': '9U87', 'direction': 'up', 'track': 'Relief',
+                     'call_type': 'STOP', 'passenger': True, 'at_station': False,
+                     'observed_pass_ts': 0, 'scheduled_pass_ts': 1_780,
+                     'forecast_pass_ts': 1_780, 'house_pass_ts': 1_780}
+            proxy._td_enrich_trains([train], 1_000)
+            self.assertTrue(train['held'])
+            self.assertEqual(train['display_pass_ts'], 1_780)
+            self.assertEqual(train['pass_time_source'], 'rtt_forecast')
+        finally:
+            proxy._berth_info = old_info
+            proxy._cif_pax_best = old_pax_best
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
     def test_fresh_remote_td_berth_overrides_rtt_station_status(self):
         # Mirrors 2P85: RTT retained AT_PLATFORM, while TD showed D1/1652
         # two miles away and held at a signal.
