@@ -1164,6 +1164,18 @@ via `tick()`), so a train is logged in the exact same tick it disappears from "N
 House" — no gap between the two. Falls back to the old predicted-time check only for
 schedule-only trains that never got a live TD fix at all.
 
+#### NEXT PAST THE HOUSE lagged the berth panel (fixed 2026-08-17)
+
+`renderAppr()` (the approaching-train list) was only re-rendered from `fetchTrains`'s 15 s cycle,
+even though it reads the same live `tdPos` (`/api/td-live`) that the berth panel above it
+(`renderPanel`/`renderSignals`) redraws from every 5 s via `fetchTd` — so the list visibly lagged
+the diagram, most noticeably right around a train sighting or passing. `fetchTd`'s callback now
+calls the full `render()` (which includes `renderAppr`/`renderLog`/`renderInfo` as well as
+`renderPanel`) instead of just `renderPanel()`, so every section redraws together every 5 s. This
+only changes redraw frequency of already-cached state — `/api/trains` itself still polls at 15 s,
+unchanged; `renderAppr`'s own live-sighting logic (`hasPassedHouse`, `msSincePassed`) was already
+using fresh `tdPos` each time, it just wasn't being asked to redraw with it often enough.
+
 #### Maidenhead station rebuilt to match the real track layout (2026-07-07)
 
 Corrected against SMART/BPLAN data for TIPLOC `MDNHEAD` (STANOX 74005) plus live user
