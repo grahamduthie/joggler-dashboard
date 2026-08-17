@@ -247,7 +247,6 @@ body {
 <div id="topbar">
   <span class="title">LINESIDE</span>
   <span class="subtitle">TWYFORD BERTH PANEL · READING ⇄ MAIDENHEAD · TD D1/D6</span>
-  <span id="layout-status" aria-live="polite"></span>
   <span id="power-legend">
     <span><i class="pw-diesel"></i>Diesel/DMU</span>
     <span><i class="pw-electric"></i>Electric/EMU</span>
@@ -1683,11 +1682,6 @@ window.addEventListener('resize', scaleToWindow);
 
 /* ── Boot ── */
 scaleToWindow();
-if (LAYOUT_ID === 'v2') {
-  const badge = document.getElementById('layout-status');
-  badge.textContent = 'GEOMETRY V2 · SHADOW';
-  badge.style.cssText = 'color:#ffb000;font:600 10px "IBM Plex Mono",monospace;letter-spacing:.08em';
-}
 drawStatic();
 fetchTrains(); fetchTd(); fetchNrcc(); fetchCalibration();
 setInterval(fetchTrains, 15000);
