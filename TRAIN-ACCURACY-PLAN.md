@@ -1,6 +1,20 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
-Status: **Core correctness implementation is deployed to cloud production in non-visible shadow mode. V2 is currently less accurate than legacy and must not be promoted.**
+Status: **Core correctness implementation is deployed to cloud production. V2 is currently less
+accurate than legacy and must not be promoted.**
+
+**2026-08-17 — public shadow surface removed.** The `train_model`/`train_shadow` query params,
+the `/train-shadow` page and `deployment/train-accuracy-shadow.sh` are gone: with a single user
+of a "production" site that's still experimental, an extra exposed toggle and monitoring page per
+model was more clutter than value. Model comparison is internal-only now — `/api/trains` always
+serves `legacy`, and `_evidence_record_snapshot`/`_evidence_score_house_crossing` inside
+`_rtt_build_trains()` keep scoring `legacy` vs `v2` in the background regardless of what any
+client requests (see `train-evidence.jsonl` / `/api/train-evidence`). Any further candidate model
+should be added the same way — computed and scored internally via `_headline_run_keys`, never
+wired to a public query param or its own page — until it's actually ready to replace `legacy`
+outright. A first candidate along these lines (`_select_headline_candidate` / `_SOURCE_TIER`, a
+`ranked` variant implementing section 7's tiered-source rule below) exists in `transport-proxy.py`
+but is not yet wired into the evidence pipeline.
 
 Created: 2026-08-16
 

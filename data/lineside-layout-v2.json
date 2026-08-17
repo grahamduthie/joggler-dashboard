@@ -1,7 +1,7 @@
 {
   "id": "v2",
-  "status": "shadow",
-  "description": "First reviewed geometry correction. Display-only; no TD, learner, signal or train-model behaviour changes.",
+  "status": "live",
+  "description": "The only /lineside geometry as of 2026-08-17. Display-only; no TD, learner, signal or train-model behaviour changes.",
   "source": {
     "kind": "live TD plus SMART berth metadata",
     "observed_at": "2026-08-16T20:08:46Z",

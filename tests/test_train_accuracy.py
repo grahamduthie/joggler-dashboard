@@ -141,7 +141,52 @@ class TrainAccuracyTests(unittest.TestCase):
         self.assertNotIn('movement_state', legacy)
         self.assertNotIn('display_pass_ts', legacy)
 
-    def test_shadow_identifies_a_changed_headline_without_changing_legacy(self):
+    def test_source_tier_orders_td_over_rtt_over_schedule(self):
+        candidates = [
+            {'id': 'schedule', 'ts': 100, 'source': 'schedule'},
+            {'id': 'rtt_forecast', 'ts': 200, 'source': 'rtt_forecast'},
+            {'id': 'td_eta', 'ts': 300, 'source': 'td_eta'},
+        ]
+        best = proxy._select_headline_candidate(
+            candidates, ts_key=lambda c: c['ts'], source_key=lambda c: c['source'])
+        self.assertEqual(best['id'], 'td_eta')
+
+    def test_source_tier_breaks_ties_within_a_tier_by_soonest(self):
+        candidates = [
+            {'id': 'far', 'ts': 500, 'source': 'td_eta'},
+            {'id': 'near', 'ts': 200, 'source': 'td_eta'},
+        ]
+        best = proxy._select_headline_candidate(
+            candidates, ts_key=lambda c: c['ts'], source_key=lambda c: c['source'])
+        self.assertEqual(best['id'], 'near')
+
+    def test_without_source_key_soonest_still_wins(self):
+        candidates = [{'id': 'a', 'ts': 200}, {'id': 'b', 'ts': 100}]
+        best = proxy._select_headline_candidate(candidates, ts_key=lambda c: c['ts'])
+        self.assertEqual(best['id'], 'b')
+
+    def test_ranked_model_prefers_live_td_eta_over_an_earlier_schedule_phantom(self):
+        # Reproduces the dominant catastrophic failure found in the evidence
+        # log backtest: a stale schedule-only entry with an earlier number
+        # out-ranks the real, live-confirmed train under soonest-wins.
+        trains = [
+            {'uid': 'phantom', 'run_key': 'phantom', 'direction': 'up', 'track': 'Main',
+             'legacy_track': 'Main', 'legacy_house_pass_ts': 1_050,
+             'house_pass_ts': 1_050, 'pass_time_source': 'schedule'},
+            {'uid': 'real', 'run_key': 'real', 'direction': 'up', 'track': 'Main',
+             'legacy_track': 'Main', 'legacy_house_pass_ts': 1_090,
+             'house_pass_ts': 1_090, 'pass_time_source': 'td_eta'},
+        ]
+        legacy_keys = proxy._headline_run_keys(trains, 1_000, 'legacy')
+        ranked_keys = proxy._headline_run_keys(trains, 1_000, 'ranked')
+        self.assertEqual(legacy_keys['um'], 'phantom')
+        self.assertEqual(ranked_keys['um'], 'real')
+
+    def test_legacy_and_v2_headline_selection_are_independent(self):
+        # legacy and v2 use different track classification and eligibility
+        # rules internally (see _headline_run_keys); this is still exercised
+        # by the background evidence scoring even though no public endpoint
+        # lets a client pick a model.
         trains = [
             {'uid': 'old', 'run_key': 'old', 'direction': 'up', 'track': 'Main',
              'legacy_track': 'Relief', 'legacy_house_pass_ts': 1_010,
@@ -152,10 +197,10 @@ class TrainAccuracyTests(unittest.TestCase):
              'display_pass_ts': 1_020, 'house_pass_ts': 1_020,
              'legacy_twy_actual': '', 'movement_state': 'approaching'},
         ]
-        shadow = proxy._train_shadow_summary(trains, 1_000)
-        self.assertEqual(shadow['legacy_headlines']['ur'], 'old')
-        self.assertEqual(shadow['v2_headlines']['ur'], 'new')
-        self.assertIn('ur', shadow['disagreement_rows'])
+        legacy_keys = proxy._headline_run_keys(trains, 1_000, 'legacy')
+        v2_keys = proxy._headline_run_keys(trains, 1_000, 'v2')
+        self.assertEqual(legacy_keys['ur'], 'old')
+        self.assertEqual(v2_keys['ur'], 'new')
 
     def test_td_house_crossing_scores_saved_model_decision(self):
         with tempfile.TemporaryDirectory() as tmp:

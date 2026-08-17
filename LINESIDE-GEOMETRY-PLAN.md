@@ -338,6 +338,19 @@ release identifier.  Do not revive the Pi as a fallback production service.
 - **Overnight handoff:** `OVERNIGHT-HANDOFF-2026-08-16.md` records the current
   cloud shadow URL, release, review constraints and the separate train-model
   monitoring state. Keep the default `/lineside` on v1 overnight.
+- **2026-08-17 — v2 promoted, v1 removed (Phase 5, without the escape hatch below).**
+  With a single user of a still-experimental "production" site, keeping two
+  live layouts plus a query-param switch was more clutter than safety net.
+  `/lineside` now always renders what was `?layout=v2`; the `?layout=` param,
+  the `layoutRequest`/`null`-`ACTIVE_LAYOUT` branch, `data/lineside-layout-v1.json`'s
+  role as a live fallback, and `deployment/lineside-geometry-shadow-deploy.sh` (the
+  scoped, restart-free release script this needed while it was a shadow) are all gone.
+  A lineside.html/lineside-layout-v2.js change is now just a normal frontend asset
+  change via `deployment/cloud-deploy.sh`. `data/lineside-layout-v1.json` itself is
+  kept only as the pre-correction baseline `test_lineside_layout.py` diffs against.
+  `data/lineside-layout-v2.json`'s `status` field is now `"live"`. This layout is
+  still not a surveyed distance model (see "Alignment" above) — that limitation is
+  unchanged by the promotion, only the rollback safety net is.
 
 ## Decisions deliberately deferred
 

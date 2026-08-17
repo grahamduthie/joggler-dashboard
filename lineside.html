@@ -303,20 +303,15 @@ body {
 <script>
 'use strict';
 
-/* V2 is an opt-in display-only shadow.  It uses exactly the same TD and train
-   APIs as v1, so removing ?layout=v2 is an immediate rollback. */
-const layoutRequest = new URLSearchParams(window.location.search).get('layout');
-const ACTIVE_LAYOUT = layoutRequest === 'v2' && window.LINESIDE_LAYOUT_V2
-  ? window.LINESIDE_LAYOUT_V2 : null;
-const LAYOUT_ID = ACTIVE_LAYOUT ? ACTIVE_LAYOUT.id : 'v1';
-const LAYOUT_READING = ACTIVE_LAYOUT && ACTIVE_LAYOUT.reading
-  ? ACTIVE_LAYOUT.reading : {removeFromRunningLine: [], stationBerthsAdd: []};
+const ACTIVE_LAYOUT = window.LINESIDE_LAYOUT_V2;
+const LAYOUT_ID = ACTIVE_LAYOUT.id;
+const LAYOUT_READING = ACTIVE_LAYOUT.reading;
 const LAYOUT_RUNNING_EXCLUSIONS = new Set([
   ...(LAYOUT_READING.removeFromRunningLine || []),
-  ...((ACTIVE_LAYOUT && ACTIVE_LAYOUT.runningLineExclusions) || [])
+  ...(ACTIVE_LAYOUT.runningLineExclusions || [])
 ]);
-const LAYOUT_SIDINGS = ACTIVE_LAYOUT && ACTIVE_LAYOUT.sidings ? ACTIVE_LAYOUT.sidings : [];
-const LAYOUT_BERTH_X = ACTIVE_LAYOUT && ACTIVE_LAYOUT.berthX ? ACTIVE_LAYOUT.berthX : null;
+const LAYOUT_SIDINGS = ACTIVE_LAYOUT.sidings || [];
+const LAYOUT_BERTH_X = ACTIVE_LAYOUT.berthX || null;
 
 /* ═════════ Berth layout (derived from learned TD CA chains + SMART) ═════════
    Cell order is geographic WEST → EAST.  Berth IDs are unique across D1/D6 in

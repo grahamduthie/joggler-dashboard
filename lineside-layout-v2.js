@@ -1,5 +1,5 @@
-/* Display-only geometry shadow configuration.  The normal /lineside URL
- * retains v1; only /lineside?layout=v2 reads this reviewed override. */
+/* /lineside's geometry configuration. Display-only: no TD, learner, signal
+ * or train-model behaviour depends on it. */
 window.LINESIDE_LAYOUT_V2 = Object.freeze({
   id: 'v2',
   reading: Object.freeze({

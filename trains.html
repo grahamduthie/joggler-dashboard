@@ -388,14 +388,9 @@ function fmtHM(msOrIso) {
 let trains = [];
 let lastFetch = 0;
 let nrccMsgs = [];
-const trainParams = new URLSearchParams(location.search);
-// Production stays on the legacy projection until the shadow window is signed
-// off. Add ?train_model=v2&train_shadow=1 when validating the new model.
-const trainModel = trainParams.get('train_model') === 'v2' ? 'v2' : 'legacy';
-const trainShadow = trainParams.get('train_shadow') === '1' ? '&shadow=1' : '';
 
 function fetchTrains() {
-  fetch('/api/trains?model=' + trainModel + trainShadow).then(r => r.json()).then(d => {
+  fetch('/api/trains').then(r => r.json()).then(d => {
     trains = d.trains || [];
     lastFetch = Date.now();
     render();

@@ -879,11 +879,6 @@ function trackKey(t) {
 }
 
 let trains = [], nrccMsgs = [], lastFetch = 0;
-const trainParams = new URLSearchParams(location.search);
-// Production stays on the legacy projection until the shadow window is signed
-// off. Add ?train_model=v2&train_shadow=1 when validating the new model.
-const trainModel = trainParams.get('train_model') === 'v2' ? 'v2' : 'legacy';
-const trainShadow = trainParams.get('train_shadow') === '1' ? '&shadow=1' : '';
 const KEYS = ['ur', 'dr', 'um', 'dm'];
 const LINE_META = {
   ur: {arrow:'→', name:'UP RELIEF',   ln:'relief'},
@@ -893,7 +888,7 @@ const LINE_META = {
 };
 
 function fetchTrains() {
-  fetch('/api/trains?model=' + trainModel + trainShadow).then(r => r.json()).then(d => {
+  fetch('/api/trains').then(r => r.json()).then(d => {
     trains = d.trains || [];
     lastFetch = Date.now();
     renderTrains();

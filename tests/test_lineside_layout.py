@@ -1,4 +1,4 @@
-"""Regression guards for the rollback-safe lineside geometry shadow."""
+"""Regression guards for the /lineside geometry (data/lineside-layout-v2.json)."""
 
 import json
 import pathlib
@@ -24,9 +24,9 @@ class LinesideLayoutTests(unittest.TestCase):
         self.assertEqual(v2['reading']['berths']['1696']['location'], 'Reading platform 14')
         self.assertEqual(v2['reading']['berths']['1696']['confidence'], 'confirmed')
 
-    def test_v2_is_explicitly_shadow_only(self):
+    def test_v2_is_the_live_layout(self):
         v2 = json.loads((ROOT / 'data' / 'lineside-layout-v2.json').read_text())
-        self.assertEqual(v2['status'], 'shadow')
+        self.assertEqual(v2['status'], 'live')
         source = (ROOT / 'lineside-layout-v2.js').read_text()
         self.assertIn("id: 'v2'", source)
         self.assertIn('removeFromRunningLine', source)

@@ -2986,42 +2986,72 @@ def _v2_headline_eligible(t, now):
     return ts >= now - 15
 
 
+# Trustworthiness order for a predicted house-pass time, best first. Both
+# 'legacy' and 'v2' pick a row's headline by soonest eligible pass_ts alone,
+# with no regard for how that time was derived — so a stale schedule-only
+# phantom with an early number can out-rank a live TD-confirmed train just by
+# having a smaller timestamp. The evidence log's wrong-headline crossings are
+# dominated by exactly this (see TRAIN-ACCURACY-PLAN.md's ranking backtest).
+# 'ranked' below breaks ties by tier first, soonest-within-tier second.
+_SOURCE_TIER = {
+    'td_crossing':  0,
+    'td_eta':       1,
+    'rtt_actual':   2,
+    'rtt_forecast': 3,
+    'schedule':     4,
+}
+
+
+def _source_tier(source):
+    return _SOURCE_TIER.get(source, 4)
+
+
+def _select_headline_candidate(candidates, ts_key, source_key=None):
+    """Pick a row's headline train from its eligible candidates.
+
+    Without ``source_key`` this is the original soonest-pass_ts rule. With
+    it, candidates are ranked by source tier first and soonest pass_ts only
+    breaks ties within a tier — see ``_SOURCE_TIER``.
+    """
+    if source_key is None:
+        return min(candidates, key=ts_key)
+    return min(candidates, key=lambda t: (_source_tier(source_key(t)), ts_key(t)))
+
+
 def _headline_run_keys(trains, now, model):
-    """Return the one selected run per physical row for shadow diagnostics."""
+    """Return the one selected run per physical row for shadow diagnostics.
+
+    'ranked' isolates a single change from 'legacy': tiered-source selection
+    in place of soonest-pass_ts-wins, holding legacy's (already better
+    performing) track classification and eligibility window fixed, so the
+    two can be compared on ranking quality alone.
+    """
     rows = {'ur': [], 'dr': [], 'um': [], 'dm': []}
     for t in trains:
-        track = (t.get('legacy_track') if model == 'legacy' else t.get('track'))
+        track = (t.get('track') if model == 'v2' else t.get('legacy_track'))
         direction = t.get('direction')
         if direction not in ('up', 'down') or track not in ('Main', 'Relief'):
             continue
         key = ('u' if direction == 'up' else 'd') + ('m' if track == 'Main' else 'r')
-        eligible = (_legacy_headline_eligible(t, now) if model == 'legacy'
-                    else _v2_headline_eligible(t, now))
+        eligible = (_v2_headline_eligible(t, now) if model == 'v2'
+                    else _legacy_headline_eligible(t, now))
         if eligible:
             rows[key].append(t)
     result = {}
     for key, candidates in rows.items():
-        if candidates:
-            timestamp = (lambda t: t.get('legacy_house_pass_ts') or t.get('house_pass_ts') or 0)
-            if model != 'legacy':
-                timestamp = lambda t: t.get('display_pass_ts') or t.get('house_pass_ts') or 0
-            result[key] = min(candidates, key=timestamp).get('run_key') or candidates[0].get('uid')
-        else:
+        if not candidates:
             result[key] = None
+            continue
+        if model == 'v2':
+            ts_key = lambda t: t.get('display_pass_ts') or t.get('house_pass_ts') or 0
+        else:
+            ts_key = lambda t: t.get('legacy_house_pass_ts') or t.get('house_pass_ts') or 0
+        source_key = None
+        if model == 'ranked':
+            source_key = lambda t: t.get('pass_time_source') or 'schedule'
+        best = _select_headline_candidate(candidates, ts_key, source_key)
+        result[key] = best.get('run_key') or best.get('uid')
     return result
-
-
-def _train_shadow_summary(trains, now):
-    """Small, non-sensitive comparison payload enabled only by ``shadow=1``."""
-    legacy = _headline_run_keys(trains, now, 'legacy')
-    v2 = _headline_run_keys(trains, now, 'v2')
-    disagreements = [key for key in legacy if legacy[key] != v2[key]]
-    return {
-        'legacy_headlines': legacy,
-        'v2_headlines': v2,
-        'disagreement_rows': disagreements,
-        'disagreement_count': len(disagreements),
-    }
 
 
 _HOUSE_TRACK_ROWS = {
@@ -4312,8 +4342,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._static('/aircraft.html')
         elif parsed.path == '/trains':
             self._static('/trains.html')
-        elif parsed.path == '/train-shadow':
-            self._static('/train-shadow.html')
         elif parsed.path == '/lineside':
             self._static('/lineside.html')
         elif parsed.path == '/now':
@@ -4989,25 +5017,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json(data)
 
     def _trains(self, qs):
+        # The live API always serves the legacy projection. Alternative
+        # selection models (see _headline_run_keys) are still computed and
+        # scored in the background via _evidence_record_snapshot inside
+        # _rtt_build_trains for internal comparison — that doesn't require
+        # any public model switch, so none is exposed here.
         _nr_touch()
         try:
             data = _rtt_build_trains()
-            model = qs.get('model', [_TRAIN_MODEL_DEFAULT])[0].lower()
-            if model not in ('legacy', 'v2'):
-                self._respond(400, 'text/plain', b'model must be legacy or v2')
-                return
             trains = data.get('trains', [])
             result = {
-                'trains': ([_legacy_train_projection(t) for t in trains]
-                           if model == 'legacy' else trains),
+                'trains': [_legacy_train_projection(t) for t in trains],
                 'ts': data.get('ts'),
-                'model': model,
+                'model': _TRAIN_MODEL_DEFAULT,
             }
-            # Diagnostics are deliberately opt-in so ordinary browser polling
-            # stays as small as before. They contain run keys only, not feed
-            # credentials or raw TD history.
-            if qs.get('shadow', ['0'])[0] == '1':
-                result['shadow'] = _train_shadow_summary(trains, time.time())
             self._json(result)
         except Exception as e:
             self._respond(502, 'text/plain', str(e).encode())
