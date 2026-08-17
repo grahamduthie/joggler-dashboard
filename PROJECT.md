@@ -46,6 +46,12 @@ generalise — `dpkg -V` aborting silently, `mmc0` vs `mmc1`, corrupt `.pyc`), *
 (Pi hardware, build-from-scratch, endpoint health baselines), and the sections below for the
 dashboard itself.
 
+**Train timing/accuracy work (session 2026-08-17, extensive) lives in `TRAIN-ACCURACY-PLAN.md`,
+not here** — read its "Handoff" section at the top first. Short version: legacy 88.4% correct
+headline / v2 78.2% (v2 not promoted, `/api/trains` always serves legacy), a long run of live-
+reported bugs fixed at their data root, and Up Relief (v2) still the worst-performing row with an
+open, not-yet-understood remaining cause.
+
 ## Cloud production — live
 
 `transport-proxy.py` now runs on the GDX cloud VM, published at

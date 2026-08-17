@@ -1,5 +1,94 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
+## Handoff — end of session 2026-08-17
+
+Read this section first. Everything below it is the detailed, dated change log this was built
+from -- go there for the "why" behind any specific fix, this section is only the "what's true
+right now and what to check next."
+
+**Deployed and stable.** All fixes this session are committed, pushed to `main`, and live on
+`cloud.gdx.org.uk` (`joggler` under Supervisor, `127.0.0.1:8002`, published via
+`dashboard.gdx.org.uk`/`nearby.gdx.org.uk`). No pending code changes. `python3 -m unittest
+tests/test_train_accuracy.py tests/test_lineside_layout.py` is green (48 + 6 tests).
+
+**Current accuracy** (`curl -s https://nearby.gdx.org.uk/api/train-evidence`, 284 crossings scored
+as of this handoff): legacy 88.4% correct headline (14s median error), v2 78.2% (14s). **V2 must
+not be promoted.** `/api/trains` (the public API every page uses) always serves the legacy
+projection regardless -- this has been true since the "one visible model" consolidation earlier
+in the session and nothing since has changed it.
+
+**What actually shipped this session, roughly in order:** consolidated to one visible train model
+and one `/lineside` layout (removed the `/train-shadow` page and all public model/layout toggles;
+legacy-vs-v2 comparison keeps running invisibly in the background regardless); a `ranked` tiered-
+source candidate-selection prototype (`_select_headline_candidate`/`_SOURCE_TIER`) validated
+against the evidence log but **not wired into anything live**; full candidate-set + `td_unmatched`
+reason logging added to the evidence pipeline; found and fixed the `cutoff_pos` bug that silently
+dropped held-train TD positions before their own 600s tolerance could apply; made the ETA speed
+model train-class-aware (CIF booked speed + a new per-class-per-line learned-speed EWMA,
+`_ca_class_speed` in `berth_chain.json`); found and partially fixed Up Relief's dominant v2 failure
+mode (a near-house dwelling train falling through to generic `'scheduled'`/ineligible instead of
+`'passing'`); a run of live-reported misclassification bugs, each fixed at its actual data root
+rather than papered over in the frontend: ECS-as-freight (twice -- once for the `'5'` digit, once
+generalised to any digit CIF can positively identify as passenger stock), a held train's ETA being
+able to beat its own booked departure, light locomotives showing Elizabeth Line purple, the
+class-`'0'` exclusion being too broad in one direction (hid genuine light engines) then too narrow
+in the other (let rail-replacement buses onto the approach list), and a non-headcode TD descriptor
+(`'CAMS'`) that could have been synthesised into a fake predicted train; synced `/lineside`'s
+approach list to redraw on the same 5s cycle as the berth panel instead of lagging on `/api/trains`'s
+15s cycle; renamed generic `HELD`/`AT STN` to name the actual platform (`AT RDG`/`AT MAI`/`AT TWY`)
+when that's what's really happening. Full detail on every one of these is in the dated entries
+below, each written at the time with the live report that prompted it.
+
+**Open items for next time, roughly in priority order:**
+
+1. **Up Relief (v2) is still the worst-performing row by far** -- 48.6% correct (35/72), 106s
+   median error, versus 85-92% everywhere else. The `'passing'`-state fix helped (was 41.2% before
+   it) but did not fix the row. Don't assume it's understood: pull fresh `by_row` data
+   (`curl -s https://nearby.gdx.org.uk/api/train-evidence`) and, for the wrong crossings, the same
+   candidate-tracing method used to find the original bug (see "Verification commands" below) --
+   the dwelling-near-house fix and the misclassification fixes were different bugs on the same
+   row; there may be a third.
+2. **Unverified anomaly, needs checking, do not assume it's real or fixed:** `freight_class387` in
+   the class-speed learner (`berth_chain.json`'s `class_speed`) had 26/8 samples (Relief/Main)
+   before today's ECS-generalisation fix and 28/9 after it -- small further growth that a reading
+   of the current `_speed_class_bucket` code says shouldn't be possible (a resolved
+   `_TIMING_LOAD_CLASS` match returns `'passenger_class...'` unconditionally, before `is_passenger`
+   is even consulted). Either this is stale pre-fix EWMA data being misread, or there's a remaining
+   path into that bucket that hasn't been found. Worth five minutes with the same live-tracing
+   method before trusting either explanation.
+3. **Known, bounded, NOT yet fixed:** a train's first 1-2 TD sightings at certain Reading
+   platform/throat berths (e.g. 1694, 1702) are invisible to corridor synthesis (`no_direction` in
+   `td_unmatched`) until it takes a step where distance-based direction becomes measurable --
+   confirmed via 3T60's own trace the same day. Self-resolves within about one more berth-step, so
+   impact is bounded, not a permanent miss like the bugs that got fixed. A real fix (inferring
+   direction from the learned CA chain's dominant successor for these specific well-established
+   feeder berths) was scoped but deliberately not implemented -- it's a judgement call with real
+   edge-case risk (not every ambiguous berth is a guaranteed one-way feeder), left for the user to
+   decide is worth it rather than assumed.
+4. **The `ranked` model prototype is real and validated but sitting unused.** It directly
+   implements TRAIN-ACCURACY-PLAN section 7's own target design (tiered source ranking) and a
+   backtest showed it would have fixed v2's worst-magnitude wrong picks. It was deliberately not
+   promoted or even wired into the evidence pipeline as a third scored model, because Up Relief's
+   dominant failure turned out to be a different bug (state/eligibility, not ranking) -- worth
+   revisiting once item 1 above is actually understood, not before.
+
+**Verification commands:**
+```bash
+curl -s https://dashboard.gdx.org.uk/health
+curl -s https://nearby.gdx.org.uk/api/train-evidence | python3 -m json.tool   # overall + by_row + by_source
+ssh gduthie@cloud.gdx.org.uk 'sudo supervisorctl status joggler'
+ssh gduthie@cloud.gdx.org.uk 'cat /home/gduthie/joggler/train-evidence.jsonl' > /tmp/evidence.jsonl
+ssh gduthie@cloud.gdx.org.uk 'python3 -c "import json; d=json.load(open(\"/home/gduthie/joggler/berth_chain.json\")); print(d.get(\"class_speed\",{}))"'
+```
+For tracing one headcode's whole story (candidates it beat/lost to, why it was or wasn't
+synthesised): pull the evidence log as above, then `grep` for the headcode and parse the
+`decision`/`score`/`td_unmatched` JSON lines with Python -- this is the method that found every
+bug fixed this session; see the dated entries below for worked examples of the actual filter/print
+logic used each time. Deploy with `./deployment/cloud-deploy.sh` from the repo root after any
+change; it runs `python3 -m unittest tests/test_train_accuracy.py tests/test_lineside_layout.py`
+implicitly only in the sense that you should run it yourself first -- the deploy script itself
+does not.
+
 **2026-08-17 — a non-headcode TD descriptor could be synthesised into a fake predicted train.**
 Reported live: `CAMS` appeared at Reading P13 (D1/1694). Not a real UK headcode -- those are
 always digit+letter+2digits (`9U87`, `0Z47`, `3T60`); `CAMS` has no digit at all. Confirmed by its
