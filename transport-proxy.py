@@ -2308,6 +2308,29 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
         if not hc:
             continue
         train_hcs.add(hc)
+        # Physically confirmed still sitting in its own Twyford platform berth
+        # right now overrides any 'passed'/departed claim from a coarser
+        # source unconditionally -- RTT's own at_station computation (and the
+        # observed_pass_ts it derives from a minute-precision actual
+        # departure time) has no live berth confirmation behind it and can
+        # fire before the train has genuinely left. Reported live 2026-08-17:
+        # 9U97 (Up Relief) showed passed while still at Twyford, "only
+        # passing now" -- the real TD step out of the platform came ~35s
+        # after the state had already flipped away from at_station. Scoped
+        # to STOP calls: a genuinely non-stopping service transiting the
+        # same track circuit isn't "at the platform" in the sense that
+        # matters here.
+        pos_now = td_pos.get(hc)
+        if (t.get('call_type') == 'STOP' and pos_now
+                and now - pos_now['ts'] < 300
+                and pos_now['to'] == _TWY_PLATFORM_BERTH.get((t.get('track'), t.get('direction')))):
+            t['at_station'] = True
+            t['observed_pass_ts'] = 0
+            fallback_ts = t.get('forecast_pass_ts') or t.get('scheduled_pass_ts') or 0
+            if fallback_ts:
+                t['display_pass_ts'] = int(fallback_ts)
+                t['house_pass_ts'] = int(fallback_ts)
+                t['pass_time_source'] = 'rtt_forecast' if t.get('forecast_pass_ts') else 'schedule'
         h = house_evts.get(hc)
         if h:
             expected = t.get('house_pass_ts') or 0
@@ -3080,6 +3103,28 @@ def _td_berth_rejects_station(binfo, age_s):
     return distance is not None and abs(distance) > 0.5
 
 
+# Twyford's own platform berth per line (dwell-EWMA confirmed, see
+# reference-smart-bplan.md): P4=1630 (Up Relief), P3=1637 (Down Relief),
+# P2=1618 (Up Main), P1=1655 (Down Main). A train sitting in its own
+# platform berth has definitionally not passed the house yet, regardless of
+# what any distance/timestamp-based evidence claims -- see
+# _at_twy_platform_berth's use in _finalise_train_state.
+_TWY_PLATFORM_BERTH = {
+    ('Relief', 'up'): '1630',
+    ('Relief', 'down'): '1637',
+    ('Main', 'up'): '1618',
+    ('Main', 'down'): '1655',
+}
+
+
+def _at_twy_platform_berth(t):
+    berth = t.get('td_berth')
+    age = t.get('td_berth_age')
+    if not berth or age is None or age >= 300:
+        return False
+    return berth == _TWY_PLATFORM_BERTH.get((t.get('track'), t.get('direction')))
+
+
 def _finalise_train_state(t, now):
     """Derive one explicit operational state for /api/trains.
 
@@ -3092,6 +3137,16 @@ def _finalise_train_state(t, now):
     source = t.get('pass_time_source') or 'schedule'
     if t.get('cancelled'):
         state = 'cancelled'
+    elif _at_twy_platform_berth(t):
+        # Physically still sitting in its own Twyford platform berth. This
+        # must override every other signal unconditionally -- a TD zero-
+        # crossing firing on the very step out of the platform, or a coarse
+        # RTT actual timestamp, can otherwise mark 'passed' while the train
+        # is still at the platform (reported live 2026-08-17, 9U97 on the
+        # Up Relief: shown passed while still at Twyford, "only passing
+        # now"). Checked ahead of at_station too since the flag it sets can
+        # itself have been wrongly cleared upstream by the same bad evidence.
+        state = 'at_station'
     elif t.get('at_station'):
         state = 'at_station'
     elif observed_ts and observed_ts <= now:

@@ -89,6 +89,33 @@ change; it runs `python3 -m unittest tests/test_train_accuracy.py tests/test_lin
 implicitly only in the sense that you should run it yourself first -- the deploy script itself
 does not.
 
+**Post-handoff addendum, same evening — a train still dwelling at its own Twyford platform berth
+could show as passed.** Reported live: 9U97 (Up Relief) dropped off "next past the house" and
+into the passing log while still at Twyford -- "it is only passing now". User's own diagnosis,
+confirmed correct: a train must not show as passed while still occupying its own platform berth
+(1630 for Up Relief; by the same logic 1637/Down Relief, 1618/Up Main, 1655/Down Main). Root cause
+traced in the evidence log: RTT's own `at_station` computation, and the `observed_pass_ts` it
+derives from a minute-precision actual-departure timestamp (+15s), have no live berth confirmation
+behind them and can flip a STOP call away from `at_station` before the train has genuinely left --
+confirmed in 9U97's own trace, `at_station` flipped to `'passing'` roughly 35s before the real TD
+step out of the platform berth arrived. Two-part fix, because the state label alone isn't what the
+legacy-projection frontend (all three pages, since the "one visible model" consolidation) actually
+reads:
+- `_td_enrich_trains` (early in the per-train loop, before any 'passed' signal is trusted): if live
+  TD confirms the train is still in its own platform berth (fresh, `call_type=='STOP'`), force
+  `at_station=True`, clear `observed_pass_ts`, and fall back `display_pass_ts`/`house_pass_ts` to
+  the RTT forecast/schedule instead -- this is the fix that actually matters, since
+  `legacy_house_pass_ts` (what `/api/trains` serves) is captured right after this function returns.
+  A genuine TD crossing, once it actually happens, still overrides this precisely and correctly --
+  this only suppresses the premature claim, not real evidence.
+- `_finalise_train_state`: the same platform-berth check, checked ahead of every other signal
+  including the `at_station` flag itself (which the bug had already cleared upstream), for the
+  `movement_state` label v2 diagnostics/scoring reads.
+Both keyed off a new `_TWY_PLATFORM_BERTH`/`_at_twy_platform_berth`, using confirmed dwell-EWMA
+platform berth codes from `reference-smart-bplan.md`. Not yet re-verified against a fresh live
+crossing post-deploy -- worth checking next time a Twyford-originating stopper is observed
+first-hand, on any of the four lines, not just Up Relief.
+
 **2026-08-17 — a non-headcode TD descriptor could be synthesised into a fake predicted train.**
 Reported live: `CAMS` appeared at Reading P13 (D1/1694). Not a real UK headcode -- those are
 always digit+letter+2digits (`9U87`, `0Z47`, `3T60`); `CAMS` has no digit at all. Confirmed by its

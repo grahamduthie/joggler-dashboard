@@ -92,6 +92,64 @@ class TrainAccuracyTests(unittest.TestCase):
         train = {'display_pass_ts': 954, 'movement_state': 'passing'}
         self.assertTrue(proxy._v2_headline_eligible(train, 1_000))
 
+    def test_at_twy_platform_berth_matches_each_lines_own_platform(self):
+        fresh = {'td_berth_age': 10}
+        self.assertTrue(proxy._at_twy_platform_berth(
+            {**fresh, 'td_berth': '1630', 'track': 'Relief', 'direction': 'up'}))
+        self.assertTrue(proxy._at_twy_platform_berth(
+            {**fresh, 'td_berth': '1637', 'track': 'Relief', 'direction': 'down'}))
+        self.assertTrue(proxy._at_twy_platform_berth(
+            {**fresh, 'td_berth': '1618', 'track': 'Main', 'direction': 'up'}))
+        self.assertTrue(proxy._at_twy_platform_berth(
+            {**fresh, 'td_berth': '1655', 'track': 'Main', 'direction': 'down'}))
+        # Wrong platform for this line/direction, or stale, or absent.
+        self.assertFalse(proxy._at_twy_platform_berth(
+            {**fresh, 'td_berth': '1628', 'track': 'Relief', 'direction': 'up'}))
+        self.assertFalse(proxy._at_twy_platform_berth(
+            {'td_berth': '1630', 'td_berth_age': 400, 'track': 'Relief', 'direction': 'up'}))
+        self.assertFalse(proxy._at_twy_platform_berth({'track': 'Relief', 'direction': 'up'}))
+
+    def test_finalise_state_forces_at_station_while_at_platform_berth(self):
+        # A stale/coarse 'passed' claim (observed_ts already in the past)
+        # must not win while the train is confirmed still at its own
+        # platform berth -- this is the state-derivation half of the 9U97
+        # fix; _td_enrich_trains's earlier guard is the one that stops the
+        # bad observed_pass_ts/house_pass_ts from being trusted in the
+        # first place (see test_td_enrich_keeps_a_stop_at_station... below).
+        train = {'td_berth': '1630', 'td_berth_age': 10, 'track': 'Relief',
+                 'direction': 'up', 'observed_pass_ts': 500,
+                 'display_pass_ts': 500, 'pass_time_source': 'rtt_actual'}
+        proxy._finalise_train_state(train, 1_000)
+        self.assertEqual(train['movement_state'], 'at_station')
+
+    def test_td_enrich_keeps_a_stop_at_station_while_still_at_its_platform(self):
+        # Reproduces the actual 9U97 bug: a coarse (minute-precision) RTT
+        # actual departure timestamp had already been turned into a past
+        # observed_pass_ts before this function ever sees live TD data --
+        # if TD still shows the train sitting in its own platform berth, that
+        # premature signal must be discarded in favour of the RTT forecast/
+        # schedule (a genuine TD crossing later corrects it precisely, once
+        # it actually happens -- this only stops the early false claim).
+        old_buffer = None
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '1642', 'to': '1630',
+                                     'descr': '9U97', 'ts': 990}]
+        try:
+            train = {'headcode': '9U97', 'direction': 'up', 'track': 'Relief',
+                     'call_type': 'STOP', 'at_station': False,
+                     'observed_pass_ts': 985, 'display_pass_ts': 985,
+                     'house_pass_ts': 985, 'forecast_pass_ts': 1_200,
+                     'scheduled_pass_ts': 1_190, 'pass_time_source': 'rtt_actual'}
+            proxy._td_enrich_trains([train], 1_000)
+            self.assertTrue(train['at_station'])
+            self.assertEqual(train['observed_pass_ts'], 0)
+            self.assertEqual(train['house_pass_ts'], 1_200)
+            self.assertEqual(train['pass_time_source'], 'rtt_forecast')
+        finally:
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
     def test_held_berth_eta_cannot_beat_the_trains_own_booked_departure(self):
         # Reported live 2026-08-17: 9U87 was confirmed sitting at Reading
         # (its ORIGIN, D1/1696, 5.1 mi out) 144s after being first seen there
