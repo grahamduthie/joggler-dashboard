@@ -1074,7 +1074,13 @@ function fetchTd() {
     dot.classList.remove('stale');
     dot.classList.add('on');
     setTimeout(() => dot.classList.remove('on'), 450);
-    renderPanel();
+    // "NEXT PAST THE HOUSE" (renderAppr, via render()) reads this same
+    // tdPos for its sighted/passed detection, but was only ever re-rendered
+    // on fetchTrains's slower 15s cycle -- so it visibly lagged the berth
+    // panel above, which redraws every 5s here. Render everything on this
+    // tick too so both move together; the underlying /api/trains data
+    // itself still only refreshes every 15s (unchanged).
+    render();
     renderSignals();
   }).catch(() => {});
 }
