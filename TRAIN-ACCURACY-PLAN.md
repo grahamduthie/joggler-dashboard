@@ -1,5 +1,40 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
+**2026-08-17 — Up Relief root cause found and fixed, via the candidate-logging instrumentation
+added earlier the same day.** Once real crossings had accumulated with `candidates` data, every
+v2-wrong Up Relief pick showed the identical shape: the correct train sitting at TD berth `1630`
+(Twyford P4, `td_dist_mi≈0.1` -- essentially at the house), correctly track-confirmed, but with
+`movement_state: 'scheduled'` and `eligible: False`, so v2 fell back to a candidate 5+ miles away
+sourced from a stale `rtt_forecast`/`schedule` entry (300-950s errors).
+
+Root cause in `_finalise_train_state`: `_berth_eta_to_house_s` credits at most one berth-step of
+dwell as progress; at a near-house platform berth the remaining travel time is tiny (a few seconds
+at line speed), so a train that's dwelt there only slightly longer than that produces a small
+*negative* ETA well before it's dwelt long enough to be flagged `held`. That negative value is too
+large-magnitude for the `±15/+20s` `'passing'` window, but not old enough for the `<-60s` `'stale'`
+threshold -- it fell through every specific branch to the generic `'scheduled'` state, which
+`_v2_headline_eligible` then discarded via its `ts >= now - 15` fallback. Legacy never hit this:
+its eligibility rule doesn't gate on `movement_state` at all, which is exactly why only v2 (and
+disproportionately Up Relief, whose Twyford platform berth sits precisely in this dead zone with
+real stopping-service dwell time) showed the failure.
+
+Fixed with two changes, not one -- reclassifying the state alone wasn't sufficient, since
+`_v2_headline_eligible`'s generic timestamp check would still have discarded it via the same
+overshot `display_pass_ts`:
+1. `_finalise_train_state` gained a branch: a fresh (`td_berth_age<150`) `td_eta`-sourced position
+   within 0.5 mi of the house becomes `'passing'` regardless of the ETA's exact sign.
+2. `_v2_headline_eligible` now treats `'passing'` as always-eligible, alongside
+   `at_station`/`held`/`held_at_red` -- the categorical state is more trustworthy here than a raw
+   timestamp the formula above is known to occasionally overshoot.
+
+Also fixed the same day: the per-class speed learner's `_speed_class_bucket` was classifying
+empty-stock moves of recognised EMU/IET classes (e.g. a Class 387 running under a 5xxx ECS
+headcode) as freight, because its passenger/freight split originally used a crude `hc[:1]`
+heuristic that a recognised CIF timing-load class (345/387/800/802) now overrides -- no freight
+service runs that stock, so trusting the class number can't misfire the other way. Confirmed live
+in `berth_chain.json` before the fix: `freight_class387` had accumulated 26 and 8 samples that
+should have been in `passenger_class387`.
+
 Status: **Core correctness implementation is deployed to cloud production. V2 is currently less
 accurate than legacy and must not be promoted.**
 

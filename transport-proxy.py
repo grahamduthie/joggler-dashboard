@@ -1882,12 +1882,19 @@ def _speed_class_bucket(hc, is_passenger):
     within each side so the learner and the CIF-speed fallback name the same
     fleets the same way, e.g. Elizabeth Line 345 vs GWR 387 vs IET 800/802.
     """
-    base = 'freight' if is_passenger is False else 'passenger'
     pax = _cif_pax_best(hc) if hc else None
+    cls = _TIMING_LOAD_CLASS.get((pax or {}).get('timing_load') or '')
+    if cls:
+        # A recognised passenger EMU/IET class number is definitive, and
+        # trusted over `is_passenger`'s crude hc[:1] heuristic: an empty-stock
+        # move of one of these units (e.g. a 5xxx ECS headcode) is still
+        # physically the same unit, and what matters for speed-learning is
+        # its real running characteristics, not whether it's carrying
+        # passengers on this particular working. No freight service runs
+        # 345/387/800/802 stock, so this can't collide with genuine freight.
+        return 'passenger_class' + cls[0].split()[-1]   # 'passenger_class345'
+    base = 'freight' if is_passenger is False else 'passenger'
     if pax:
-        cls = _TIMING_LOAD_CLASS.get(pax.get('timing_load') or '')
-        if cls:
-            return base + '_class' + cls[0].split()[-1]   # 'passenger_class345'
         bucket = _cif_power_bucket(pax)
         if bucket:
             return base + '_' + bucket                     # 'freight_diesel'
@@ -3021,6 +3028,22 @@ def _finalise_train_state(t, now):
     elif (t.get('td_berth_age') is not None and t.get('td_berth_age') < 150
           and t.get('td_eta_s') is not None and t.get('td_eta_s') > 0):
         state = 'approaching'
+    elif (source == 'td_eta' and t.get('td_dist_mi') is not None
+          and abs(t['td_dist_mi']) < 0.5
+          and t.get('td_berth_age') is not None and t.get('td_berth_age') < 150):
+        # Physically at/just past the house with a fresh TD fix, but not
+        # caught by 'approaching' above. _berth_eta_to_house_s credits at
+        # most one berth-step of dwell as progress; at a near-house platform
+        # berth (e.g. Twyford P4, dist_mi~0.1) the tiny remaining travel
+        # time is smaller than a typical dwell, so that formula can return a
+        # small negative ETA well before the train has dwelt long enough to
+        # be flagged 'held' -- too negative for the ±15/+20s window just
+        # below, not old enough for 'stale'. It fell through to 'scheduled'
+        # and _v2_headline_eligible discarded it as too-far-past, letting a
+        # stale/distant candidate win the row instead (see the Up Relief
+        # diagnosis in TRAIN-ACCURACY-PLAN.md). Physical proximity + a fresh
+        # fix is stronger evidence here than that ETA's exact sign.
+        state = 'passing'
     elif display_ts and source in ('td_eta', 'rtt_forecast') and -15 <= display_ts - now <= 20:
         state = 'passing'
     elif display_ts and display_ts < now - 60:
@@ -3100,7 +3123,11 @@ def _v2_headline_eligible(t, now):
     state = t.get('movement_state')
     if state == 'passed':
         return now - ts <= 20
-    if state in ('at_station', 'held', 'held_at_red'):
+    # 'passing' can carry a pass_ts thrown off by the near-house dwell-crediting
+    # quirk documented on _finalise_train_state's 'passing' branches -- the
+    # categorical state is more trustworthy here than the raw timestamp compare
+    # below, same reasoning as at_station/held/held_at_red.
+    if state in ('at_station', 'held', 'held_at_red', 'passing'):
         return True
     return ts >= now - 15
 

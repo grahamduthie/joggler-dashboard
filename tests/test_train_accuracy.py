@@ -72,6 +72,26 @@ class TrainAccuracyTests(unittest.TestCase):
         self.assertEqual(post_house['movement_state'], 'passed')
         self.assertEqual(post_house['passed_evidence'], 'td_post_house')
 
+    def test_near_house_dwelling_train_becomes_passing_not_scheduled(self):
+        # Reproduces the Up Relief bug: a train dwelling at a near-house
+        # platform berth (e.g. Twyford P4, td_dist_mi~0.1) for longer than
+        # its own tiny remaining travel time produces a small negative ETA
+        # from _berth_eta_to_house_s's age-crediting formula -- too negative
+        # for the +-15/+20s 'passing' window, not old enough for 'stale'
+        # (<-60s), and previously fell through to the generic 'scheduled'
+        # state, which _v2_headline_eligible then discarded as too-far-past.
+        train = {'display_pass_ts': 954, 'observed_pass_ts': 0,
+                 'pass_time_source': 'td_eta', 'direction': 'up',
+                 'td_dist_mi': 0.1, 'td_berth_age': 95, 'td_eta_s': -46}
+        proxy._finalise_train_state(train, 1_000)
+        self.assertEqual(train['movement_state'], 'passing')
+
+    def test_v2_eligible_treats_passing_as_always_eligible(self):
+        # Even though its own pass_ts fails the generic "within 15s" check
+        # below -- the categorical state is the more trustworthy signal here.
+        train = {'display_pass_ts': 954, 'movement_state': 'passing'}
+        self.assertTrue(proxy._v2_headline_eligible(train, 1_000))
+
     def test_fresh_remote_td_berth_overrides_rtt_station_status(self):
         # Mirrors 2P85: RTT retained AT_PLATFORM, while TD showed D1/1652
         # two miles away and held at a signal.
@@ -211,6 +231,21 @@ class TrainAccuracyTests(unittest.TestCase):
             proxy._cif_pax_best = lambda hc: None
             self.assertEqual(proxy._speed_class_bucket('1A00', True), 'passenger_other')
             self.assertEqual(proxy._speed_class_bucket('6A01', False), 'freight_other')
+        finally:
+            proxy._cif_pax_best = old_pax_best
+
+    def test_speed_class_bucket_trusts_recognised_class_over_headcode_prefix(self):
+        # A 5xxx ECS move of a Class 387 unit reads as freight by headcode
+        # prefix alone, but it's the same physical unit as its passenger
+        # workings -- CIF's own class number must win so the speed learner
+        # doesn't average a fast EMU's samples into the freight bucket.
+        old_pax_best = proxy._cif_pax_best
+        try:
+            proxy._cif_pax_best = lambda hc: {'timing_load': '387', 'power_type': 'EMU'}
+            self.assertEqual(proxy._speed_class_bucket('5387', False), 'passenger_class387')
+            self.assertEqual(
+                proxy._speed_class_bucket('5387', False),
+                proxy._speed_class_bucket('2P44', True))
         finally:
             proxy._cif_pax_best = old_pax_best
 
