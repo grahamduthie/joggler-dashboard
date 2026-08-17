@@ -51,10 +51,10 @@ The dashboard automatically adapts to the display it runs on:
 The system has two parts:
 
 ```
-Raspberry Pi (172.16.10.136)           O2 Joggler (172.16.10.168)
+GDX cloud VM                             O2 Joggler (172.16.10.168)
 ────────────────────────────           ─────────────────────────
-transport-proxy.py :5001               Chromium kiosk
-  • serves dashboard.html      ────▶     http://172.16.10.136:5001/
+transport-proxy.py :8002 (loopback)     Chromium kiosk
+  • serves dashboard.html      ────▶     https://dashboard.gdx.org.uk/
   • National Rail API proxy
   • ADS-B / flight route proxy  shutdown-server.py :9999
   • Bus departures + vehicles     (power button — Joggler only)
@@ -63,13 +63,14 @@ transport-proxy.py :5001               Chromium kiosk
   • Airline logos / aircraft info  (raw touchscreen → XTest)
   • Static file serving
 
-cast-server.py :9998
-  (Chromecast discovery + control)
+Joggler-local helpers
+  • cast-server.py :9998 (Chromecast discovery + control)
+  • shutdown-server.py :9999 (power button)
 ```
 
 The Joggler is a **thin client**: it runs Chromium in kiosk mode and nothing else. All API
-proxying and data fetching happen on the Pi. The Pi serves the dashboard HTML directly, so
-`/api/...` URLs are relative and work correctly from any browser on the LAN.
+proxying and data fetching happen on the cloud VM. Nginx publishes the cloud backend over HTTPS,
+so relative `/api/...` URLs work from the Joggler and any other browser.
 
 ---
 
@@ -79,8 +80,8 @@ proxying and data fetching happen on the Pi. The Pi serves the dashboard HTML di
 dashboard.html          Single-file SPA — all views, CSS, JS
 aircraft.html           Standalone full-screen aircraft SPA (served at /aircraft)
 trains.html             Standalone full-screen trains SPA (served at /trains)
-transport-proxy.py      Pi backend: all API proxying + static file serving
-cast-server.py          Pi: Chromecast discovery and control (port 9998)
+transport-proxy.py      Cloud backend: all API proxying + static file serving
+cast-server.py          Joggler-local Chromecast discovery/control (port 9998)
 shutdown-server.py      Joggler: graceful power-off via power button (port 9999)
 touch-bridge.py         Joggler: raw touchscreen events → X11 mouse events
 hive-setup.py           One-time interactive Hive auth setup
@@ -104,31 +105,36 @@ icons/                  Weather icons (MAm TV set, 92 PNGs) + station/camera log
 Two separate setup guides:
 
 - **[JOGGLER-SETUP.md](JOGGLER-SETUP.md)** — Flash openframe-linux, install packages, configure
-  the Joggler as a thin kiosk client pointing at the Pi.
+  the Joggler as a thin kiosk client pointing at `https://dashboard.gdx.org.uk/`.
 
-- **[PI-SETUP.md](PI-SETUP.md)** — Set up the Raspberry Pi backend: install Python dependencies,
-  deploy files, configure credentials, and start the systemd service.
+- **[PI-SETUP.md](PI-SETUP.md)** — Legacy Pi setup and the temporary rollback backend. It is no
+  longer the normal production deployment target.
 
 See **[PROJECT.md](PROJECT.md)** for the full technical reference — API details, rate limits,
 data formats, deployment commands, and key gotchas.
+
+The live production backend is on the GDX cloud VM at `dashboard.gdx.org.uk` and
+`nearby.gdx.org.uk`. The Pi backend remains available temporarily as the documented rollback path.
+Read **[CLOUD-MIGRATION-PLAN.md](CLOUD-MIGRATION-PLAN.md)** before changing cloud deployment,
+DNS, Nginx, kiosk URLs, or the public Dashboard/Nearby routes.
 
 ---
 
 ## Quick deployment (day-to-day)
 
 ```bash
-# Deploy dashboard.html to Pi and hard-reload the Joggler
-scp dashboard.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
-  ssh of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
+# Deploy code and static assets to cloud production, restart the Supervisor service,
+# and verify its loopback health endpoint. Protected runtime state is not overwritten.
+./deployment/cloud-deploy.sh
 
-# Restart transport-proxy on Pi (after changing transport-proxy.py)
-ssh gduthie@172.16.10.136 \
-  'kill $(pgrep -f transport-proxy) 2>/dev/null; \
-   nohup python3 /home/gduthie/twyford-dashboard/transport-proxy.py \
-     >> /home/gduthie/twyford-dashboard/dashboard.log 2>&1 & disown; echo started'
+# For a front-end-only change, then hard-reload the Joggler to pick it up immediately.
+ssh of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
 ```
 
 Use `ctrl+shift+r` (hard reload), not F5 — F5 may serve cached CSS.
+
+Do not run `rsync --delete` against `/home/gduthie/joggler`: that directory contains cloud-only
+credentials, tokens, learned railway state, caches and calibration data.
 
 ---
 

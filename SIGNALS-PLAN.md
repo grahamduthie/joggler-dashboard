@@ -123,7 +123,8 @@ Key facts (from https://wiki.openraildata.com/index.php/Decoding_S-Class_Data):
   so it just needs the berth code.
 - Existing raw `signals` dict in `/api/td-live` unchanged (now also carries `src`).
 
-Deployed to the Pi (2026-07-08); learning happens automatically whenever the NR STOMP
+Originally deployed to the Pi (2026-07-08); the same learner now runs in cloud production.
+Learning happens automatically whenever the NR STOMP
 connection is up — i.e. whenever /trains or /lineside is being viewed, same as the existing
 on-demand connection behaviour. No permanent-connection flag needed since there's no
 fixed corpus-collection window to satisfy.
@@ -153,16 +154,17 @@ fixed corpus-collection window to satisfy.
 
 ## Operational constraints
 
-- **Deployment**: transport-proxy.py runs on the Raspberry Pi (172.16.10.136, user
-  `gduthie`) at `/home/gduthie/twyford-dashboard/`, as systemd service
-  `twyford-dashboard`. Deploy = `scp transport-proxy.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/`
-  then `ssh gduthie@172.16.10.136 'sudo systemctl restart twyford-dashboard'`. Logs in
-  `dashboard.log` there. See `project-joggler-status` memory for full procedure.
+- **Deployment**: normal production is the cloud VM (`cloud.gdx.org.uk`, user `gduthie`),
+  application directory `/home/gduthie/joggler/`, Supervisor service `joggler`, backend
+  `127.0.0.1:8002`. Release with `./deployment/cloud-deploy.sh`; see
+  `CLOUD-MIGRATION-PLAN.md` for verification and rollback. The Pi dashboard is rollback-only,
+  so do not use its old `scp`/systemd procedure for normal releases.
 - **NR STOMP is ON-DEMAND**: the proxy connects only while /trains or /lineside pages are
   polling, and disconnects after 90 s idle (`_nr_touch()`). This is fine under the revised
   design — learning just happens whenever the feed is up; there's no fixed window it must
   span, unlike the old plan's 2-3 day requirement.
-- `signals_learned.json` persists on the Pi next to `berth_chain.json`; small (one entry per
+- `signals_learned.json` persists in the active application directory next to `berth_chain.json`;
+  the cloud copy is production state. It is small (one entry per
   step key/candidate bit), no rotation needed.
 
 ## Phase 4 — Display on /lineside (shipped 2026-07-08)
@@ -189,8 +191,9 @@ existing cell layout (`CELLS`/`BERTH_CELL`/`LINE_OF`) instead of computing signa
   the second dot just appears organically once the backend has real evidence, same
   grey→tentative→confirmed progression as the primary one.
 - Joggler constraints: plain SVG shapes only, no CSS filters (`--disable-gpu`, Atom CPU).
-  Verified with a headless-Chrome screenshot against the live Pi.
-- Deploy is scp of lineside.html only, no service restart (static file).
+  Historically verified with a headless-Chrome screenshot against the live Pi.
+- Historical Pi release note: this was once an `scp` of `lineside.html` with no restart. Current
+  releases use `./deployment/cloud-deploy.sh`; force-reload the Joggler after the release.
 
 Acceptance: with a train visibly approaching on /lineside, the signal behind it flicks
 red within ~5 s of the train symbol passing it, and clears back green shortly after.
@@ -207,7 +210,7 @@ A bidirectional berth shows two dots, one per direction, once both have evidence
 
 - Once a step key has been `confirmed` for a long stable period, optionally snapshot it into
   a committed `signals.json` as a seed/fallback (not required — `signals_learned.json` on the
-  Pi already survives restarts — but useful if the Pi's disk is ever wiped, or to publish the
+  cloud runtime copy already survives restarts — but useful if its state is ever lost, or to publish the
   decode).
 - Publish the validated D1/D6 decode on the Open Rail Data wiki (they ask decoders to share).
 - Delete `td_correlate.py` once Phase 4 is confirmed working end-to-end.

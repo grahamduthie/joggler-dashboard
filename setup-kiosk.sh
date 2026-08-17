@@ -122,7 +122,7 @@ exec chromium \
   --js-flags="--max-old-space-size=80" \
   --window-position=0,0 \
   --window-size=800,480 \
-  http://172.16.10.136:5001/
+  https://dashboard.gdx.org.uk/
 EOF
 chmod +x /home/of/kiosk.sh
 

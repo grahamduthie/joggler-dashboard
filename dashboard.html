@@ -3684,20 +3684,8 @@ applyProfile();
   }
 
   function fetchWeather() {
-    var url = 'https://api.open-meteo.com/v1/forecast' +
-      '?latitude=51.474&longitude=-0.861' +
-      '&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,' +
-      'wind_gusts_10m,relative_humidity_2m,apparent_temperature,' +
-      'precipitation,cloud_cover,surface_pressure,uv_index,is_day,' +
-      'dew_point_2m,visibility' +
-      '&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,pressure_msl' +
-      '&daily=temperature_2m_max,temperature_2m_min,weather_code,' +
-      'sunrise,sunset,precipitation_probability_max,precipitation_sum,' +
-      'wind_speed_10m_max,wind_direction_10m_dominant,' +
-      'apparent_temperature_max,apparent_temperature_min,uv_index_max' +
-      '&timezone=Europe%2FLondon&past_days=1&forecast_days=7';
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', url, true);
+    xhr.open('GET', '/api/weather', true);
     xhr.onload = function() {
       if (xhr.status !== 200) { showWeatherError(); return; }
       try {
@@ -3910,6 +3898,13 @@ applyProfile();
 
   function radioResolveAndPlay() {
     var st = RADIO_STATIONS[currentStationIdx];
+    // The remaining playlist entries are Bauer streams. Their third-party
+    // playlist URLs now resolve to dead/tokenised endpoints, so fail clearly
+    // instead of leaving the player buffering indefinitely on the HTTPS app.
+    if (st.streamPlaylist) {
+      setStatus('error', 'This Bauer stream is currently unavailable online.');
+      return;
+    }
     if (st.streamUrl) {
       radioStreamUrl = st.streamUrl;
       radioStartPlayback();
@@ -3929,14 +3924,19 @@ applyProfile();
   }
 
   function radioStartPlayback() {
+    // Keep the original URL for Chromecast, but relay HTTP-only browser audio
+    // through our same-origin HTTPS endpoint to avoid mixed-content blocking.
+    var playbackUrl = radioStreamUrl.indexOf('http://') === 0
+      ? '/api/radio/stream?url=' + encodeURIComponent(radioStreamUrl)
+      : radioStreamUrl;
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-    if (radioStreamUrl.indexOf('.m3u8') !== -1 && typeof Hls !== 'undefined' && Hls.isSupported()) {
+    if (playbackUrl.indexOf('.m3u8') !== -1 && typeof Hls !== 'undefined' && Hls.isSupported()) {
       hlsInstance = new Hls({ enableWorker: false, lowLatencyMode: false });
-      hlsInstance.loadSource(radioStreamUrl);
+      hlsInstance.loadSource(playbackUrl);
       hlsInstance.attachMedia(audio);
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() { audio.play(); });
     } else {
-      audio.src = radioStreamUrl;
+      audio.src = playbackUrl;
       audio.load();
       audio.play();
     }
@@ -4184,6 +4184,11 @@ applyProfile();
 
   function castPlay(name) {
     var st = RADIO_STATIONS[currentStationIdx];
+    if (st.streamPlaylist) {
+      document.getElementById('cast-status-msg').textContent =
+        'This Bauer stream is currently unavailable online.';
+      return;
+    }
     document.getElementById('cast-status-msg').textContent = 'Starting cast…';
     document.getElementById('cast-device-list').innerHTML = '';
 

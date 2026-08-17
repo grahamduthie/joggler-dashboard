@@ -1,9 +1,16 @@
-# Twyford Dashboard — Raspberry Pi Setup Guide
+# Twyford Dashboard — legacy Pi rollback guide
 
-How to set up the Raspberry Pi as the dashboard backend from scratch.
+This is the historical build-from-scratch guide for the temporary Pi rollback backend. Production
+now runs on the GDX cloud VM at `https://dashboard.gdx.org.uk/` and
+`https://nearby.gdx.org.uk/`; do not use these instructions for ordinary deployments. TrainPi
+continues to run on the Pi and is out of scope for this guide.
 
-The Pi serves `dashboard.html` and all API endpoints. The Joggler (and any other browser
-on the LAN) connects to `http://172.16.10.136:5001/`.
+Use this guide only to recover the Pi dashboard during the observation period. The current cloud
+release/backup/retirement procedure is in `CLOUD-MIGRATION-PLAN.md`.
+
+**Do not run the Pi dashboard concurrently with cloud production.** Both use the same National
+Rail durable TD STOMP subscription identity and will split berth messages. To roll back, stop the
+cloud `joggler` Supervisor service first, then start `twyford-dashboard` on the Pi.
 
 ---
 

@@ -56,7 +56,7 @@ except: pass
     --window-position=0,0 \
     --window-size=800,480 \
     --remote-debugging-port=9222 \
-    http://172.16.10.136:5001/
+    https://dashboard.gdx.org.uk/
 
   echo "$(date): Chromium exited (code $?), restarting in 5s" >> /tmp/kiosk-watchdog.log
   sleep 5

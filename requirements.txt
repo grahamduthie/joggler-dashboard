@@ -1,0 +1,5 @@
+# Runtime dependency for National Rail STOMP movement and TD feeds.
+stomp.py>=8.1,<9
+
+# Used by the interactive Hive re-authentication utility.
+requests>=2.31,<3

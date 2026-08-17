@@ -4,18 +4,20 @@ This documents every railway data source the Twyford dashboard uses: the credent
 needs, where that credential lives, what data it provides, how to call it, and the
 non-obvious gotchas. The house is ~200 m east of **Twyford** station (Great Western Main
 Line), on the Up/Down Relief crossover. Four running lines pass it: **Up Main, Down Main,
-Up Relief, Down Relief**. All of this is consumed by `transport-proxy.py` on the Pi.
+Up Relief, Down Relief**. All of this is consumed by `transport-proxy.py` on the GDX cloud VM.
 
 > **Credential policy:** secret values are NOT written in this file (it is committed to a
 > GitHub repo). They live in `.env` / `nr-credentials.env`, which are **gitignored**. To read
-> a live value: `cut -d= -f2- .env | …` or just read the file — a Claude working in this repo
-> (Mac or Pi) can open them. The one exception is the Darwin token, which is already hard-coded
-> in `transport-proxy.py` (see §3), so it is repeated here.
+> a live value: read the mode-600 cloud `.env` only when necessary. Never commit, display or log
+> it. Darwin, BODS and other application secrets are also loaded from that file.
 
 Credential files:
-- **Pi:** `/home/gduthie/twyford-dashboard/.env` (mode 600) — keys: `BODS_API_KEY`,
-  `LASTFM_API_KEY`, `RTT_REFRESH_TOKEN`, `NR_USERNAME`, `NR_PASSWORD`.
-- **Mac (this repo):** `nr-credentials.env` — `NR_USERNAME`, `NR_PASSWORD`, `RTT_REFRESH_TOKEN`.
+- **Cloud production:** `/home/gduthie/joggler/.env` (mode 600) — keys include `BODS_API_KEY`,
+  `LASTFM_API_KEY`, `RTT_REFRESH_TOKEN`, `NR_USERNAME`, `NR_PASSWORD`, `NR_TOKEN`, `BUS_APP_ID`
+  and `BUS_APP_KEY`.
+- **Pi rollback only:** `/home/gduthie/twyford-dashboard/.env` (mode 600).
+- **Mac (this repo):** `nr-credentials.env` is legacy/development-only; do not treat it as the
+  production source of truth.
 - Loaded at startup by `_load_env()` in `transport-proxy.py`.
 
 ---
@@ -79,7 +81,7 @@ Two completely different access methods share the same credentials:
 | | |
 |---|---|
 | **Host** | `publicdatafeeds.networkrail.co.uk:61618` (STOMP) |
-| **Library** | `stomp.py` (`import stomp`) — installed via pip on the Pi |
+| **Library** | `stomp.py` (`import stomp`) — installed in the cloud service virtual environment |
 | **Connect** | `login=NR_USERNAME`, `passcode=NR_PASSWORD`, `headers={'client-id': NR_USERNAME}`, `heartbeats=(10000,10000)` |
 | **Code** | `_nr_stomp_connect`, `_NRListener.on_message`, `_nr_idle_watcher` (disconnects after 90 s with no `/api/trains` poll, reconnects on demand) |
 

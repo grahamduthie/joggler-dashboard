@@ -4,6 +4,7 @@
 # Chromecasts stream the radio directly — Joggler is not in the audio path.
 import http.server
 import json
+import os
 import time
 import threading
 import urllib.parse
@@ -11,6 +12,10 @@ import urllib.parse
 import pychromecast
 
 PORT = 9998
+ALLOWED_ORIGINS = frozenset(filter(None, os.environ.get(
+    'JOGGLER_ALLOWED_ORIGINS',
+    'http://172.16.10.136:5001,https://dashboard.gdx.org.uk'
+).split(',')))
 
 # Cache discovered chromecasts so discover only runs once per session
 _chromecasts = {}   # friendly_name -> Chromecast object
@@ -79,25 +84,39 @@ def cast_volume(name, delta):
 
 class Handler(http.server.BaseHTTPRequestHandler):
 
+    def _origin_allowed(self):
+        return self.headers.get('Origin') in ALLOWED_ORIGINS
+
+    def _cors_headers(self):
+        self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
+        self.send_header('Vary', 'Origin')
+
     def send_json(self, code, obj):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Private-Network', 'true')
+        if self._origin_allowed():
+            self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
+        if not self._origin_allowed():
+            self.send_error(403, 'Forbidden origin')
+            return
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self._cors_headers()
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Access-Control-Allow-Private-Network', 'true')
         self.end_headers()
 
     def do_GET(self):
+        if not self._origin_allowed():
+            self.send_json(403, {'error': 'forbidden origin'})
+            return
         path = urllib.parse.urlparse(self.path).path
         if path == '/cast/discover':
             try:
@@ -109,6 +128,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(404, {'error': 'not found'})
 
     def do_POST(self):
+        if not self._origin_allowed():
+            self.send_json(403, {'error': 'forbidden origin'})
+            return
         path = urllib.parse.urlparse(self.path).path
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length)) if length else {}

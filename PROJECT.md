@@ -10,8 +10,8 @@ with map. Standalone SPAs at `/aircraft` and `/trains` provide detailed full-scr
 nearby aircraft and passing trains respectively.
 
 The original Joggler OS is non-functional. The device runs openframe-linux (Debian Trixie) on a
-USB stick and acts as a **thin client**: it runs Chromium in kiosk mode pointed at a Raspberry Pi
-that handles all API proxying and serves the dashboard.
+USB stick and acts as a **thin client**: it runs Chromium in kiosk mode pointed at the cloud
+production service, which handles all API proxying and serves the dashboard.
 
 ---
 
@@ -22,10 +22,11 @@ Read this first; it is the orientation a fresh session needs.
 | | |
 |---|---|
 | **Pi** (`trainpi`, 172.16.10.136) | Pi 3B. **SD card replaced 2026-08-12** — SanDisk `SN64G`, root 59 GB. Kernel 6.18.39, **0 pending package upgrades**. |
-| **Joggler** (172.16.10.168) | Unchanged thin client — Chromium → `http://172.16.10.136:5001/` |
-| **Services** | `twyford-dashboard`, `train-pi-controller`, `train-pi-restart.timer` — all active, 0 failed units |
+| **Cloud production** (`cloud.gdx.org.uk`) | `joggler` Supervisor service → `127.0.0.1:8002`, published as `dashboard.gdx.org.uk` and `nearby.gdx.org.uk` |
+| **Joggler** (172.16.10.168) | Thin client — Chromium → `https://dashboard.gdx.org.uk/`; local casting/power helpers remain |
+| **Pi services** | `twyford-dashboard` is temporary rollback only; `train-pi-controller` and `train-pi-restart.timer` remain TrainPi production services |
 | **Integrity** | `dpkg -V` 0 errors / 6 flagged (all verified-legitimate conffiles); 0 corrupt `.gz` of 8,697. **Re-verified 2026-08-13**: 10/10 identical cold re-reads, `dpkg -V` byte-identical across two runs |
-| **Backup** | `~/Programming/pi-backups/2026-08-12/` — 1253 files, checksum-verified |
+| **Cloud runtime backup** | `~/Programming/cloud-backups/joggler/joggler-runtime-2026-08-16-182409.tar.gz` — checksum-verified manual snapshot; automation deferred until the always-on replacement machine |
 
 Two known-open items, neither urgent:
 
@@ -45,29 +46,43 @@ generalise — `dpkg -V` aborting silently, `mmc0` vs `mmc1`, corrupt `.pyc`), *
 (Pi hardware, build-from-scratch, endpoint health baselines), and the sections below for the
 dashboard itself.
 
+## Cloud production — live
+
+`transport-proxy.py` now runs on the GDX cloud VM, published at
+`dashboard.gdx.org.uk` and `nearby.gdx.org.uk`. This document retains extensive Pi history and
+hardware detail, but the cloud is the normal production deployment target. The Pi dashboard
+service is retained only as the temporary rollback path; TrainPi remains on the Pi.
+
+**TD subscription rule (2026-08-16):** keep Pi `twyford-dashboard` stopped while cloud `joggler`
+is running. Both use the same durable National Rail TD STOMP subscription identity, and concurrent
+connections split berth messages. A rollback must stop cloud before starting the Pi dashboard.
+
+The current architecture, security decisions, rollback criteria and change log are maintained in
+**[CLOUD-MIGRATION-PLAN.md](CLOUD-MIGRATION-PLAN.md)**.
+
 ---
 
 ## Architecture
 
 ```
-Raspberry Pi (172.16.10.136, user gduthie)
-  /home/gduthie/twyford-dashboard/
-  ├── transport-proxy.py   port 5001  (0.0.0.0) — API proxy + static file server
-  ├── dashboard.html, icons/, hls.min.js — served as static files by transport-proxy
+GDX cloud VM (cloud.gdx.org.uk, user gduthie)
+  /home/gduthie/joggler/
+  ├── transport-proxy.py   port 8002 (127.0.0.1) — API proxy + static file server
+  ├── dashboard.html, icons/, hls.min.js — served through Nginx over HTTPS
   ├── hive-tokens.json, hive-credentials.json (mode 600)
   ├── .env  — BODS_API_KEY + LASTFM_API_KEY + RTT_REFRESH_TOKEN + NR_USERNAME + NR_PASSWORD (mode 600)
   └── logos/, aircraft-info/, bus-stops.json, bus-route-stops.json (runtime caches)
 
 O2 Joggler (172.16.10.168, user of)
   /home/of/
-  ├── Chromium kiosk → http://172.16.10.136:5001/
+  ├── Chromium kiosk → https://dashboard.gdx.org.uk/
   ├── cast-server.py       port 9998  (0.0.0.0) — Chromecast discovery/control
   ├── shutdown-server.py   port 9999  (127.0.0.1) — graceful poweroff via power button
   └── touch-bridge.py — raw touchscreen events → X11 mouse via XTest
 ```
 
-The dashboard is served from the Pi. All `/api/…` calls in the HTML are relative URLs and
-resolve to the Pi automatically from any browser on the LAN.
+The dashboard is served from the cloud VM through Nginx. All `/api/…` calls in the HTML are
+relative URLs and resolve to the same secure public host from any browser.
 
 **Chromecast note:** `CAST_BASE = 'http://localhost:9998'` in `dashboard.html`. The Joggler's
 kiosk browser resolves `localhost` to the Joggler itself, so cast-server.py runs **on the Joggler**
@@ -142,12 +157,12 @@ tty1 autologin as 'of'
           python3 cast-server.py &
           unclutter -idle 0.1 -root &
           kiosk.sh &
-            → chromium --start-fullscreen http://172.16.10.136:5001/
+            → chromium --start-fullscreen https://dashboard.gdx.org.uk/
             (watchdog loop — auto-restarts on crash)
 ```
 
 `touch-bridge.py`, `shutdown-server.py`, and `cast-server.py` run on the Joggler. The transport
-proxy runs on the Pi.
+proxy runs on the cloud VM.
 
 **Why cast-server.py runs on the Joggler:** `dashboard.html` calls `http://localhost:9998` from
 JavaScript. Since JS runs in the Joggler's browser, `localhost` resolves to the Joggler — not
@@ -175,7 +190,7 @@ chromium \
   --disk-cache-size=52428800 \
   --js-flags="--max-old-space-size=80" \
   --window-position=0,0 --window-size=800,480 \
-  http://172.16.10.136:5001/
+  https://dashboard.gdx.org.uk/
 ```
 
 **`--kiosk` is broken on this system** (Chromium 148 + Openbox + EMGD framebuffer): it creates a
@@ -193,14 +208,16 @@ writes at ~24 MB/s and drive wear. `fix-oom.sh` sets this up on a fresh or repai
 swap under memory pressure. Default is 100 on this distro. Lower values keep hot Chromium pages
 in RAM longer, reducing I/O wait spikes. Applied by `fix-oom.sh`.
 
-### Pi (systemd)
+### Cloud production (Supervisor)
 
 ```
-twyford-dashboard.service
-  → python3 /home/gduthie/twyford-dashboard/transport-proxy.py
+joggler
+  → /home/gduthie/joggler/venv/bin/python /home/gduthie/joggler/transport-proxy.py
+  → 127.0.0.1:8002, published by Nginx as Dashboard/Nearby over HTTPS
 ```
 
-cast-server.py is started separately (manually or via a second systemd unit). See PI-SETUP.md.
+The Pi `twyford-dashboard.service` is rollback-only. `cast-server.py` and `shutdown-server.py`
+run locally on the Joggler through its Openbox autostart, not on the cloud VM.
 
 **The Pi is shared with an unrelated project** (2026-07-07): it also runs
 `train-pi-controller.service`, the backend for a Raspberry-Pi-driven OLED train/bus/tube/
@@ -390,21 +407,21 @@ Host 172.16.10.179
 
 ## Files
 
-### On the Pi (/home/gduthie/twyford-dashboard/)
+### On the cloud VM (`/home/gduthie/joggler/`)
 
 ```
 dashboard.html              # The kiosk SPA (single file, all views)
 aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
 trains.html                 # Standalone trains SPA (served at /trains)
 lineside.html               # Standalone visual track display SPA (served at /lineside)
-transport-proxy.py          # API proxy + static file server (port 5001)
-cast-server.py              # Chromecast discovery/control (port 9998)
+transport-proxy.py          # API proxy + static file server (127.0.0.1:8002)
+cast-server.py              # Source only; active Chromecast helper runs on the Joggler
 hive-setup.py               # Interactive Hive auth setup (run once to obtain tokens)
 hls.min.js                  # HLS.js library (served statically to browser)
 
 hive-tokens.json            # Hive/Cognito auth tokens + home_id (mode 600)
 hive-credentials.json       # Hive login credentials for auto-reauth (mode 600)
-.env                        # BODS_API_KEY + LASTFM_API_KEY + RTT_REFRESH_TOKEN + NR_USERNAME + NR_PASSWORD (mode 600)
+.env                        # API credentials, including BODS/Last.fm/RTT/National Rail/Darwin keys (mode 600)
 
 icons/
   wsymbol_*.png             # 92 PNG weather icons (MAm TV set, 128×128)
@@ -432,7 +449,7 @@ cast-server.py              # Chromecast discovery/control (port 9998, 0.0.0.0)
 ### In this repository (/Users/gduthie/Programming/Joggler/)
 
 ```
-dashboard.html              # Source (deploy to Pi with scp)
+dashboard.html              # Source (normal production deploy: ./deployment/cloud-deploy.sh)
 aircraft.html               # Standalone aircraft detail SPA (served at /aircraft)
 trains.html                 # Standalone trains SPA (served at /trains)
 lineside.html               # Standalone lineside visual track display (served at /lineside)
@@ -982,6 +999,17 @@ window: confirmed-passed Down 20 s, Up 45 s (house is ~200 m east of the station
 100 s. Candidates limited to −2.5 min … +65 min. Polling: /api/trains 15 s, /api/nrcc 5 min,
 re-render every 1 s.
 
+**Train-state provenance (2026-08-16):** the old convention of putting RTT's future
+`realtimeForecast` into `twy_actual` was removed. `/api/trains` now keeps schedule, forecast,
+TD-ETA and observed passage times separate, selects `display_pass_ts` with a `pass_time_source`,
+and emits `movement_state`/`pass_confidence`. A TD house crossing is immutable observation and
+is never adjusted by the manual calibration offset; this fixes `NOW` continuing to flash after a
+physical pass. `/trains` and `/now` share `train-display.js`, which consumes that backend state
+and gives observed passed trains only a 20-second non-flashing grace. A live berth farther than
+1.6 miles from the house now records `current_track` without overriding the displayed
+track-at-house; only final-approach TD evidence does so. Full follow-up/replay plan:
+`TRAIN-ACCURACY-PLAN.md`.
+
 **Delay handling:** RTT provides delay information via two mechanisms that must both be
 handled:
 
@@ -1234,12 +1262,13 @@ timetable-authoritative route badges.
 
 ## Local Python Servers
 
-### On the Pi
+### On the cloud VM
 
-#### transport-proxy.py — port 5001 (0.0.0.0)
+#### transport-proxy.py — port 8002 (127.0.0.1)
 
 ThreadingMixIn (concurrent requests). Serves `dashboard.html` and `icons/` as static files in
-addition to API endpoints. All responses include `Access-Control-Allow-Origin: *`.
+addition to API endpoints. Nginx is the only public entry point; the backend does not use wildcard
+CORS.
 
 Uses only Python stdlib (no flask). The Hive endpoints use the stdlib `urllib.request` for
 HTTPS; `hive-setup.py` is the only file that uses the `requests` package.
@@ -1305,7 +1334,8 @@ the `route_ref` tag strategy covers it.
 - `POST /cast/stop {"device": "name"}` → stops cast
 - `POST /cast/volume {"device": "name", "delta": ±0.1}` → adjust volume
 
-pychromecast installed via pip on the Pi. See PI-SETUP.md.
+`pychromecast` is installed on the Joggler because casting is a Joggler-local helper. See
+JOGGLER-SETUP.md.
 
 **`_active_cc` pattern:** `cast_play()` saves the specific Chromecast object used as `_active_cc`.
 `cast_stop()` uses `_active_cc` (not re-discovering by name) so stop() works even if a
@@ -1406,7 +1436,7 @@ fields, never the envelope, so the envelope is safe to change. `src` names the s
 and is the fastest way to diagnose aircraft problems:
 
 ```bash
-curl -s "http://172.16.10.136:5001/api/flights?lat=51.4741&lon=-0.8610&dist=25" \
+curl -s "https://dashboard.gdx.org.uk/api/flights?lat=51.4741&lon=-0.8610&dist=25" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['src'], d['total'])"
 ```
 
@@ -1696,9 +1726,11 @@ Email: dsg_nrod.support@caci.co.uk (the feeds are operated by CACI on behalf of 
 
 ## Persistent Data Files
 
-These files live on the Pi and survive reboots. Deleting them forces a fresh fetch.
+These files live on the cloud VM at `/home/gduthie/joggler/` and survive service restarts.
+They are protected runtime state: include them in backups and do not overwrite them during normal
+deployments. Deleting a cache forces a fresh fetch.
 
-### `/home/gduthie/twyford-dashboard/bus-stops.json`
+### `/home/gduthie/joggler/bus-stops.json`
 
 Bus stop locations for tracked routes (850, 127, 128, 129, 12) in the bbox covering High
 Wycombe–Reading. Created by the proxy on first call to `/api/buses/stops` using Overpass API.
@@ -1706,10 +1738,10 @@ Never re-fetched unless deleted. Contains ~62 stops.
 
 Structure: `{"stops": [{"lat": …, "lon": …, "name": "…", "atco": "…", "routes": ["850","12"]}, …]}`
 
-**To regenerate:** `ssh gduthie@172.16.10.136 'rm /home/gduthie/twyford-dashboard/bus-stops.json'`
-then trigger `/api/buses/stops` by opening the bus map.
+**To regenerate:** remove only the exact cloud file during maintenance, then trigger
+`/api/buses/stops` by opening the bus map.
 
-### `/home/gduthie/twyford-dashboard/bus-route-stops.json`
+### `/home/gduthie/joggler/bus-route-stops.json`
 
 Transport API timetable data mapping each route/direction to its list of ATCO stop codes. Built
 progressively — each call to `/api/buses/route-stops` fetches whichever of the 12 combinations
@@ -1718,7 +1750,7 @@ the stops response so each stop's `routes` array is authoritative.
 
 Structure: `{"routes": [{"op": "CSLB", "route": "850", "direction": "outbound", "atcos": […]}, …]}`
 
-### `/home/gduthie/twyford-dashboard/hive-tokens.json`
+### `/home/gduthie/joggler/hive-tokens.json`
 
 Hive/Cognito auth tokens written by `hive-setup.py`. Mode 600. Auto-refreshed in-memory when
 `token_expiry` is reached; auto-reauth when refresh token expires (requires `hive-credentials.json`).
@@ -1741,9 +1773,9 @@ Structure:
 live under the "Luke" home; his own "Home" has no devices. `hive-setup.py` auto-discovers and
 saves `home_id`.
 
-**To regenerate:** Run `hive-setup.py` on the Pi (see Deployment below).
+**To regenerate:** run `hive-setup.py` on the cloud VM (see Deployment above).
 
-### `/home/gduthie/twyford-dashboard/hive-credentials.json`
+### `/home/gduthie/joggler/hive-credentials.json`
 
 Hive account email and password for automatic re-authentication when the refresh token expires.
 Written by `hive-setup.py --save-credentials`. Mode 600.
@@ -1757,40 +1789,26 @@ Structure: `{"username": "…@….com", "password": "…"}`
 ```bash
 # From /Users/gduthie/Programming/Joggler/ on Mac
 
-# Deploy dashboard.html to Pi and hard-reload Joggler (most common)
-scp dashboard.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
-  ssh -i ~/.ssh/id_ed25519 of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
+# Normal production release: deploy code/static assets to the cloud, restart the
+# Supervisor-managed backend and check /health. Runtime state/credentials are retained.
+./deployment/cloud-deploy.sh
+
+# Hard-reload the Joggler after a front-end change (not normally needed for backend-only work).
+ssh -i ~/.ssh/id_ed25519 of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
 # Use ctrl+shift+r (hard reload), NOT F5 — F5 may serve cached CSS
 
-# Deploy and restart transport-proxy on Pi (systemd service)
-scp transport-proxy.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
-  ssh gduthie@172.16.10.136 'sudo systemctl restart twyford-dashboard'
-
-# Deploy lineside.html (no service restart needed — served as static file)
-scp lineside.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
-
-# Deploy and restart cast-server on Pi
-scp cast-server.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
-  ssh gduthie@172.16.10.136 \
-    'kill $(pgrep -f cast-server) 2>/dev/null; \
-     nohup python3 /home/gduthie/twyford-dashboard/cast-server.py \
-       >> /home/gduthie/twyford-dashboard/dashboard.log 2>&1 & disown; echo started'
-
-# Verify proxy health
-ssh gduthie@172.16.10.136 'curl -s http://127.0.0.1:5001/health'
-
-# First-time Hive auth setup on Pi (run once; saves tokens + credentials)
-scp hive-setup.py gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
-  ssh -t gduthie@172.16.10.136 \
-    'python3 /home/gduthie/twyford-dashboard/hive-setup.py --save-credentials'
-
-# Trigger bus route-stops progressive fetch
-ssh gduthie@172.16.10.136 \
-  'curl -s http://127.0.0.1:5001/api/buses/route-stops | python3 -m json.tool'
-
-# Deploy icons to Pi
-scp -r icons/ gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/
+# View production service/logs when diagnosing a release.
+ssh gduthie@cloud.gdx.org.uk 'sudo supervisorctl status joggler; sudo tail -n 100 /var/log/supervisor/joggler.err.log'
 ```
+
+Cloud production is `/home/gduthie/joggler`, managed by Supervisor as `joggler`, bound to
+`127.0.0.1:8002`, and published only through Nginx. Never copy `.env`, Hive files, learned signal
+state, calibration data, or runtime caches from a development machine as part of a normal deploy.
+The Pi commands remain in `PI-SETUP.md` solely for temporary rollback/recovery.
+
+For the train-accuracy rollout specifically, use `deployment/train-accuracy-shadow.sh` first.
+It deploys only the four compatible train files while the visible pages stay on the legacy model;
+the shadow and cutover procedure is in `TRAIN-ACCURACY-PLAN.md`.
 
 ---
 
@@ -2017,38 +2035,38 @@ HTTPS, ES6, CSS gap, flexbox, Leaflet.js, SSE — all fine.
 # Hard-reload dashboard (picks up CSS changes)
 ssh of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
 
-# Check what Python servers are running on the Pi
-ssh gduthie@172.16.10.136 'pgrep -af python3'
+# Check cloud production service and its recent errors
+ssh gduthie@cloud.gdx.org.uk 'sudo supervisorctl status joggler; sudo tail -n 100 /var/log/supervisor/joggler.err.log'
 
 # Check what servers are running on the Joggler
 ssh of@172.16.10.168 'pgrep -af python3'
 
 # Test train departures (National Rail — dashboard tile)
-ssh gduthie@172.16.10.136 'curl -s "http://localhost:5001/api/departures?station=TWY&rows=5"'
+ssh gduthie@cloud.gdx.org.uk 'curl -s "http://127.0.0.1:8002/api/departures?station=TWY&rows=5"'
 
 # Test RTT trains endpoint (trains.html)
-ssh gduthie@172.16.10.136 'curl -s "http://localhost:5001/api/trains" | python3 -m json.tool | head -40'
+ssh gduthie@cloud.gdx.org.uk 'curl -s "http://127.0.0.1:8002/api/trains" | python3 -m json.tool | head -40'
 
 # Test bus departures (Twyford Waggon and Horses stop)
-ssh gduthie@172.16.10.136 'curl -s "http://localhost:5001/api/bods/departures?stop=035091060001"'
+ssh gduthie@cloud.gdx.org.uk 'curl -s "http://127.0.0.1:8002/api/bods/departures?stop=035091060001"'
 
 # Check bus stops count and route coverage
-ssh gduthie@172.16.10.136 'curl -s http://localhost:5001/api/buses/stops | python3 -c "
+ssh gduthie@cloud.gdx.org.uk 'curl -s http://127.0.0.1:8002/api/buses/stops | python3 -c "
 import json,sys; d=json.load(sys.stdin); s=d[\"stops\"]
 print(len(s),\"stops;\",sum(1 for x in s if x[\"routes\"]),\"with routes\")"'
 
 # Trigger progressive route timetable fetch
-ssh gduthie@172.16.10.136 \
-  'curl -s http://localhost:5001/api/buses/route-stops | python3 -m json.tool'
+ssh gduthie@cloud.gdx.org.uk \
+  'curl -s http://127.0.0.1:8002/api/buses/route-stops | python3 -m json.tool'
 
 # Test Hive temperature endpoint
-ssh gduthie@172.16.10.136 'curl -s http://localhost:5001/api/hive'
+ssh gduthie@cloud.gdx.org.uk 'curl -s http://127.0.0.1:8002/api/hive'
 
-# Watch proxy log (proxy started with -u flag so output flushes immediately)
-ssh gduthie@172.16.10.136 'tail -f /home/gduthie/twyford-dashboard/proxy.log'
+# Watch cloud backend errors
+ssh gduthie@cloud.gdx.org.uk 'sudo tail -f /var/log/supervisor/joggler.err.log'
 
 # Check NR STOMP connection status
-ssh gduthie@172.16.10.136 'grep -i "NR STOMP" /home/gduthie/twyford-dashboard/proxy.log'
+ssh gduthie@cloud.gdx.org.uk 'grep -i "NR STOMP" /var/log/supervisor/joggler.out.log | tail -50'
 
 # Check freight trains in buffer (quick API test)
 ssh gduthie@172.16.10.136 'curl -s http://localhost:5001/api/trains | python3 -c "
@@ -2080,7 +2098,7 @@ ssh of@172.16.10.168 'sudo of-expand'
 Everything working as of 2026-08-09.
 
 - [x] Joggler: Boot, WiFi, SSH
-- [x] Autologin → X → Openbox → kiosk chain (Chromium → Pi)
+- [x] Autologin → X → Openbox → kiosk chain (Chromium → cloud Dashboard)
 - [x] Touchscreen tap (touch-bridge.py)
 - [x] sshd OOM-protected (OOMScoreAdjust=-1000)
 - [x] Chromium HTTP disk cache on tmpfs (/tmp/chromium-cache) to eliminate USB I/O

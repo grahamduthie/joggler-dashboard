@@ -1,5 +1,9 @@
 # Radio View — Controls Bar Layout Bug
 
+> Historical Pi debugging record. Normal production deployment is now the cloud VM; use
+> `./deployment/cloud-deploy.sh` and `CLOUD-MIGRATION-PLAN.md`. The Pi commands below document
+> the incident and are rollback-only, not a current release procedure.
+
 ## Problem
 
 In the radio playing state (when now-playing data is available), the controls bar
@@ -142,15 +146,15 @@ After this, the controls bar was flush with the bottom of the screen.
 
 ---
 
-## Deployment Rule
+## Historical deployment rule (superseded)
 
-**Always deploy `dashboard.html` to the Pi:**
+At the time of this incident, `dashboard.html` was deployed directly to the Pi:
 
 ```bash
 scp dashboard.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/dashboard.html && \
   ssh of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
 ```
 
-The Joggler's `/home/of/dashboard.html` is not served by any process.
-The file at `/home/gduthie/twyford-dashboard/dashboard.html` on the Pi is what
-`transport-proxy.py` serves at `http://172.16.10.136:5001/`.
+The Joggler's `/home/of/dashboard.html` was not served by any process. That Pi file was served
+at `http://172.16.10.136:5001/`. Today, deploy to cloud production with
+`./deployment/cloud-deploy.sh`, then reload the Joggler kiosk.

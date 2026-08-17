@@ -2,9 +2,9 @@
 
 How to go from a bare O2 Joggler to a fully running thin-client kiosk.
 
-The Joggler is the **display device only**. All API proxying and data fetching happen on
-the Raspberry Pi. Set up the Pi backend first (see [PI-SETUP.md](PI-SETUP.md)), then set
-up the Joggler to point at it.
+The Joggler is the **display device only**. All API proxying and data fetching happen on the GDX
+cloud VM. Set up the cloud backend first (see [CLOUD-MIGRATION-PLAN.md](CLOUD-MIGRATION-PLAN.md)),
+then set up the Joggler to point at `https://dashboard.gdx.org.uk/`.
 
 ---
 
@@ -111,12 +111,13 @@ PROJECT=~/Programming/Joggler
 
 scp -i ~/.ssh/id_ed25519 \
     $PROJECT/shutdown-server.py \
+    $PROJECT/cast-server.py \
     $PROJECT/touch-bridge.py \
     $JOGGLER:/home/of/
 ```
 
-Only `shutdown-server.py` and `touch-bridge.py` run on the Joggler. The transport proxy,
-cast server, and all API Python files run on the Pi (see PI-SETUP.md).
+`shutdown-server.py`, `cast-server.py` and `touch-bridge.py` run on the Joggler. The transport
+proxy and all data/API code run on the cloud VM.
 
 ---
 
@@ -140,7 +141,7 @@ This script configures:
 - `.bash_profile` (starts X on tty1)
 - `.xinitrc` (launches openbox-session)
 - Openbox autostart (starts touch-bridge.py, shutdown-server.py, and kiosk.sh)
-- `kiosk.sh` (Chromium launcher pointing at the Pi — `http://172.16.10.136:5001/`)
+- `kiosk.sh` (Chromium launcher pointing at `https://dashboard.gdx.org.uk/`)
 - sudoers rule (passwordless poweroff for the power button)
 - udev rule (touchscreen as mouse device)
 - sshd OOM protection
@@ -162,7 +163,7 @@ sudo timedatectl set-timezone Europe/London
 After reboot the Joggler should:
 1. Auto-login as `of` on tty1
 2. Start X → Openbox → launch touch-bridge.py and shutdown-server.py → launch Chromium
-3. Load `http://172.16.10.136:5001/` (the Pi backend must be running — see PI-SETUP.md)
+3. Load `https://dashboard.gdx.org.uk/` (the cloud `joggler` service must be healthy)
 
 **Check servers are running on Joggler:**
 
@@ -217,22 +218,23 @@ open /tmp/joggler_screen.png
 
 ## Ongoing deployment (from Mac)
 
-**Deploy dashboard.html and force a hard reload:**
+**Deploy a front-end change to cloud production and force a hard reload:**
 
 ```bash
-scp dashboard.html gduthie@172.16.10.136:/home/gduthie/twyford-dashboard/ && \
+cd /Users/gduthie/Programming/Joggler
+./deployment/cloud-deploy.sh && \
   ssh -i ~/.ssh/id_ed25519 of@172.16.10.168 'DISPLAY=:0 xdotool key ctrl+shift+r'
 ```
 
-`dashboard.html` goes to the **Pi** (where it's served from). The Joggler is told to
-hard-reload with `ctrl+shift+r` (not F5 — F5 may serve stale cached CSS).
+The backend/static files go to the **cloud VM**. The Joggler is then told to hard-reload with
+`ctrl+shift+r` (not F5 — F5 may serve stale cached CSS).
 
 ---
 
 ## Persistent data files on the Joggler
 
 There are none — the Joggler is stateless. All cached data (bus stops, aircraft info,
-airline logos, Hive tokens) lives on the Pi at `/home/gduthie/twyford-dashboard/`.
+airline logos, Hive tokens) lives on the cloud VM at `/home/gduthie/joggler/`.
 
 ---
 

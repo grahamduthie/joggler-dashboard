@@ -25,7 +25,8 @@ import time
 
 import requests
 
-TOKEN_FILE = '/home/gduthie/twyford-dashboard/hive-tokens.json'
+APP_DIR = os.path.abspath(os.environ.get('JOGGLER_APP_DIR', os.path.dirname(__file__)))
+TOKEN_FILE = os.path.join(APP_DIR, 'hive-tokens.json')
 SSO_URL    = 'https://sso.hivehome.com/'
 API_BASE   = 'https://beekeeper-uk.hivehome.com/1.0'
 
@@ -274,7 +275,7 @@ def _test_api(id_token, token_path):
         print(f'home_id {home_id} saved to {token_path}')
 
 
-CREDS_FILE = '/home/gduthie/twyford-dashboard/hive-credentials.json'
+CREDS_FILE = os.path.join(APP_DIR, 'hive-credentials.json')
 
 
 def main():
