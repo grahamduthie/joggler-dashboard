@@ -1,5 +1,19 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
+**2026-08-17 — a non-headcode TD descriptor could be synthesised into a fake predicted train.**
+Reported live: `CAMS` appeared at Reading P13 (D1/1694). Not a real UK headcode -- those are
+always digit+letter+2digits (`9U87`, `0Z47`, `3T60`); `CAMS` has no digit at all. Confirmed by its
+own data shape too: no `from` berth (an interpose, not a real step) and no resolvable running
+line. TD occasionally reports a non-train administrative/test descriptor in the same `descr` field
+a real headcode would occupy, and nothing validated the shape before treating it as one. Added
+`_is_real_headcode` (`^[0-9][A-Z][0-9]{2}$`) and gated it **only** in corridor synthesis's
+`trains.append()` in `_td_enrich_trains` (`not_a_headcode` skip reason) -- the one place an
+unidentified TD sighting turns into a prediction with a `house_pass_ts` that could show up on
+"next past the house". Deliberately **not** gated at TD ingestion (`_handle_td`) or `/api/td-live`:
+the user wants to keep seeing odd descriptors like this on the berth panel/Reading box, which
+render whatever TD reports occupying a berth regardless of what it is -- only the leap from "TD
+reported something at a berth" to "this is a train that will pass the house" needed stopping.
+
 **2026-08-17 — light locomotive moves (headcode class '0') were excluded from the corridor
 entirely; the real digit-'0' split is light engine ('0Z') vs rail-replacement bus ('0B').**
 Reported live in three stages the same day:

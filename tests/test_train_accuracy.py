@@ -615,6 +615,36 @@ class TrainAccuracyTests(unittest.TestCase):
             with proxy._td_lock:
                 proxy._td_buffer[:] = old_buffer
 
+    def test_is_real_headcode_matches_only_the_digit_letter_digit_digit_shape(self):
+        for hc in ('9U87', '0Z47', '3T60', '2P44', '5N82', '0B00', '2H37'):
+            self.assertTrue(proxy._is_real_headcode(hc), hc)
+        for bad in ('CAMS', 'CMAS', '0000', '', '9U8', '9U877', 'AB12'):
+            self.assertFalse(proxy._is_real_headcode(bad), bad)
+
+    def test_non_headcode_td_descriptor_excluded_from_corridor_synthesis_only(self):
+        # Reported live 2026-08-17: 'CAMS' appeared at Reading P13 (D1/1694),
+        # not a real headcode -- no digit at all, and confirmed by its own
+        # data shape: no 'from' berth (an interpose, not a real step) and no
+        # resolvable running line. Must not become a predicted "train" with a
+        # house_pass_ts that could show up on "next past the house" -- but
+        # this gate lives only in corridor synthesis (which builds that
+        # prediction), not at TD ingestion or /api/td-live, since the user
+        # wants to keep seeing odd descriptors on the berth panel itself.
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '', 'to': '1694',
+                                     'descr': 'CAMS', 'ts': 995}]
+        try:
+            skip_log = []
+            trains = []
+            proxy._td_enrich_trains(trains, 1_000, skip_log=skip_log)
+            self.assertEqual(trains, [])
+            self.assertEqual(len(skip_log), 1)
+            self.assertEqual(skip_log[0]['reason'], 'not_a_headcode')
+        finally:
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
     def test_rail_replacement_bus_is_excluded_from_corridor_synthesis(self):
         # A rail-replacement bus (headcode '0B...') is a road vehicle: RTT
         # lists it as a bookable public service, but it can never produce a

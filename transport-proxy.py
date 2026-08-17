@@ -2454,6 +2454,10 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
                 skip_log.append({'headcode': hc, 'area': pos['area'],
                                   'berth': pos.get('to'), 'reason': reason})
 
+        if not _is_real_headcode(hc):
+            _skip('not_a_headcode')
+            continue          # administrative/test descriptor, not a real train -- see
+                              # _is_real_headcode; still shown as-is on the berth panel
         if hc.startswith('2H'):
             _skip('henley_branch')
             continue          # Henley branch shuttle -- physically never reaches this corridor
@@ -4186,6 +4190,25 @@ _nr_cancellations = {}   # headcode -> {'cancelled': bool, 'ts': float, 'reason'
 # Twyford as that headcode again.
 _nr_identity_lock = threading.Lock()
 _nr_identity_map  = {}   # old_headcode -> {'new_hc': str, 'ts': float}
+
+# A real UK headcode is always digit + letter + 2 digits (e.g. '9U87', '0Z47',
+# '3T60'). TD's CA/CC 'descr' field usually carries one, but signalling areas
+# occasionally report a non-train administrative/test descriptor in the same
+# field instead -- confirmed live 2026-08-17: 'CAMS' appeared at Reading P13
+# with no 'from' berth (an interpose, not a real step) and no resolvable
+# running line. That's fine to show on the berth panel/Reading box, which
+# renders whatever /api/td-live reports occupying a berth, no matter what it
+# is -- deliberately NOT gated here or at /api/td-live. It must not become a
+# predicted "train" anywhere a house-pass ETA gets attached to it, since it
+# can never actually pass the house: gated instead at corridor-synthesis's
+# trains.append() in _td_enrich_trains, the one place an unidentified TD
+# sighting turns into something with a house_pass_ts that could show up on
+# "next past the house".
+_HEADCODE_RE = re.compile(r'^[0-9][A-Z][0-9]{2}$')
+
+
+def _is_real_headcode(descr):
+    return bool(_HEADCODE_RE.match(descr))
 
 
 class _NRListener:
