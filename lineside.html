@@ -1404,8 +1404,17 @@ function renderAppr() {
     const lp = tdPos[t.headcode];
     const sighted = (lp && lp.age_s < 150) || !!t.twy_actual;
     let eta, etaCls = '';
-    if (t.at_station)        { eta = 'AT STN'; etaCls = 'warn'; }
-    else if (t.held)         { eta = 'HELD';   etaCls = 'warn'; }
+    if (t.at_station)        { eta = 'AT TWY'; etaCls = 'warn'; }
+    else if (t.held) {
+      // Reading and Maidenhead are the two places a "held" train is
+      // actually just dwelling in a platform, not stuck at a signal --
+      // name it instead of the generic HELD when we know it's one of those.
+      const heldPlace = placeName(t.td_place || (lp && lp.place) || '');
+      eta = heldPlace.startsWith('Reading') ? 'AT RDG'
+          : heldPlace === 'Maidenhead'      ? 'AT MDN'
+          : 'HELD';
+      etaCls = 'warn';
+    }
     else if (diff >= -NOW_TAIL_MS && diff <= NOW_LEAD_MS) {
       if (sighted)           { eta = 'NOW';    etaCls = 'now'; }
       else                   { eta = 'DUE';    etaCls = 'due'; }

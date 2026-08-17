@@ -1183,6 +1183,15 @@ only changes redraw frequency of already-cached state — `/api/trains` itself s
 unchanged; `renderAppr`'s own live-sighting logic (`hasPassedHouse`, `msSincePassed`) was already
 using fresh `tdPos` each time, it just wasn't being asked to redraw with it often enough.
 
+#### NEXT PAST THE HOUSE names the platform for a held train (2026-08-17)
+
+`renderAppr()`'s status word used a generic `HELD` for every dwelling/held train, and `AT STN`
+specifically for one at Twyford. Most "held" trains are just sitting in a platform at Reading or
+Maidenhead (not stuck at a signal), so those two now get their own status: `AT RDG` / `AT MDN`,
+via `placeName(t.td_place)` matched against `'Reading'`/`'Reading W'` (from `STANME`'s Reading-
+area entries, hence `startsWith`) or `'Maidenhead'`. Genuine mid-corridor signal holds still show
+`HELD`. `AT STN` renamed `AT TWY` for symmetry with the new place-named states.
+
 #### Maidenhead station rebuilt to match the real track layout (2026-07-07)
 
 Corrected against SMART/BPLAN data for TIPLOC `MDNHEAD` (STANOX 74005) plus live user
