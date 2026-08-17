@@ -1822,7 +1822,8 @@ def _rtt_build_trains():
 _BERTH_STEP_S = 50
 
 
-def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age_s):
+def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age_s,
+                          headcode=None):
     """
     Estimate seconds until a train at this berth reaches the house, using the
     SMART berth model (real chainage distance).  Returns None if the berth is
@@ -1847,10 +1848,7 @@ def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age
                                          # unreliable (intermediate stops) — keep the
                                          # RTT schedule instead
     main = (info['line'] == 'Main') if info['line'] else is_main
-    if is_passenger is False:            # explicit freight — runs slower
-        speed_mph = 50.0 if main else 35.0
-    else:
-        speed_mph = 90.0 if main else 60.0
+    speed_mph = _lookup_speed_mph(headcode, is_passenger, 'Main' if main else 'Relief')
     travel_s = to_go / speed_mph * 3600.0
     if to_go < -0.3:
         # Already past the house (berth says so).  Report it as passed — a negative
@@ -1868,6 +1866,61 @@ def _berth_eta_to_house_s(area, berth_str, direction, is_passenger, is_main, age
         return (travel_s, True)
     eta = travel_s - min(age_s, _BERTH_STEP_S)
     return (eta, False)
+
+
+_CLASS_SPEED_MIN_N = 5   # samples required before a learned class speed is trusted
+
+
+def _speed_class_bucket(hc, is_passenger):
+    """Stable bucket key for the per-class speed learner/lookup below.
+
+    Passenger/freight is always the top-level split (mirrors the pre-existing
+    ``is_passenger is False`` check this replaces) so a diesel freight and a
+    diesel passenger DMU can never share a bucket just because they share a
+    power type -- freight is categorically slower regardless of traction.
+    Reuses the CIF stock classification (_TIMING_LOAD_CLASS/_cif_power_bucket)
+    within each side so the learner and the CIF-speed fallback name the same
+    fleets the same way, e.g. Elizabeth Line 345 vs GWR 387 vs IET 800/802.
+    """
+    base = 'freight' if is_passenger is False else 'passenger'
+    pax = _cif_pax_best(hc) if hc else None
+    if pax:
+        cls = _TIMING_LOAD_CLASS.get(pax.get('timing_load') or '')
+        if cls:
+            return base + '_class' + cls[0].split()[-1]   # 'passenger_class345'
+        bucket = _cif_power_bucket(pax)
+        if bucket:
+            return base + '_' + bucket                     # 'freight_diesel'
+    return base + '_other'
+
+
+def _lookup_speed_mph(headcode, is_passenger, line_key):
+    """Pick a running speed for the ETA calculation, best evidence first:
+    1. Learned per-class speed (_ca_class_speed), once it has enough samples
+       -- an empirical average over real transit times on this corridor,
+       which already reflects real-world running (curves, junctions, TSRs)
+       that a booked or assumed figure can't.
+    2. CIF's own booked Schedule Speed for today's working, if present and
+       plausible -- specific to this train, but a ceiling, not an average.
+    3. The old flat passenger/freight x Main/Relief constants, unchanged,
+       as the floor when nothing else is known yet (headcode unclassified,
+       CIF not loaded, or a brand-new corridor/class with no samples).
+    """
+    bucket = _speed_class_bucket(headcode, is_passenger)
+    with _chain_lock:
+        learned = _ca_class_speed.get((bucket, line_key))
+    if learned and learned[1] >= _CLASS_SPEED_MIN_N:
+        return learned[0]
+    pax = _cif_pax_best(headcode) if headcode else None
+    if pax:
+        raw = (pax.get('speed') or '').strip()
+        if raw.isdigit():
+            v = int(raw)
+            if 10 <= v <= 140:
+                return float(v)
+    if is_passenger is False:
+        return 50.0 if line_key == 'Main' else 35.0
+    return 90.0 if line_key == 'Main' else 60.0
 
 
 # ── SMART berth → line & position model ──────────────────────────────────────
@@ -2144,6 +2197,7 @@ def _save_chain():
                 'succ': {f'{a}|{b}': v for (a, b), v in _ca_succ.items()},
                 'pred': {f'{a}|{b}': v for (a, b), v in _ca_pred.items()},
                 'transit': {f'{a}|{b}': v for (a, b), v in _ca_transit.items()},
+                'class_speed': {f'{c}|{l}': v for (c, l), v in _ca_class_speed.items()},
             }
         with open(_CHAIN_FILE, 'w') as f:
             json.dump(data, f)
@@ -2152,7 +2206,7 @@ def _save_chain():
 
 
 def _load_chain():
-    global _ca_succ, _ca_pred, _ca_transit
+    global _ca_succ, _ca_pred, _ca_transit, _ca_class_speed
     try:
         with open(_CHAIN_FILE) as f:
             data = json.load(f)
@@ -2162,7 +2216,9 @@ def _load_chain():
             _ca_succ = unkey(data.get('succ', {}))
             _ca_pred = unkey(data.get('pred', {}))
             _ca_transit = unkey(data.get('transit', {}))
-        print(f'chain: loaded {len(_ca_succ)} berth edges')
+            _ca_class_speed = unkey(data.get('class_speed', {}))
+        print(f'chain: loaded {len(_ca_succ)} berth edges, '
+              f'{len(_ca_class_speed)} class-speed buckets')
     except FileNotFoundError:
         pass
     except Exception as e:
@@ -2307,6 +2363,7 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
                     t.get('passenger'),
                     t.get('track', '') == 'Main',
                     berth_age,
+                    headcode=hc,
                 )
                 if res is not None:
                     eta_s, held = res
@@ -2442,7 +2499,7 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
         line = info.get('line') or ''
         is_main = (line == 'Main') if line else (hc[:1] == '1')
         res = _berth_eta_to_house_s(pos['area'], pos['to'], direction,
-                                    passenger, is_main, int(age))
+                                    passenger, is_main, int(age), headcode=hc)
         if res is None:
             _skip('no_eta')
             continue
@@ -2585,14 +2642,17 @@ _chain_lock   = threading.Lock()
 _ca_succ      = {}   # (area, berth) → {next_berth: count}
 _ca_pred      = {}   # (area, berth) → {prev_berth: count}
 _ca_transit   = {}   # (area, berth) → [ewma_seconds, samples]
+_ca_class_speed = {} # (class_bucket, 'Main'|'Relief') → [ewma_mph, samples]
 _ca_last_pos  = {}   # headcode → (area, berth, ts) — to measure transit time
 _chain_pos    = {}   # (area, berth) → dist_mi   (interpolated; merged into _berth_info)
 _chain_dirty  = False
 
 
 def _ca_observe(area, frm, to, hc, ts):
-    """Record one CA berth step into the adjacency + transit-time model."""
+    """Record one CA berth step into the adjacency + transit-time model, and
+    (if both berths have a known position) a per-train-class speed sample."""
     global _chain_dirty
+    dt = None
     with _chain_lock:
         if frm and to:
             _ca_succ.setdefault((area, frm), {})
@@ -2603,8 +2663,9 @@ def _ca_observe(area, frm, to, hc, ts):
         # transit time of `frm` = now − when this train entered `frm`
         prev = _ca_last_pos.get(hc)
         if prev and prev[0] == area and prev[1] == frm and ts > prev[2]:
-            dt = ts - prev[2]
-            if 2 <= dt <= 600:
+            cand = ts - prev[2]
+            if 2 <= cand <= 600:
+                dt = cand
                 cur = _ca_transit.get((area, frm))
                 if cur is None:
                     _ca_transit[(area, frm)] = [float(dt), 1]
@@ -2612,6 +2673,37 @@ def _ca_observe(area, frm, to, hc, ts):
                     cur[0] = cur[0] * 0.8 + dt * 0.2   # EWMA
                     cur[1] += 1
         _ca_last_pos[hc] = (area, to, ts)
+    if dt:
+        # Needs _berth_info, which takes _chain_lock itself -- must run after
+        # the lock above is released to avoid deadlocking on it.
+        _ca_observe_class_speed(area, frm, to, hc, dt)
+
+
+def _ca_observe_class_speed(area, frm, to, hc, dt):
+    """Turn one CA step's elapsed time + known berth positions into an
+    observed mph sample, folded into the learned per-class speed model."""
+    fi = _berth_info(area, frm)
+    ti = _berth_info(area, to)
+    if not fi or not ti or fi.get('dist_mi') is None or ti.get('dist_mi') is None:
+        return
+    dist_mi = abs(ti['dist_mi'] - fi['dist_mi'])
+    if dist_mi <= 0:
+        return
+    mph = dist_mi / (dt / 3600.0)
+    if not (5.0 <= mph <= 130.0):
+        return          # implausible: bad step pairing, a held/dwelling train, or noise
+    line = ti.get('line') or fi.get('line') or ''
+    if line not in ('Main', 'Relief'):
+        return
+    is_passenger = hc[:1] in '129' if hc else None
+    key = (_speed_class_bucket(hc, is_passenger), line)
+    with _chain_lock:
+        cur = _ca_class_speed.get(key)
+        if cur is None:
+            _ca_class_speed[key] = [mph, 1]
+        else:
+            cur[0] = cur[0] * 0.8 + mph * 0.2   # EWMA
+            cur[1] += 1
 
 _sf_lock      = threading.Lock()
 _sf_state     = {}   # (area, address) → {'data': hex_str, 'ts': unix_seconds, 'src': 'SF'|'SG'|'SH'}

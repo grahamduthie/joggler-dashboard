@@ -3,6 +3,28 @@
 Status: **Core correctness implementation is deployed to cloud production. V2 is currently less
 accurate than legacy and must not be promoted.**
 
+**2026-08-17 — ETA speed model now train-class-aware, for both legacy and v2 (this is timing, not
+selection, so it applies to whichever train either model has already picked).** The berth-to-house
+ETA used a flat constant speed per passenger/freight × Main/Relief (90/60/50/35 mph) with no
+distinction between e.g. an IET and a stopping EMU, or a GWR 387 and an Elizabeth Line 345 sharing
+a line -- raised by the user directly. Fixed in two layers, both in `_berth_eta_to_house_s` via the
+new `_lookup_speed_mph`: (1) CIF's own booked Schedule Speed per working (`_cif_pax_index[...]
+['speed']`) was already downloaded for the stock-type display feature but never used for ETA --
+now used when available. (2) The CA berth-chain learner (`_ca_observe`) now also derives a real
+observed mph per CA step (distance ÷ elapsed time, when both berths have a known position) and
+folds it into a new per-class-bucket EWMA (`_ca_class_speed`, persisted alongside the existing
+chain data in `berth_chain.json`), which is preferred over CIF's speed once it has ≥5 samples for
+that bucket -- it's an empirical average of real running on this specific corridor, which already
+reflects curves/junctions/TSRs that a booked figure can't. Class buckets always split
+passenger/freight first (so two fleets can never average together just because they share a power
+type), refined by CIF stock class where known (matches the existing display-only
+`stock_type`/`power_bucket` classification's own class list: 345/387/800/802) or a coarser
+diesel/electric/bimode bucket otherwise. Falls back to the original flat constants only when none
+of the above is available yet. See PROJECT.md's "Per-class speed learner" and "Live-berth ETA
+refinement" for the implementation detail. Not yet done: no way to inspect `_ca_class_speed`'s
+current buckets/sample counts short of reading `berth_chain.json` directly on the VM -- worth an
+`/api/...` read endpoint (mirroring `/api/calibration`) if this needs regular checking.
+
 **2026-08-17 — public shadow surface removed.** The `train_model`/`train_shadow` query params,
 the `/train-shadow` page and `deployment/train-accuracy-shadow.sh` are gone: with a single user
 of a "production" site that's still experimental, an extra exposed toggle and monitoring page per

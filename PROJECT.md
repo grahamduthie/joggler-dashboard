@@ -877,6 +877,15 @@ Twyford / Reading), weighted by transit time. Conservative: a berth gets a posit
 bracketed by anchors within a few hops; otherwise it falls back to the RTT schedule. Refreshed
 every 120 s; the model persists across restarts and sharpens over time.
 
+**Per-class speed learner** (`_ca_observe_class_speed`, `_ca_class_speed`, same `berth_chain.json`,
+2026-08-17): the same CA steps also yield a real observed mph whenever both berths in a step have a
+known position (distance ÷ elapsed time). Bucketed by `_speed_class_bucket(headcode, is_passenger)`
+× line (Main/Relief) — passenger/freight is always the top-level split (never sharing a bucket just
+because they share a power type), refined within each side by CIF stock class where known (Class
+345 Elizabeth Line EMU / 387 GWR EMU / 800·802 IET, else a diesel/electric/bimode bucket, else
+`_other`). EWMA per bucket, same 0.8/0.2 weighting as berth transit time. Samples outside 5–130 mph
+are dropped (bad step pairing, a held/dwelling train, or noise) rather than folded in.
+
 **Static near-house berth fallback** (`_BERTH_MI`, 2026-07-06 eve): SMART only anchors berths to
 whole stations (coarse — every Twyford-area berth reads 0.1 mi, every Slough berth −12.5) and the
 chain-learner leaves the immediate throat berths (1623/1626/1614/1633…) with `dist_mi = None`.
@@ -890,8 +899,13 @@ heard passing the house at berths **1640→1626** (2 berths west of the earlier 
 straddle 0 and the distance zero-crossing house-event fires there.
 
 **Live-berth ETA refinement** (`_berth_eta_to_house_s`, `_td_enrich_trains`): for a matched train
-with a live berth, `house_pass_ts` is refined from the real distance (speed by line/passenger),
-capped at 8 mi out (constant-speed estimate unreliable further, with intermediate stops). The live
+with a live berth, `house_pass_ts` is refined from the real distance × a speed (`_lookup_speed_mph`,
+2026-08-17), capped at 8 mi out (constant-speed estimate unreliable further, with intermediate
+stops). Speed is picked best-evidence-first: the per-class learned speed above once it has ≥5
+samples for that bucket × line (`_CLASS_SPEED_MIN_N`), else the train's own booked CIF Schedule
+Speed for today's working (`_cif_pax_index[hc]['speed']` — downloaded and parsed since the
+stock-type display work but unused for ETA until now), else the original flat constants (90/60 mph
+passenger, 50/35 mph freight, Main/Relief) as the floor when nothing else is known yet. The live
 berth is **authoritative over the schedule** — `house_pass_ts = now + eta` whether the train is
 approaching (+) or has already passed (−). Three subtleties it handles:
 - **Dwelling / held:** a CA berth is a *point*, not a section the train slides along, so the time

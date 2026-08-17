@@ -182,6 +182,187 @@ class TrainAccuracyTests(unittest.TestCase):
         self.assertEqual(legacy_keys['um'], 'phantom')
         self.assertEqual(ranked_keys['um'], 'real')
 
+    def test_speed_class_bucket_always_splits_freight_from_passenger(self):
+        old_pax_best = proxy._cif_pax_best
+        try:
+            # Same power type on both sides -- must not collide into one bucket.
+            proxy._cif_pax_best = lambda hc: {'power_type': 'D', 'timing_load': ''}
+            freight = proxy._speed_class_bucket('4L33', False)
+            passenger = proxy._speed_class_bucket('2P40', True)
+            self.assertEqual(freight, 'freight_diesel')
+            self.assertEqual(passenger, 'passenger_diesel')
+            self.assertNotEqual(freight, passenger)
+        finally:
+            proxy._cif_pax_best = old_pax_best
+
+    def test_speed_class_bucket_uses_timing_load_class_when_available(self):
+        old_pax_best = proxy._cif_pax_best
+        try:
+            proxy._cif_pax_best = lambda hc: {'timing_load': '345', 'power_type': 'EMU'}
+            self.assertEqual(proxy._speed_class_bucket('9U41', True), 'passenger_class345')
+            proxy._cif_pax_best = lambda hc: {'timing_load': '387', 'power_type': 'EMU'}
+            self.assertEqual(proxy._speed_class_bucket('1A00', True), 'passenger_class387')
+        finally:
+            proxy._cif_pax_best = old_pax_best
+
+    def test_speed_class_bucket_falls_back_without_cif_data(self):
+        old_pax_best = proxy._cif_pax_best
+        try:
+            proxy._cif_pax_best = lambda hc: None
+            self.assertEqual(proxy._speed_class_bucket('1A00', True), 'passenger_other')
+            self.assertEqual(proxy._speed_class_bucket('6A01', False), 'freight_other')
+        finally:
+            proxy._cif_pax_best = old_pax_best
+
+    def test_lookup_speed_mph_prefers_learned_over_cif_over_constant(self):
+        old_pax_best = proxy._cif_pax_best
+        with proxy._chain_lock:
+            old_class_speed = dict(proxy._ca_class_speed)
+            proxy._ca_class_speed.clear()
+        try:
+            proxy._cif_pax_best = lambda hc: None
+            self.assertEqual(proxy._lookup_speed_mph('9Z99', True, 'Main'), 90.0)
+            self.assertEqual(proxy._lookup_speed_mph('9Z99', False, 'Relief'), 35.0)
+
+            proxy._cif_pax_best = lambda hc: {
+                'speed': '110', 'timing_load': '', 'power_type': ''}
+            self.assertEqual(proxy._lookup_speed_mph('1A00', True, 'Main'), 110.0)
+
+            # Below the sample-count floor: learned value must not be trusted yet.
+            with proxy._chain_lock:
+                proxy._ca_class_speed[('passenger_other', 'Main')] = [
+                    102.5, proxy._CLASS_SPEED_MIN_N - 1]
+            self.assertEqual(proxy._lookup_speed_mph('1A00', True, 'Main'), 110.0)
+
+            # At the floor: learned value now wins over CIF.
+            with proxy._chain_lock:
+                proxy._ca_class_speed[('passenger_other', 'Main')] = [
+                    102.5, proxy._CLASS_SPEED_MIN_N]
+            self.assertEqual(proxy._lookup_speed_mph('1A00', True, 'Main'), 102.5)
+        finally:
+            proxy._cif_pax_best = old_pax_best
+            with proxy._chain_lock:
+                proxy._ca_class_speed.clear()
+                proxy._ca_class_speed.update(old_class_speed)
+
+    def test_berth_eta_to_house_uses_cif_speed_when_available(self):
+        old_info = proxy._berth_info
+        old_pax_best = proxy._cif_pax_best
+        with proxy._chain_lock:
+            old_class_speed = dict(proxy._ca_class_speed)
+            proxy._ca_class_speed.clear()
+        try:
+            proxy._berth_info = lambda area, berth: {'line': 'Main', 'dist_mi': 2.0}
+            proxy._cif_pax_best = lambda hc: None
+            eta_default, _ = proxy._berth_eta_to_house_s(
+                'D6', 'X', 'up', True, True, 0, headcode='1A00')
+            proxy._cif_pax_best = lambda hc: {
+                'speed': '125', 'timing_load': '', 'power_type': ''}
+            eta_cif, _ = proxy._berth_eta_to_house_s(
+                'D6', 'X', 'up', True, True, 0, headcode='1A00')
+            # 125 mph (CIF) is faster than the 90 mph default -> shorter ETA.
+            self.assertGreater(eta_default, eta_cif)
+        finally:
+            proxy._berth_info = old_info
+            proxy._cif_pax_best = old_pax_best
+            with proxy._chain_lock:
+                proxy._ca_class_speed.clear()
+                proxy._ca_class_speed.update(old_class_speed)
+
+    def test_ca_observe_class_speed_folds_a_plausible_sample_into_the_learner(self):
+        old_info = proxy._berth_info
+        old_pax_best = proxy._cif_pax_best
+        with proxy._chain_lock:
+            old_class_speed = dict(proxy._ca_class_speed)
+            proxy._ca_class_speed.clear()
+        try:
+            proxy._berth_info = lambda area, berth: (
+                {'line': 'Main', 'dist_mi': 1.0} if berth == 'A'
+                else {'line': 'Main', 'dist_mi': 0.0})
+            proxy._cif_pax_best = lambda hc: None
+            proxy._ca_observe_class_speed('D6', 'A', 'B', '1A00', 40)  # 1.0 mi / 40s = 90mph
+            with proxy._chain_lock:
+                mph, n = proxy._ca_class_speed[('passenger_other', 'Main')]
+            self.assertAlmostEqual(mph, 90.0, delta=0.5)
+            self.assertEqual(n, 1)
+        finally:
+            proxy._berth_info = old_info
+            proxy._cif_pax_best = old_pax_best
+            with proxy._chain_lock:
+                proxy._ca_class_speed.clear()
+                proxy._ca_class_speed.update(old_class_speed)
+
+    def test_ca_observe_class_speed_rejects_an_implausible_sample(self):
+        old_info = proxy._berth_info
+        with proxy._chain_lock:
+            old_class_speed = dict(proxy._ca_class_speed)
+            proxy._ca_class_speed.clear()
+        try:
+            proxy._berth_info = lambda area, berth: (
+                {'line': 'Main', 'dist_mi': 1.0} if berth == 'A'
+                else {'line': 'Main', 'dist_mi': 0.0})
+            proxy._ca_observe_class_speed('D6', 'A', 'B', '1A00', 2)  # 1 mi / 2s = 1800mph
+            with proxy._chain_lock:
+                self.assertEqual(proxy._ca_class_speed, {})
+        finally:
+            proxy._berth_info = old_info
+            with proxy._chain_lock:
+                proxy._ca_class_speed.clear()
+                proxy._ca_class_speed.update(old_class_speed)
+
+    def test_ca_observe_end_to_end_updates_class_speed_without_deadlock(self):
+        old_info = proxy._berth_info
+        old_pax_best = proxy._cif_pax_best
+        with proxy._chain_lock:
+            old_succ = {k: dict(v) for k, v in proxy._ca_succ.items()}
+            old_pred = {k: dict(v) for k, v in proxy._ca_pred.items()}
+            old_transit = dict(proxy._ca_transit)
+            old_last_pos = dict(proxy._ca_last_pos)
+            old_class_speed = dict(proxy._ca_class_speed)
+            proxy._ca_last_pos.clear()
+            proxy._ca_class_speed.clear()
+        try:
+            proxy._berth_info = lambda area, berth: (
+                {'line': 'Main', 'dist_mi': 1.0} if berth == 'A'
+                else {'line': 'Main', 'dist_mi': 0.0})
+            proxy._cif_pax_best = lambda hc: None
+            proxy._ca_observe('D6', '', 'A', '9Z50', 1_000)   # first sighting, no prior pos
+            proxy._ca_observe('D6', 'A', 'B', '9Z50', 1_040)  # steps A->B 40s later
+            with proxy._chain_lock:
+                self.assertIn(('passenger_other', 'Main'), proxy._ca_class_speed)
+        finally:
+            proxy._berth_info = old_info
+            proxy._cif_pax_best = old_pax_best
+            with proxy._chain_lock:
+                proxy._ca_succ.clear(); proxy._ca_succ.update(old_succ)
+                proxy._ca_pred.clear(); proxy._ca_pred.update(old_pred)
+                proxy._ca_transit.clear(); proxy._ca_transit.update(old_transit)
+                proxy._ca_last_pos.clear(); proxy._ca_last_pos.update(old_last_pos)
+                proxy._ca_class_speed.clear(); proxy._ca_class_speed.update(old_class_speed)
+
+    def test_chain_persistence_round_trips_class_speed(self):
+        old_file = proxy._CHAIN_FILE
+        with proxy._chain_lock:
+            old_class_speed = dict(proxy._ca_class_speed)
+            proxy._ca_class_speed.clear()
+            proxy._ca_class_speed[('passenger_class387', 'Relief')] = [58.2, 12]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                proxy._CHAIN_FILE = str(pathlib.Path(tmp) / 'berth_chain.json')
+                proxy._save_chain()
+                with proxy._chain_lock:
+                    proxy._ca_class_speed.clear()
+                proxy._load_chain()
+                with proxy._chain_lock:
+                    self.assertEqual(
+                        proxy._ca_class_speed.get(('passenger_class387', 'Relief')),
+                        [58.2, 12])
+        finally:
+            proxy._CHAIN_FILE = old_file
+            with proxy._chain_lock:
+                proxy._ca_class_speed.clear()
+                proxy._ca_class_speed.update(old_class_speed)
+
     def test_td_position_cutoff_keeps_a_held_train_within_600s(self):
         # A train held at a red signal doesn't step berths, so its last CA
         # message ages past any short cutoff even though it's still there
