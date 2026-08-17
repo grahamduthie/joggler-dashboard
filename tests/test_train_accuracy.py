@@ -97,17 +97,26 @@ class TrainAccuracyTests(unittest.TestCase):
         self.assertTrue(proxy._at_twy_platform_berth(
             {**fresh, 'td_berth': '1630', 'track': 'Relief', 'direction': 'up'}))
         self.assertTrue(proxy._at_twy_platform_berth(
-            {**fresh, 'td_berth': '1637', 'track': 'Relief', 'direction': 'down'}))
-        self.assertTrue(proxy._at_twy_platform_berth(
             {**fresh, 'td_berth': '1618', 'track': 'Main', 'direction': 'up'}))
-        self.assertTrue(proxy._at_twy_platform_berth(
-            {**fresh, 'td_berth': '1655', 'track': 'Main', 'direction': 'down'}))
         # Wrong platform for this line/direction, or stale, or absent.
         self.assertFalse(proxy._at_twy_platform_berth(
             {**fresh, 'td_berth': '1628', 'track': 'Relief', 'direction': 'up'}))
         self.assertFalse(proxy._at_twy_platform_berth(
             {'td_berth': '1630', 'td_berth_age': 400, 'track': 'Relief', 'direction': 'up'}))
         self.assertFalse(proxy._at_twy_platform_berth({'track': 'Relief', 'direction': 'up'}))
+
+    def test_at_twy_platform_berth_excludes_down_direction(self):
+        # A Down train's house-crossing happens on arrival, BEFORE the
+        # platform dwell (opposite of Up) -- one confirmed at its own
+        # platform berth has normally already crossed, so this check must
+        # not fire for Down even though 1637/1655 are genuinely DR/DM's own
+        # platform berths (asked directly 2026-08-17; the original fix
+        # wrongly applied the Up-only assumption to all four lines).
+        fresh = {'td_berth_age': 10}
+        self.assertFalse(proxy._at_twy_platform_berth(
+            {**fresh, 'td_berth': '1637', 'track': 'Relief', 'direction': 'down'}))
+        self.assertFalse(proxy._at_twy_platform_berth(
+            {**fresh, 'td_berth': '1655', 'track': 'Main', 'direction': 'down'}))
 
     def test_finalise_state_forces_at_station_while_at_platform_berth(self):
         # A stale/coarse 'passed' claim (observed_ts already in the past)
@@ -146,6 +155,29 @@ class TrainAccuracyTests(unittest.TestCase):
             self.assertEqual(train['observed_pass_ts'], 0)
             self.assertEqual(train['house_pass_ts'], 1_200)
             self.assertEqual(train['pass_time_source'], 'rtt_forecast')
+        finally:
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
+    def test_td_enrich_does_not_suppress_passed_for_a_down_arrival(self):
+        # A Down train genuinely at its own platform berth (1637, Down
+        # Relief) has normally already crossed the house on arrival -- the
+        # 9U97 guard above must not fire here and clear a real observed
+        # pass just because the train is now sitting at the platform.
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '1635', 'to': '1637',
+                                     'descr': '9R43', 'ts': 990}]
+        try:
+            train = {'headcode': '9R43', 'direction': 'down', 'track': 'Relief',
+                     'call_type': 'STOP', 'at_station': True,
+                     'observed_pass_ts': 985, 'display_pass_ts': 985,
+                     'house_pass_ts': 985, 'forecast_pass_ts': 1_200,
+                     'scheduled_pass_ts': 1_190, 'pass_time_source': 'td_crossing'}
+            proxy._td_enrich_trains([train], 1_000)
+            self.assertEqual(train['observed_pass_ts'], 985)
+            self.assertEqual(train['house_pass_ts'], 985)
+            self.assertEqual(train['pass_time_source'], 'td_crossing')
         finally:
             with proxy._td_lock:
                 proxy._td_buffer[:] = old_buffer

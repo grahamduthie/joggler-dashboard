@@ -9,10 +9,10 @@ right now and what to check next."
 **Deployed and stable.** All fixes this session are committed, pushed to `main`, and live on
 `cloud.gdx.org.uk` (`joggler` under Supervisor, `127.0.0.1:8002`, published via
 `dashboard.gdx.org.uk`/`nearby.gdx.org.uk`). No pending code changes. `python3 -m unittest
-tests/test_train_accuracy.py tests/test_lineside_layout.py` is green (48 + 6 tests).
+tests/test_train_accuracy.py tests/test_lineside_layout.py` is green (53 + 6 tests).
 
-**Current accuracy** (`curl -s https://nearby.gdx.org.uk/api/train-evidence`, 284 crossings scored
-as of this handoff): legacy 88.4% correct headline (14s median error), v2 78.2% (14s). **V2 must
+**Current accuracy** (`curl -s https://nearby.gdx.org.uk/api/train-evidence`, 291 crossings scored
+as of this handoff): legacy 88.3% correct headline (14s median error), v2 79.0% (14s). **V2 must
 not be promoted.** `/api/trains` (the public API every page uses) always serves the legacy
 projection regardless -- this has been true since the "one visible model" consolidation earlier
 in the session and nothing since has changed it.
@@ -32,26 +32,32 @@ rather than papered over in the frontend: ECS-as-freight (twice -- once for the 
 generalised to any digit CIF can positively identify as passenger stock), a held train's ETA being
 able to beat its own booked departure, light locomotives showing Elizabeth Line purple, the
 class-`'0'` exclusion being too broad in one direction (hid genuine light engines) then too narrow
-in the other (let rail-replacement buses onto the approach list), and a non-headcode TD descriptor
-(`'CAMS'`) that could have been synthesised into a fake predicted train; synced `/lineside`'s
-approach list to redraw on the same 5s cycle as the berth panel instead of lagging on `/api/trains`'s
-15s cycle; renamed generic `HELD`/`AT STN` to name the actual platform (`AT RDG`/`AT MAI`/`AT TWY`)
+in the other (let rail-replacement buses onto the approach list), a non-headcode TD descriptor
+(`'CAMS'`) that could have been synthesised into a fake predicted train, and a train still at its
+own Twyford platform berth showing as passed -- **Up direction only** (`_TWY_PLATFORM_BERTH`/
+`_at_twy_platform_berth`); this one was first shipped applying to all four lines "by the same
+logic" and had to be corrected the same evening after being asked directly whether DR/UM/DM got
+the same treatment -- Down's house-crossing happens on arrival, *before* the platform dwell
+(opposite of Up), so the Up-direction assumption doesn't hold there and applying it would have
+suppressed real passed statuses for Down Relief/Down Main. Also: synced `/lineside`'s approach
+list to redraw on the same 5s cycle as the berth panel instead of lagging on `/api/trains`'s 15s
+cycle; renamed generic `HELD`/`AT STN` to name the actual platform (`AT RDG`/`AT MAI`/`AT TWY`)
 when that's what's really happening. Full detail on every one of these is in the dated entries
 below, each written at the time with the live report that prompted it.
 
 **Open items for next time, roughly in priority order:**
 
-1. **Up Relief (v2) is still the worst-performing row by far** -- 48.6% correct (35/72), 106s
-   median error, versus 85-92% everywhere else. The `'passing'`-state fix helped (was 41.2% before
-   it) but did not fix the row. Don't assume it's understood: pull fresh `by_row` data
-   (`curl -s https://nearby.gdx.org.uk/api/train-evidence`) and, for the wrong crossings, the same
-   candidate-tracing method used to find the original bug (see "Verification commands" below) --
-   the dwelling-near-house fix and the misclassification fixes were different bugs on the same
-   row; there may be a third.
+1. **Up Relief (v2) is still the worst-performing row by far** -- 49.3% correct (35/71), 62s
+   median error, versus 82-91% everywhere else. Multiple fixes landed against it this session
+   (the `'passing'`-state fix, the platform-berth fix) and it is *still* clearly broken. Don't
+   assume it's understood: pull fresh `by_row` data (`curl -s
+   https://nearby.gdx.org.uk/api/train-evidence`) and, for the wrong crossings, the same
+   candidate-tracing method used to find every other bug this session (see "Verification commands"
+   below) -- there is likely a fourth distinct bug still to find on this specific row.
 2. **Unverified anomaly, needs checking, do not assume it's real or fixed:** `freight_class387` in
    the class-speed learner (`berth_chain.json`'s `class_speed`) had 26/8 samples (Relief/Main)
-   before today's ECS-generalisation fix and 28/9 after it -- small further growth that a reading
-   of the current `_speed_class_bucket` code says shouldn't be possible (a resolved
+   before the ECS-generalisation fix and 28/9 after it -- small further growth that a reading of
+   the current `_speed_class_bucket` code says shouldn't be possible (a resolved
    `_TIMING_LOAD_CLASS` match returns `'passenger_class...'` unconditionally, before `is_passenger`
    is even consulted). Either this is stale pre-fix EWMA data being misread, or there's a remaining
    path into that bucket that hasn't been found. Worth five minutes with the same live-tracing
@@ -59,18 +65,25 @@ below, each written at the time with the live report that prompted it.
 3. **Known, bounded, NOT yet fixed:** a train's first 1-2 TD sightings at certain Reading
    platform/throat berths (e.g. 1694, 1702) are invisible to corridor synthesis (`no_direction` in
    `td_unmatched`) until it takes a step where distance-based direction becomes measurable --
-   confirmed via 3T60's own trace the same day. Self-resolves within about one more berth-step, so
-   impact is bounded, not a permanent miss like the bugs that got fixed. A real fix (inferring
-   direction from the learned CA chain's dominant successor for these specific well-established
-   feeder berths) was scoped but deliberately not implemented -- it's a judgement call with real
-   edge-case risk (not every ambiguous berth is a guaranteed one-way feeder), left for the user to
-   decide is worth it rather than assumed.
+   confirmed via 3T60's own trace. Self-resolves within about one more berth-step, so impact is
+   bounded, not a permanent miss like the bugs that got fixed. A real fix (inferring direction from
+   the learned CA chain's dominant successor for these specific well-established feeder berths) was
+   scoped but deliberately not implemented -- it's a judgement call with real edge-case risk (not
+   every ambiguous berth is a guaranteed one-way feeder), left for the user to decide is worth it
+   rather than assumed.
 4. **The `ranked` model prototype is real and validated but sitting unused.** It directly
    implements TRAIN-ACCURACY-PLAN section 7's own target design (tiered source ranking) and a
    backtest showed it would have fixed v2's worst-magnitude wrong picks. It was deliberately not
    promoted or even wired into the evidence pipeline as a third scored model, because Up Relief's
    dominant failure turned out to be a different bug (state/eligibility, not ranking) -- worth
    revisiting once item 1 above is actually understood, not before.
+5. **Process note for whoever picks this up:** the Up/Down platform-berth mistake in item-1's fix
+   happened because a rule confirmed correct for one line (Up Relief, from a direct live report)
+   got generalised to the other three "by the same logic" without checking whether the underlying
+   physical asymmetry (`_detect_house_event`'s Up-departs/Down-arrives docstring) actually applies
+   to all of them. It was only caught because the user asked directly. Don't repeat this: when a
+   fix depends on a directional or line-specific physical fact, check it against each line
+   separately before generalising, not after.
 
 **Verification commands:**
 ```bash
@@ -90,17 +103,15 @@ implicitly only in the sense that you should run it yourself first -- the deploy
 does not.
 
 **Post-handoff addendum, same evening — a train still dwelling at its own Twyford platform berth
-could show as passed.** Reported live: 9U97 (Up Relief) dropped off "next past the house" and
-into the passing log while still at Twyford -- "it is only passing now". User's own diagnosis,
-confirmed correct: a train must not show as passed while still occupying its own platform berth
-(1630 for Up Relief; by the same logic 1637/Down Relief, 1618/Up Main, 1655/Down Main). Root cause
-traced in the evidence log: RTT's own `at_station` computation, and the `observed_pass_ts` it
-derives from a minute-precision actual-departure timestamp (+15s), have no live berth confirmation
-behind them and can flip a STOP call away from `at_station` before the train has genuinely left --
-confirmed in 9U97's own trace, `at_station` flipped to `'passing'` roughly 35s before the real TD
-step out of the platform berth arrived. Two-part fix, because the state label alone isn't what the
-legacy-projection frontend (all three pages, since the "one visible model" consolidation) actually
-reads:
+could show as passed. UP DIRECTION ONLY, see correction below.** Reported live: 9U97 (Up Relief)
+dropped off "next past the house" and into the passing log while still at Twyford -- "it is only
+passing now". Root cause traced in the evidence log: RTT's own `at_station` computation, and the
+`observed_pass_ts` it derives from a minute-precision actual-departure timestamp (+15s), have no
+live berth confirmation behind them and can flip a STOP call away from `at_station` before the
+train has genuinely left -- confirmed in 9U97's own trace, `at_station` flipped to `'passing'`
+roughly 35s before the real TD step out of the platform berth arrived. Two-part fix, because the
+state label alone isn't what the legacy-projection frontend (all three pages, since the "one
+visible model" consolidation) actually reads:
 - `_td_enrich_trains` (early in the per-train loop, before any 'passed' signal is trusted): if live
   TD confirms the train is still in its own platform berth (fresh, `call_type=='STOP'`), force
   `at_station=True`, clear `observed_pass_ts`, and fall back `display_pass_ts`/`house_pass_ts` to
@@ -112,9 +123,23 @@ reads:
   including the `at_station` flag itself (which the bug had already cleared upstream), for the
   `movement_state` label v2 diagnostics/scoring reads.
 Both keyed off a new `_TWY_PLATFORM_BERTH`/`_at_twy_platform_berth`, using confirmed dwell-EWMA
-platform berth codes from `reference-smart-bplan.md`. Not yet re-verified against a fresh live
-crossing post-deploy -- worth checking next time a Twyford-originating stopper is observed
-first-hand, on any of the four lines, not just Up Relief.
+platform berth codes from `reference-smart-bplan.md`.
+
+**Correction, same evening, asked directly: "have you changed the way DR/UM/DM decide passed?"**
+Yes, wrongly. The fix above was first written to apply identically to all four lines ("by the same
+logic" for 1637/Down Relief and 1655/Down Main) without checking `_detect_house_event`'s own
+docstring first, which states the exact asymmetry that breaks that assumption: an Up train crosses
+the house on **departure**, after leaving the platform, so "still in the platform berth" genuinely
+means "hasn't crossed yet" -- correct for Up Relief and Up Main. A Down train crosses on
+**arrival**, *before* the platform dwell -- a Down train confirmed at its own platform berth has
+normally *already* crossed, so the same check would have incorrectly forced `at_station=True` and
+cleared a real observed pass for every Down Relief/Down Main stopper the moment it reached its
+platform. Fixed by adding `direction == 'up'` to both guards; `_TWY_PLATFORM_BERTH` keeps all four
+berth codes as a reference table, but only the two Up entries are ever consulted. Down Relief/Down
+Main are untouched by either guard -- they still work exactly as before this whole addendum, which
+was already correct for them (that's *why* nothing needed changing there, not an oversight left
+for later). Two new tests lock in the Down exclusion specifically. Still not re-verified against a
+fresh live crossing post-deploy on any line.
 
 **2026-08-17 — a non-headcode TD descriptor could be synthesised into a fake predicted train.**
 Reported live: `CAMS` appeared at Reading P13 (D1/1694). Not a real UK headcode -- those are

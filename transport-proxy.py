@@ -2316,12 +2316,22 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
         # fire before the train has genuinely left. Reported live 2026-08-17:
         # 9U97 (Up Relief) showed passed while still at Twyford, "only
         # passing now" -- the real TD step out of the platform came ~35s
-        # after the state had already flipped away from at_station. Scoped
+        # after the state had already flipped away from at_station.
+        #
+        # UP direction only (asked directly 2026-08-17 whether DR/UM/DM got
+        # the same treatment -- they hadn't been checked and DR/DM turned
+        # out wrong): an Up train's house-crossing happens on departure,
+        # after leaving the platform -- see _detect_house_event's own
+        # docstring -- so "still in the platform berth" genuinely means
+        # "hasn't crossed yet" for Up. A Down train crosses on arrival,
+        # BEFORE the platform dwell, so a Down train confirmed at its own
+        # platform berth has normally already crossed; forcing at_station
+        # there would incorrectly suppress a real passed status. Also scoped
         # to STOP calls: a genuinely non-stopping service transiting the
         # same track circuit isn't "at the platform" in the sense that
         # matters here.
         pos_now = td_pos.get(hc)
-        if (t.get('call_type') == 'STOP' and pos_now
+        if (t.get('direction') == 'up' and t.get('call_type') == 'STOP' and pos_now
                 and now - pos_now['ts'] < 300
                 and pos_now['to'] == _TWY_PLATFORM_BERTH.get((t.get('track'), t.get('direction')))):
             t['at_station'] = True
@@ -3105,10 +3115,9 @@ def _td_berth_rejects_station(binfo, age_s):
 
 # Twyford's own platform berth per line (dwell-EWMA confirmed, see
 # reference-smart-bplan.md): P4=1630 (Up Relief), P3=1637 (Down Relief),
-# P2=1618 (Up Main), P1=1655 (Down Main). A train sitting in its own
-# platform berth has definitionally not passed the house yet, regardless of
-# what any distance/timestamp-based evidence claims -- see
-# _at_twy_platform_berth's use in _finalise_train_state.
+# P2=1618 (Up Main), P1=1655 (Down Main). Kept as a complete reference table
+# for all four lines, but _at_twy_platform_berth only ever consults the
+# 'up' entries -- see its docstring for why Down is deliberately excluded.
 _TWY_PLATFORM_BERTH = {
     ('Relief', 'up'): '1630',
     ('Relief', 'down'): '1637',
@@ -3118,6 +3127,24 @@ _TWY_PLATFORM_BERTH = {
 
 
 def _at_twy_platform_berth(t):
+    """Whether TD confirms the train is still sitting in its own Twyford
+    platform berth -- Up direction only.
+
+    _detect_house_event's own docstring states the asymmetry this depends
+    on: an Up train's house-crossing happens on DEPARTURE, after leaving the
+    platform, so "still in the platform berth" genuinely means "hasn't
+    crossed yet". A Down train's crossing happens on ARRIVAL, BEFORE the
+    platform dwell -- a Down train confirmed at its own platform berth has
+    normally already crossed, so this same berth-occupancy check would
+    assert the wrong thing there. Deliberately not extended to Down (asked
+    directly, 2026-08-17, after the original fix applied this to all four
+    lines without checking that asymmetry first): Up Main shares Up
+    Relief's semantics and is correctly included; Down Relief/Down Main do
+    not share it and are excluded pending their own, separately-reasoned
+    fix if one turns out to be needed.
+    """
+    if t.get('direction') != 'up':
+        return False
     berth = t.get('td_berth')
     age = t.get('td_berth_age')
     if not berth or age is None or age >= 300:
