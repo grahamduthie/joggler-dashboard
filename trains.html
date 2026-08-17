@@ -265,6 +265,41 @@ main {
   flex-shrink: 0;
 }
 #alert .msg { overflow: hidden; text-overflow: ellipsis; }
+
+/* ── O2 Joggler launch ───────────────────────────────────────────
+   Applied only when opened from the dashboard's Joggler-only menu.  Keeping
+   these rules behind .joggler preserves the presentation for every normal
+   browser, including other 800px-wide displays. */
+html.joggler header {
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+}
+html.joggler #back { font-size: 26px; line-height: 1; }
+html.joggler #title { font-size: 29px; letter-spacing: 0.07em; }
+html.joggler #title small { display: none; }
+html.joggler #stale { font-size: 14px; }
+html.joggler #clock { font-size: 29px; }
+html.joggler .track {
+  grid-template-columns: 108px minmax(0, 1fr) 116px;
+  gap: 0 10px;
+  padding-right: 12px;
+}
+html.joggler .t-id { padding-left: 16px; gap: 2px; }
+html.joggler .t-id .arrow { font-size: 30px; }
+html.joggler .t-id .name { font-size: 23px; }
+html.joggler .t-id .dirword { font-size: 11px; }
+html.joggler .t-main { gap: 3px; padding: 5px 0; }
+html.joggler .t-dest { font-size: 43px; }
+html.joggler .t-sub { gap: 7px; font-size: 15px; }
+html.joggler .t-next { font-size: 12px; }
+html.joggler .t-eta { min-width: 116px; gap: 2px; }
+html.joggler .t-count { font-size: 62px; }
+html.joggler .t-count.stn,
+html.joggler .t-count.held { font-size: 38px; }
+html.joggler .t-count.gone { font-size: 32px; }
+html.joggler .t-status { font-size: 12px; }
+html.joggler #alert { padding: 5px 12px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -554,6 +589,13 @@ function tick() {
 }
 
 /* ── Boot ───────────────────────────────────────────────── */
+const params = new URLSearchParams(window.location.search);
+if (params.get('joggler') === '1') {
+  document.documentElement.classList.add('joggler');
+  const back = document.getElementById('back');
+  back.href = 'https://dashboard.gdx.org.uk/';
+  back.setAttribute('onmousedown', "window.location.href='https://dashboard.gdx.org.uk/'");
+}
 document.body.classList.add('hidecursor');
 fetchTrains();
 fetchNrcc();

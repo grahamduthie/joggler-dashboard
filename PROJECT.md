@@ -695,6 +695,11 @@ Tap a row to expand calling points. Settings (⚙) persists station/platform to 
 Default: TWY, all platforms (was hardcoded to platform 4 only until 2026-07-27 — an old
 saved `transConfig.platform: '4'` is migrated to `''` automatically on load).
 
+On the Joggler only, the departures header includes a **Passing trains** button. It opens
+`https://nearby.gdx.org.uk/trains?joggler=1`, rather than replacing the standard departures
+view. The query flag enables the standalone board's compact 800×480 presentation and points its
+back control to `https://dashboard.gdx.org.uk/`; no styles or navigation change for other devices.
+
 Departure status: `On time` → `OT` · `Delayed` → `D` · `Cancelled` → `C` · e.g. `Late 3 mins` → `3L`.
 
 **Flights tab:**
@@ -818,6 +823,11 @@ Served at `GET /trains` — a separate page from `dashboard.html`, showing real-
 information for all trains passing the house (~200 m east of Twyford station). The house is
 adjacent to four tracks: two Main Line tracks (fast GWR inter-city and freight) and two Relief
 Line tracks (GWR local and Elizabeth Line stopping services).
+
+The page is normally device-neutral. A dashboard Joggler launch adds `?joggler=1`, which applies
+the `html.joggler` compact board rules (fixed-size header, four readable track rows and compact
+alert strip) and returns the back button to the dashboard. This isolated launch flag is deliberate:
+opening `/trains` normally keeps the existing presentation unchanged on every other device.
 
 **Data source:** Real Time Trains (RTT) API v2 (`data.rtt.io`). RTT is queried with **two calls**
 per 30-second polling cycle (run in parallel threads):

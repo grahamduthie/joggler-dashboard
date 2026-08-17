@@ -25,8 +25,8 @@ USB stick, and repurposes the device as a persistent household display.
 | **Weather** | Current conditions, hourly chart, 7-day forecast. NOW / TODAY / WEEK tabs. Sun arc, wind compass, AQI, indoor temperatures from Hive heating. |
 | **Radio** | 30+ stations — Marlow FM (with live SSE now-playing), Bauer/Global/indie streams. Station picker grid. Chromecast casting. |
 | **WagtailCam** | Live MJPEG stream and dated timelapse from a garden wildlife camera. |
-| **Trains** | Next 5 departures from Twyford station (National Rail live feed). Tap for calling points. |
-| **Trains detail** (`/trains`) | Standalone full-screen trains SPA (Real Time Trains API). Shows all trains passing the house — stopping, non-stopping, and Main Line fast trains estimated from Reading. RECENT / NEXT / LIST modes with operator branding. |
+| **Trains** | Next 5 departures from Twyford station (National Rail live feed). Tap for calling points. On the Joggler, the live-departures header also has a **Passing trains** button. |
+| **Trains detail** (`/trains`) | Standalone full-screen four-track board (Real Time Trains API). Shows trains passing the house — stopping, non-stopping, and Main Line fast trains estimated from Reading. When launched from the Joggler button, it uses a compact 800×480 layout and returns to the dashboard. |
 | **Flights** | Leaflet.js radar map with ADS-B live positions, airline logos, and FlightAware route details. |
 | **Aircraft detail** (`/aircraft`) | Standalone full-screen aircraft SPA. Tap any aircraft for detail view; Focus mode shows a single large display of the closest commercial aircraft with live stats — designed to identify overhead aircraft at a glance. |
 | **Buses** | Live departure board for Twyford stops (routes 850, 127, 128, 129, 12). Leaflet.js map with live vehicle positions. |
