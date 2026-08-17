@@ -131,6 +131,20 @@ sudo tee /etc/sudoers.d/of-poweroff > /dev/null << 'EOF'
 of ALL=(ALL) NOPASSWD: /usr/bin/systemctl poweroff
 EOF
 
+# Chromium 146+ treats HTTPS requests to localhost as Local Network Access.
+# The dashboard's power tile calls only the Joggler-local shutdown helper on
+# 127.0.0.1:9999, so pre-approve precisely this dashboard origin. Without this
+# managed policy Chromium shows a permission dialog at every shutdown.
+sudo install -d -m 0755 /etc/chromium/policies/managed
+sudo tee /etc/chromium/policies/managed/joggler-local-services.json > /dev/null << 'EOF'
+{
+  "LoopbackNetworkAllowedForUrls": [
+    "https://dashboard.gdx.org.uk"
+  ]
+}
+EOF
+sudo chmod 644 /etc/chromium/policies/managed/joggler-local-services.json
+
 # ── Fix ownership ──
 chown of:of /home/of/.bash_profile /home/of/.xinitrc /home/of/kiosk.sh /home/of/dashboard.html 2>/dev/null || true
 chown -R of:of /home/of/.config/openbox

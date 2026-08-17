@@ -178,6 +178,32 @@ Should show: `touch-bridge.py` and `shutdown-server.py`
 ssh -i ~/.ssh/id_ed25519 of@172.16.10.168 'pgrep -c chromium'
 ```
 
+### Prevent the shutdown permission prompt (Chromium 146+)
+
+The dashboard is served over HTTPS but its power button calls the Joggler's
+local `http://localhost:9999/shutdown` helper. Recent Chromium versions protect
+such loopback requests with a **"wants to access other apps and services on this
+device"** prompt. This is expected browser behaviour, but unsuitable for a
+kiosk with no conventional power button.
+
+`setup-kiosk.sh` installs a managed Chromium policy that allows only
+`https://dashboard.gdx.org.uk` to access loopback services. On an existing
+Joggler, install it once and restart Chromium (or reboot):
+
+```bash
+sudo install -d -m 0755 /etc/chromium/policies/managed
+sudo tee /etc/chromium/policies/managed/joggler-local-services.json > /dev/null <<'EOF'
+{
+  "LoopbackNetworkAllowedForUrls": ["https://dashboard.gdx.org.uk"]
+}
+EOF
+sudo chmod 644 /etc/chromium/policies/managed/joggler-local-services.json
+```
+
+Verify after Chromium starts at `chrome://policy`: the
+`LoopbackNetworkAllowedForUrls` policy should show the dashboard origin. Do not
+replace this with a broad allow-list or a flag disabling Local Network Access.
+
 **Take a screenshot:**
 
 ```bash
