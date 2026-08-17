@@ -16,6 +16,45 @@ outright. A first candidate along these lines (`_select_headline_candidate` / `_
 `ranked` variant implementing section 7's tiered-source rule below) exists in `transport-proxy.py`
 but is not yet wired into the evidence pipeline.
 
+**2026-08-17 — Up Relief identified as the concentrated failure, evidence log instrumented
+to diagnose it.** A row-by-row breakdown of scored crossings (223 scored) found v2 wrong on
+Up Relief **59.0%** of the time (36/61) against 8.9-26.0% everywhere else, and legacy also
+worst there (16.4-20.0% on the two Relief rows vs 8.9-14.3% on Main). 19 of v2's 36 Up Relief
+misses were sourced from `td_eta` -- its *most* trusted tier -- ruling out the ranking bug as
+the cause here: v2 was confident and still wrong about which physical train it was looking at.
+Leading hypothesis: Up Relief passes the messiest geography in the corridor (nine parallel
+Reading platform/throat berths converging on one anchor, `1676`, plus the ambiguous Kennet Loop
+siding `1679` beside it -- see LINESIDE-GEOMETRY-PLAN.md), and v2's conservative track-lock
+(only reclassifies within the final 1.6 mi approach, vs legacy's immediate reclassification on
+any live sighting) may commit to the wrong candidate early there and never correct it.
+
+The evidence log previously only recorded the winning candidate per row, which can prove a pick
+was wrong but not explain *why* -- whether the correct train was never a candidate at all, was a
+candidate but on the wrong row/track, or lost to a worse candidate. Instrumented to answer this:
+- `_row_candidates()` -- every same-row train per row per model, not just the winner, each with
+  `eligible`, `source`, `track_source`/`track_confidence`, `td_area`/`td_berth`/`td_dist_mi`/
+  `td_berth_age`. Attached to every decision record as `candidates.legacy`/`candidates.v2`.
+- `_td_enrich_trains(..., skip_log=...)` -- every TD-seen headcode that never became a trains
+  entry now gets a reason (`stale_fix`, `no_berth_distance`, `no_direction`, `outside_corridor`,
+  `endpoints_dont_pass_twyford`, `no_eta`, `henley_or_light_loco`). Attached as `td_unmatched`.
+- Legacy's recorded `source` is now the real shared `pass_time_source` (`td_eta`/`rtt_forecast`/
+  `schedule`/...) instead of a coarse two-bucket label -- it was too coarse to tell a td_eta pick
+  from a schedule-only one when diagnosing a wrong legacy headline after the fact.
+- `/api/train-evidence` gained `by_row` and `by_source` (both models; `v2_by_source` kept for
+  compatibility). This is what should be checked first after the next data-collection window --
+  it would have shown the Up Relief concentration directly instead of needing an offline pull.
+
+**Bug found and fixed while adding the above:** `cutoff_pos` (how old a TD position can be
+before `_td_enrich_trains` won't consider it at all) was `now - 300`, but the synthesis loop's
+own staleness check a few lines later is `age > 600`, with a comment specifically explaining why
+600s (a train held at a red for several minutes is still genuinely there). The 300s cutoff meant
+that check was unreachable dead code -- a held train's last position aged out and vanished from
+candidacy entirely at 300s, before the 600s tolerance it was written for ever got a chance to
+apply. Fixed by raising `cutoff_pos` to `now - 600`; safe because both downstream consumers that
+specifically need freshness (`_berth_eta_to_house_s` ETA refinement, `_td_berth_rejects_station`)
+already self-guard at 300s. This is itself a plausible contributor to "correct train never
+visible" cases and is worth checking against the row/candidate data once it accumulates.
+
 Created: 2026-08-16
 
 Primary files:

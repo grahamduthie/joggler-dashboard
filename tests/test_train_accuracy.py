@@ -182,6 +182,108 @@ class TrainAccuracyTests(unittest.TestCase):
         self.assertEqual(legacy_keys['um'], 'phantom')
         self.assertEqual(ranked_keys['um'], 'real')
 
+    def test_td_position_cutoff_keeps_a_held_train_within_600s(self):
+        # A train held at a red signal doesn't step berths, so its last CA
+        # message ages past any short cutoff even though it's still there
+        # (see the comment on cutoff_pos). 450s: within the 600s the
+        # synthesis loop is meant to tolerate, but past the old 300s cutoff
+        # that used to discard it before that tolerance ever applied.
+        old_info = proxy._berth_info
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D6', 'from': '1608', 'to': '1604',
+                                     'descr': '9Z99', 'ts': 550}]
+        try:
+            proxy._berth_info = lambda area, berth: {
+                'line': 'Main', 'dist_mi': 2.0, 'dir': 'up', 'stanme': 'X'}
+            skip_log = []
+            trains = []
+            proxy._td_enrich_trains(trains, 1_000, skip_log=skip_log)
+            self.assertEqual(skip_log, [])
+            self.assertEqual(len(trains), 1)
+            self.assertEqual(trains[0]['headcode'], '9Z99')
+        finally:
+            proxy._berth_info = old_info
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
+    def test_fixes_older_than_the_position_cutoff_are_silently_absent(self):
+        # A position older than cutoff_pos (600s) never enters td_pos at all,
+        # so it's invisible even to skip_log -- not a "reason", just absence.
+        # Documents the current known boundary of what this diagnostic can see.
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D6', 'from': '1608', 'to': '1604',
+                                     'descr': '9Z99', 'ts': 100}]
+        try:
+            skip_log = []
+            proxy._td_enrich_trains([], 1_000, skip_log=skip_log)
+            self.assertEqual(skip_log, [])
+        finally:
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
+    def test_td_synthesis_skip_log_explains_outside_corridor(self):
+        old_info = proxy._berth_info
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D6', 'from': '0400', 'to': '0390',
+                                     'descr': '9Z98', 'ts': 995}]
+        try:
+            proxy._berth_info = lambda area, berth: {
+                'line': 'Main', 'dist_mi': 10.0, 'dir': 'up', 'stanme': 'FAR'}
+            skip_log = []
+            proxy._td_enrich_trains([], 1_000, skip_log=skip_log)
+            self.assertEqual(len(skip_log), 1)
+            self.assertEqual(skip_log[0]['reason'], 'outside_corridor')
+        finally:
+            proxy._berth_info = old_info
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
+    def test_row_candidates_includes_ineligible_trains_with_a_reason_visible(self):
+        trains = [
+            {'uid': 'winner', 'run_key': 'winner', 'direction': 'up', 'track': 'Main',
+             'legacy_track': 'Main', 'legacy_house_pass_ts': 1_010,
+             'house_pass_ts': 1_010, 'pass_time_source': 'td_eta',
+             'movement_state': 'approaching'},
+            {'uid': 'too_old', 'run_key': 'too_old', 'direction': 'up', 'track': 'Main',
+             'legacy_track': 'Main', 'legacy_house_pass_ts': 500,
+             'house_pass_ts': 500, 'pass_time_source': 'schedule',
+             'movement_state': 'stale'},
+        ]
+        candidates = proxy._row_candidates(trains, 1_000, 'legacy')
+        self.assertEqual(len(candidates['um']), 2)
+        by_uid = {c['uid']: c for c in candidates['um']}
+        self.assertTrue(by_uid['winner']['eligible'])
+        self.assertFalse(by_uid['too_old']['eligible'])
+        self.assertEqual(candidates['ur'], [])
+
+    def test_evidence_snapshot_carries_candidates_and_td_unmatched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_file = proxy.TRAIN_EVIDENCE_FILE
+            proxy.TRAIN_EVIDENCE_FILE = str(pathlib.Path(tmp) / 'evidence.jsonl')
+            with proxy._evidence_lock:
+                proxy._evidence_recent.clear()
+                proxy._evidence_last_signature = ''
+                proxy._evidence_last_record_ts = 0
+            try:
+                train = {'uid': 'U1', 'run_key': 'U1', 'headcode': '1A00',
+                         'direction': 'up', 'track': 'Main', 'legacy_track': 'Main',
+                         'legacy_house_pass_ts': 1_010, 'house_pass_ts': 1_010,
+                         'display_pass_ts': 1_010, 'movement_state': 'approaching',
+                         'pass_time_source': 'td_eta'}
+                proxy._evidence_record_snapshot(
+                    [train], 1_000,
+                    td_unmatched=[{'headcode': '9Z97', 'area': 'D6', 'berth': '0400',
+                                   'reason': 'outside_corridor'}])
+                recorded = proxy._evidence_recent[-1]
+                self.assertIn('um', recorded['candidates']['legacy'])
+                self.assertEqual(recorded['candidates']['legacy']['um'][0]['headcode'], '1A00')
+                self.assertEqual(recorded['td_unmatched'][0]['headcode'], '9Z97')
+            finally:
+                proxy.TRAIN_EVIDENCE_FILE = old_file
+
     def test_legacy_and_v2_headline_selection_are_independent(self):
         # legacy and v2 use different track classification and eligibility
         # rules internally (see _headline_run_keys); this is still exercised

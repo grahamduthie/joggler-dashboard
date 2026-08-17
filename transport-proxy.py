@@ -1699,7 +1699,8 @@ def _rtt_build_trains():
         t['display_pass_ts'] = int(display_ts) if display_ts else 0
         t['house_pass_ts'] = t['display_pass_ts']
 
-    _td_enrich_trains(trains, now, ident)
+    td_skip_log = []
+    _td_enrich_trains(trains, now, ident, skip_log=td_skip_log)
 
     # At this point both models have seen the same inputs.  Their only timing
     # difference in the old model was that calibration also moved a physical
@@ -1807,7 +1808,7 @@ def _rtt_build_trains():
     trains.sort(key=lambda t: t.get('display_pass_ts') or t.get('house_pass_ts')
                 or _iso_to_ts(t.get('twy_sched', '')))
     result = {'trains': trains, 'ts': int(now)}
-    _evidence_record_snapshot(trains, now)
+    _evidence_record_snapshot(trains, now, td_unmatched=td_skip_log)
 
     with _lock:
         _rtt_trains_data = result
@@ -2180,11 +2181,24 @@ def _chain_refresh_loop():
             print(f'chain refresh: {e}')
 
 
-def _td_enrich_trains(trains, now, ident=None):
+def _td_enrich_trains(trains, now, ident=None, skip_log=None):
     """Enrich train list with TD house-crossing events and live berth positions,
-    then synthesise entries for live corridor trains no schedule source knew."""
+    then synthesise entries for live corridor trains no schedule source knew.
+
+    ``skip_log``, if given a list, gets one compact record per TD-seen
+    headcode that never became a trains entry, with why -- diagnostic only,
+    for tracking down "the correct train never appeared" evidence-log cases.
+    """
     ident = ident or {}
-    cutoff_pos   = now - 300
+    # Matches the synthesis loop's own 600s staleness tolerance below (a
+    # train held at a red for several minutes is still genuinely there --
+    # see that check's comment). A tighter cutoff here previously discarded
+    # a held train's last position before that check ever ran, silently
+    # dropping candidacy for exactly the trains it was meant to protect.
+    # The two downstream consumers that specifically need freshness
+    # (_berth_eta_to_house_s refinement, _td_berth_rejects_station) already
+    # self-guard at 300s, so widening this doesn't loosen those.
+    cutoff_pos   = now - 600
     cutoff_house = now - 3600
     td_pos = {}
     with _td_lock:
@@ -2320,7 +2334,14 @@ def _td_enrich_trains(trains, now, ident=None):
     for hc, pos in td_pos.items():
         if hc in train_hcs:
             continue
+
+        def _skip(reason):
+            if skip_log is not None:
+                skip_log.append({'headcode': hc, 'area': pos['area'],
+                                  'berth': pos.get('to'), 'reason': reason})
+
         if hc.startswith('2H') or hc[:1] == '0':
+            _skip('henley_or_light_loco')
             continue          # Henley branch shuttle / light-loco-bus moves
         # 600s, not the old 180s: a train held at a red signal for several minutes —
         # e.g. approach control near a busy station, a real and unremarkable
@@ -2333,9 +2354,11 @@ def _td_enrich_trains(trains, now, ident=None):
         # staleness window (420s) rather than the tighter value this used to use.
         age = now - pos['ts']
         if age > 600:
+            _skip('stale_fix')
             continue          # stale fix — may have stopped or left the area
         info = _berth_info(pos['area'], pos['to'])
         if not info or info.get('dist_mi') is None:
+            _skip('no_berth_distance')
             continue
         d = info['dist_mi']
         # Actual from→to movement is ground truth for THIS train; SMART's 'dir'
@@ -2356,6 +2379,7 @@ def _td_enrich_trains(trains, now, ident=None):
         if not direction:
             direction = info.get('dir') or ''
         if not direction:
+            _skip('no_direction')
             continue
         # Cover the WHOLE corridor for both directions, not just the
         # pre-house half. Originally this only synthesised entries for
@@ -2373,6 +2397,7 @@ def _td_enrich_trains(trains, now, ident=None):
         # no reason to gate this on direction/side — just exclude the tiny
         # dead zone right at the house itself.
         if not (-6.3 < d < 4.95 and abs(d) > 0.05):
+            _skip('outside_corridor')
             continue          # outside the no-turnback corridor
         who = ident.get(hc) or {}
         ci  = _cif_ident(hc) or _cif_pax_ident(hc)
@@ -2411,6 +2436,7 @@ def _td_enrich_trains(trains, now, ident=None):
         trust_measured = direction_measured and not in_outer_throat
         if (not trust_measured and who.get('origin') and who.get('dest')
                 and not _passes_twyford(direction, who['origin'], who['dest'])):
+            _skip('endpoints_dont_pass_twyford')
             continue
         passenger = who['passenger'] if 'passenger' in who else (hc[:1] in '129')
         line = info.get('line') or ''
@@ -2418,6 +2444,7 @@ def _td_enrich_trains(trains, now, ident=None):
         res = _berth_eta_to_house_s(pos['area'], pos['to'], direction,
                                     passenger, is_main, int(age))
         if res is None:
+            _skip('no_eta')
             continue
         eta_s, held = res
         pass_ts = int(now + eta_s)
@@ -3084,11 +3111,13 @@ def _evidence_headlines(trains, now, model):
             continue
         if model == 'legacy':
             pass_ts = selected.get('legacy_house_pass_ts') or selected.get('house_pass_ts') or 0
-            source = ('legacy_actual_or_forecast' if selected.get('legacy_twy_actual')
-                      else 'legacy_schedule_or_td')
         else:
             pass_ts = selected.get('display_pass_ts') or selected.get('house_pass_ts') or 0
-            source = selected.get('pass_time_source') or 'schedule'
+        # pass_time_source is shared by both models (set once, before the
+        # legacy/v2 split) -- record it for legacy too instead of the old
+        # two-bucket label, which was too coarse to tell a td_eta pick from
+        # a schedule-only one when diagnosing a wrong headline after the fact.
+        source = selected.get('pass_time_source') or 'schedule'
         result[row] = {
             'run_key': run_key,
             'uid': selected.get('uid', ''),
@@ -3100,7 +3129,44 @@ def _evidence_headlines(trains, now, model):
     return result
 
 
-def _evidence_record_snapshot(trains, now):
+def _row_candidates(trains, now, model):
+    """Every same-row train per row, not just the one headline picks.
+
+    Diagnostic-only, for _evidence_record_snapshot. A log of only the winner
+    can show a wrong pick was wrong, but not whether the correct train was
+    ever a candidate at all (and if so, why it lost) -- this answers that
+    without needing to reproduce the whole trains list from elsewhere.
+    """
+    rows = {'ur': [], 'dr': [], 'um': [], 'dm': []}
+    for t in trains:
+        track = (t.get('track') if model == 'v2' else t.get('legacy_track'))
+        direction = t.get('direction')
+        if direction not in ('up', 'down') or track not in ('Main', 'Relief'):
+            continue
+        key = ('u' if direction == 'up' else 'd') + ('m' if track == 'Main' else 'r')
+        eligible = (_v2_headline_eligible(t, now) if model == 'v2'
+                    else _legacy_headline_eligible(t, now))
+        ts = ((t.get('display_pass_ts') if model == 'v2'
+               else t.get('legacy_house_pass_ts')) or t.get('house_pass_ts') or 0)
+        rows[key].append({
+            'headcode': t.get('headcode', ''),
+            'uid': t.get('uid', ''),
+            'eligible': eligible,
+            'pass_ts': int(ts) if ts else 0,
+            'source': t.get('pass_time_source') or 'schedule',
+            'state': t.get('movement_state', ''),
+            'cancelled': bool(t.get('cancelled')),
+            'track_source': t.get('track_source', ''),
+            'track_confidence': t.get('track_confidence', ''),
+            'td_area': t.get('td_area', ''),
+            'td_berth': t.get('td_berth', ''),
+            'td_dist_mi': t.get('td_dist_mi'),
+            'td_berth_age': t.get('td_berth_age'),
+        })
+    return rows
+
+
+def _evidence_record_snapshot(trains, now, td_unmatched=None):
     """Store changed choices (and a one-minute heartbeat) for TD scoring."""
     global _evidence_last_signature, _evidence_last_record_ts
     record = {
@@ -3115,6 +3181,18 @@ def _evidence_record_snapshot(trains, now):
             return False
         _evidence_last_signature = signature
         _evidence_last_record_ts = now
+        # Diagnostic-only fields: they ride along with whatever record the
+        # signature/heartbeat logic above decided to write, but deliberately
+        # don't affect that decision -- fuller candidate detail every poll
+        # would make the log's write cadence (and size) hard to reason
+        # about, for no scoring benefit (scoring only ever reads 'legacy'
+        # and 'v2' above).
+        record['candidates'] = {
+            'legacy': _row_candidates(trains, now, 'legacy'),
+            'v2': _row_candidates(trains, now, 'v2'),
+        }
+        if td_unmatched:
+            record['td_unmatched'] = td_unmatched
         _evidence_recent.append(record)
         _evidence_append(record)
     return True
@@ -3227,20 +3305,35 @@ def _evidence_metrics(limit=2000):
             'correct_rate': round(sum(bool(s.get('correct_headline')) for s in entries) / len(entries), 3) if entries else None,
             'median_abs_eta_error_s': int(sorted(errors)[len(errors) // 2]) if errors else None,
         }
-    source_stats = {}
-    for score in (s for s in scores if s.get('model') == 'v2' and s.get('source')):
-        stat = source_stats.setdefault(score['source'], {'n': 0, 'correct': 0, 'abs_errors': []})
-        stat['n'] += 1
-        stat['correct'] += bool(score.get('correct_headline'))
-        if score.get('eta_error_s') is not None:
-            stat['abs_errors'].append(abs(score['eta_error_s']))
-    for stat in source_stats.values():
-        errors = sorted(stat.pop('abs_errors'))
-        stat['correct_rate'] = round(stat['correct'] / stat['n'], 3)
-        stat['median_abs_eta_error_s'] = int(errors[len(errors) // 2]) if errors else None
+    def _breakdown(group_key):
+        by_model = {}
+        for model in ('legacy', 'v2'):
+            stats = {}
+            for score in (s for s in scores
+                          if s.get('model') == model and s.get(group_key)):
+                stat = stats.setdefault(score[group_key],
+                                         {'n': 0, 'correct': 0, 'abs_errors': []})
+                stat['n'] += 1
+                stat['correct'] += bool(score.get('correct_headline'))
+                if score.get('eta_error_s') is not None:
+                    stat['abs_errors'].append(abs(score['eta_error_s']))
+            for stat in stats.values():
+                errors = sorted(stat.pop('abs_errors'))
+                stat['correct_rate'] = round(stat['correct'] / stat['n'], 3)
+                stat['median_abs_eta_error_s'] = int(errors[len(errors) // 2]) if errors else None
+            by_model[model] = stats
+        return by_model
+
+    by_source = _breakdown('source')
+    by_row = _breakdown('row')
     return {'decisions_logged': decisions, 'crossings_scored': len(scores) // 2,
             'manual_observations': manual_observations,
-            'models': models, 'v2_by_source': source_stats}
+            'models': models,
+            # v2_by_source kept for compatibility; source data is now equally
+            # meaningful for legacy (see _evidence_headlines), so both are
+            # also available per-model under by_source/by_row.
+            'v2_by_source': by_source['v2'],
+            'by_source': by_source, 'by_row': by_row}
 
 
 def _save_sig_learned():
