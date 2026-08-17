@@ -1553,8 +1553,18 @@ def _rtt_build_trains():
         # train's own direction (UP +, DOWN −), so both directions are kept.
         t = _rtt_normalise(svc, confirmed=False)
         hc = t['headcode']
-        if not t['twy_sched'] or hc.startswith('2H'):
-            continue                      # no time / Henley branch -- never reaches this corridor
+        # '0B' is a rail-replacement bus service (a genuine, standard headcode
+        # convention -- 'Z' for light engine, 'B' for bus -- confirmed live
+        # 2026-08-17: 0B00, Reading-Heathrow bus, appeared on the approach
+        # list with an ETA that could never resolve, since a bus has no TD
+        # presence to ever confirm it. This is the ORIGINAL reason class '0'
+        # was excluded wholesale (see the light-loco fix earlier the same
+        # day) -- the bundling just caught genuine light engines too. RTT
+        # lists buses as bookable public services same as trains, which is
+        # why this loop (not corridor synthesis, which buses can't reach
+        # anyway with no TD presence) is where it actually needs excluding.
+        if not t['twy_sched'] or hc.startswith('2H') or hc.startswith('0B'):
+            continue                      # no time / Henley branch / rail-replacement bus
         if t['op_code'] == 'HX':          # Heathrow Express — own track, not via Twyford
             continue
         if (t.get('line_code') or '') == 'BUS':
@@ -2447,14 +2457,22 @@ def _td_enrich_trains(trains, now, ident=None, skip_log=None):
         if hc.startswith('2H'):
             _skip('henley_branch')
             continue          # Henley branch shuttle -- physically never reaches this corridor
-        # NOTE: headcode class '0' (light locomotive) used to be excluded here
-        # too, bundled with Henley under the same "out of scope" assumption.
-        # That's wrong for a light engine running on the MAIN corridor -- it
-        # physically passes the house like anything else, unlike a Henley
-        # shuttle which genuinely never leaves the branch. Reported live
-        # 2026-08-17: 0Z47 passed the house and never appeared, because of
-        # exactly this. Removed; light engines now flow through the same
-        # corridor synthesis as everything else.
+        if hc.startswith('0B'):
+            _skip('rail_replacement_bus')
+            continue          # a bus has no TD presence to synthesise anyway; belt-and-braces
+        # NOTE: this used to exclude all of headcode class '0' (bundled with
+        # Henley) on the assumption '0' meant "light-loco-bus moves", i.e.
+        # out of scope either way. That conflated two real but different
+        # digit-'0' conventions: 'Z' for light engine (genuinely runs the
+        # main corridor, physically passes the house) and 'B' for a rail-
+        # replacement bus (a road vehicle, no TD presence, never will). Two
+        # live reports the same day found both halves of the mistake: 0Z47
+        # passed the house and never appeared (fixed by narrowing this to
+        # '0B' specifically, see above); 0B00 (Reading-Heathrow bus) then
+        # showed up on the approach list with an ETA that could never
+        # resolve (fixed at its actual source, the RTT-predictor loop in
+        # _rtt_build_trains, since a bus is RTT-listed but has no TD
+        # presence to ever be excluded by here in the first place).
         # 600s, not the old 180s: a train held at a red signal for several minutes —
         # e.g. approach control near a busy station, a real and unremarkable
         # occurrence on this corridor (see SIGNALS-PLAN.md's signalling research) —

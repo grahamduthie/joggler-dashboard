@@ -1,14 +1,35 @@
 # Plan: Make `/trains` and `/now` Accurate and Self-Correcting
 
 **2026-08-17 — light locomotive moves (headcode class '0') were excluded from the corridor
-entirely.** Reported live: 0Z47 physically passed the house and never appeared on `/trains` or
-`/lineside`. Both `_td_enrich_trains`'s corridor synthesis and the Reading RTT-predictor loop
-skipped any headcode starting `'0'`, bundled into the same check as the Henley branch (`'2H'`)
-exclusion under a single "out of scope" assumption. That's wrong for light engines specifically:
-a Henley shuttle genuinely never leaves the branch, but a light locomotive can and does run on the
-main corridor like anything else. Fixed by dropping the `'0'` half of both checks, keeping only
-the Henley exclusion (still correct -- that branch really is out of scope). `_td_unmatched`'s
-`henley_or_light_loco` skip reason is renamed `henley_branch` to match.
+entirely; the real digit-'0' split is light engine ('0Z') vs rail-replacement bus ('0B').**
+Reported live in three stages the same day:
+1. 0Z47 physically passed the house and never appeared on `/trains` or `/lineside`. Both
+   `_td_enrich_trains`'s corridor synthesis and the Reading RTT-predictor loop skipped any
+   headcode starting `'0'`, bundled into the same check as the Henley branch (`'2H'`) exclusion
+   under a single "out of scope" assumption. Fixed by dropping the whole-class-'0' check from
+   both loops, keeping only Henley (still correct -- that branch really is out of scope).
+   `_td_unmatched`'s `henley_or_light_loco` skip reason renamed `henley_branch` to match.
+2. Then 0Z47 showed up on `/lineside`'s berth panel in Elizabeth Line purple. The berth panel
+   renders straight from `/api/td-live` position objects, which carry no `passenger` field at
+   all (only `headcode`/`area`/`berth`/`line`/`place`/`dist_mi`), so `opInfo()`'s freight test
+   (`t.passenger === false || isFrtHc(hc)`) can't see it there even though the fuller
+   `/api/trains` entry does report `passenger: false` correctly -- it fell through to the
+   Maidenhead-place fallback (`MAID_PLACES`, "an unmatched sighting there is overwhelmingly
+   Elizabeth Line") and got purple. Fixed by giving light locos their own headcode-only check
+   (`isLightLocoHc`, `hc[0]==='0'`) and colour in `opInfo()` on all three pages (`lineside.html`,
+   `trains.html`, `now.html`), checked ahead of both the freight test and the Maidenhead
+   fallback so it doesn't depend on which data shape called it.
+3. That fix's undo of step 1 (removing the whole-class-'0' exclusion) turned out too broad: 0B00
+   (a Reading-Heathrow rail-replacement bus) then appeared on the approach list with an ETA that
+   could never resolve -- a bus is RTT-listed as a bookable public service but is a road vehicle
+   with no TD presence to ever confirm it. This was the plan's own original, correct reason for
+   excluding class '0' in the first place; the mistake was scoping it to the whole digit instead
+   of the specific letter. `'0Z'` (light engine) and `'0B'` (bus) are both real, standard
+   headcode conventions for what digit '0' covers. Fixed by excluding `hc.startswith('0B')`
+   specifically -- in the RTT-predictor loop (where the actual bug was: buses are RTT-listed,
+   trains aren't restricted from being there) and, belt-and-braces, in corridor synthesis too
+   (`rail_replacement_bus` skip reason), even though a bus can never produce a real TD sighting
+   there anyway.
 
 **2026-08-17 — ECS-as-freight fix generalised: any headcode digit, not just '5'.** Reported live:
 3T60 (Reading Traincare Depot -> Paddington, CIF-identified as a genuine Class 387 EMU) showed

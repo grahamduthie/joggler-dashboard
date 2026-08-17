@@ -916,6 +916,7 @@ const OPS = {
 };
 const isFrtHc = hc => hc && '4678'.indexOf(hc[0]) >= 0;
 const isEcsHc = hc => hc && hc[0] === '5';
+const isLightLocoHc = hc => hc && hc[0] === '0';
 /* Power-type indicator colours (berth-diagram cap stripe + topbar legend) —
    independent of the operator fill colour, so e.g. a GWR DMU and a GWR IET
    are still visually distinguishable at a glance. */
@@ -946,6 +947,15 @@ function opInfo(t) {
   if (t && t.headcode && t.headcode.startsWith('2Y')) return OPS.XR;
   if (t && isEcsHc(t.headcode))
     return {bg:'#4a7d9d', fg:'#04121a', ab:'ECS'};
+  // Checked ahead of the freight test and the Maidenhead fallback below,
+  // and headcode-only (not t.passenger): the berth panel renders straight
+  // from /api/td-live position objects, which carry no passenger field at
+  // all, so a passenger===false-based freight test can't see a light loco
+  // there -- it fell through everything to the Maidenhead fallback and
+  // showed as Elizabeth Line purple instead (reported live 2026-08-17,
+  // 0Z47 at a Maidenhead berth -- definitely not an EL working).
+  if (t && isLightLocoHc(t.headcode))
+    return {bg:'#8a8f99', fg:'#14161a', ab:'LOCO'};
   if (t && (t.passenger === false || isFrtHc(t.headcode)))
     return {bg:'#7d8f4a', fg:'#111504', ab:'FRT'};
   if (t && MAID_PLACES[t.place]) return OPS.XR;

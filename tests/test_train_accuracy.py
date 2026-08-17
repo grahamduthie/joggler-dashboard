@@ -615,6 +615,25 @@ class TrainAccuracyTests(unittest.TestCase):
             with proxy._td_lock:
                 proxy._td_buffer[:] = old_buffer
 
+    def test_rail_replacement_bus_is_excluded_from_corridor_synthesis(self):
+        # A rail-replacement bus (headcode '0B...') is a road vehicle: RTT
+        # lists it as a bookable public service, but it can never produce a
+        # real TD sighting. This is a belt-and-braces check -- the live bug
+        # (0B00 showing on the approach list with an ETA that could never
+        # resolve) was actually in the RTT-predictor loop, not here.
+        with proxy._td_lock:
+            old_buffer = list(proxy._td_buffer)
+            proxy._td_buffer[:] = [{'area': 'D1', 'from': '1646', 'to': '1640',
+                                     'descr': '0B00', 'ts': 995}]
+        try:
+            skip_log = []
+            proxy._td_enrich_trains([], 1_000, skip_log=skip_log)
+            self.assertEqual(len(skip_log), 1)
+            self.assertEqual(skip_log[0]['reason'], 'rail_replacement_bus')
+        finally:
+            with proxy._td_lock:
+                proxy._td_buffer[:] = old_buffer
+
     def test_row_candidates_includes_ineligible_trains_with_a_reason_visible(self):
         trains = [
             {'uid': 'winner', 'run_key': 'winner', 'direction': 'up', 'track': 'Main',

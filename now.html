@@ -810,12 +810,17 @@ function opInfo(t) {
   if (o) return o;
   if (isEcsHc(t.headcode))
     return {bg:'#4a7d9d', fg:'#04121a', name:'ECS'};
+  // Own colour, not lumped into Freight: a light locomotive is neither
+  // freight nor an ordinary passenger service (reported live 2026-08-17).
+  if (isLightLocoHc(t.headcode))
+    return {bg:'#8a8f99', fg:'#14161a', name:'Light Loco'};
   if (t.passenger === false || isFreightHc(t.headcode))
     return {bg:'#7d8f4a', fg:'#111504', name:'Freight'};
   return {bg:'#3c4c60', fg:'#dfe7f0', name: t.op_name || t.op_code || ''};
 }
 function isFreightHc(hc) { return hc && '4678'.indexOf(hc[0]) >= 0; }
 function isEcsHc(hc) { return hc && hc[0] === '5'; }
+function isLightLocoHc(hc) { return hc && hc[0] === '0'; }
 function freightClass(hc) {
   const c = hc ? hc[0] : '';
   return c === '4' ? 'Freight · intermodal'
