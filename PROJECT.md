@@ -90,6 +90,12 @@ O2 Joggler (172.16.10.168, user of)
 The dashboard is served from the cloud VM through Nginx. All `/api/…` calls in the HTML are
 relative URLs and resolve to the same secure public host from any browser.
 
+**Dashboard access rule:** Internet clients require Google SSO. Home-LAN clients, including the
+Joggler, are exempted at the cloud Nginx authentication check by the home's pfSense IPv4 WAN
+address (`82.71.18.37`); the cloud host cannot see individual `172.16.10.x` addresses after NAT.
+If the WAN address changes, update the narrowly scoped exception in
+`/etc/nginx/sites-available/dashboard` on `gdxcloud` and reload Nginx.
+
 **Chromecast note:** `CAST_BASE = 'http://localhost:9998'` in `dashboard.html`. The Joggler's
 kiosk browser resolves `localhost` to the Joggler itself, so cast-server.py runs **on the Joggler**
 (not the Pi) at port 9998. Casting therefore works from the Joggler's kiosk. It will not work from

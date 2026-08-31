@@ -71,10 +71,12 @@ answers until their former TTL expires. Recheck public DNS before certificate is
 
 ## Security decisions
 
-The user has explicitly chosen **public, no-login read-only pages**. The only planned household
-data exposed by the dashboard is upstairs/downstairs temperature, and that exposure is acceptable.
-Do not introduce Basic Auth, Cloudflare Access, or an application login unless this decision is
-revisited.
+Dashboard requires Google SSO for Internet clients. Home-LAN devices are intentionally exempt:
+the cloud VM sees them after pfSense NAT as the home's IPv4 WAN address (`82.71.18.37`), so its
+Dashboard Nginx vhost returns a successful internal authentication check only for that address.
+This keeps the Joggler kiosk login-free while retaining Google authentication everywhere else.
+If the WAN address changes, update that one allow-list entry and reload Nginx. Do not broaden this
+to an address range or bypass authentication for arbitrary Internet sources.
 
 The following protections remain required:
 
