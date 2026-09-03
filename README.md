@@ -118,6 +118,23 @@ The live production backend is on the GDX cloud VM at `dashboard.gdx.org.uk` and
 Read **[CLOUD-MIGRATION-PLAN.md](CLOUD-MIGRATION-PLAN.md)** before changing cloud deployment,
 DNS, Nginx, kiosk URLs, or the public Dashboard/Nearby routes.
 
+### Public Nearby navigation
+
+`nearby.gdx.org.uk` is a public, no-login hub. It deliberately separates location-independent
+aircraft discovery from the Twyford-specific railway views:
+
+| Route | Purpose |
+|---|---|
+| `https://nearby.gdx.org.uk/` | Nearby hub: Aircraft Nearby, Now, Lineside and Trains |
+| `https://nearby.gdx.org.uk/aircraft` | Public aircraft view; the first and location-capable destination |
+| `https://nearby.gdx.org.uk/now`, `/lineside`, `/trains` | Public Twyford-specific views |
+
+The hub is styled to match the public `www.gdx.org.uk` landing page, including its remotely served
+GDX logo. Its source is `nearby.html` in this repository and it is served directly by
+`transport-proxy.py`; a normal `./deployment/cloud-deploy.sh` publishes it. The public GDX landing
+links directly to Aircraft Nearby, while its SSO-protected Internal apps page contains a convenience
+link to this public hub. Do not add Dashboard/Internal Apps authentication to the Nearby Nginx host.
+
 ---
 
 ## Quick deployment (day-to-day)

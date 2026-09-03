@@ -1,6 +1,72 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Nearby — GDX</title><style>
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:#10202f;color:#eef5fb;font:18px system-ui,sans-serif}
-main{width:min(92vw,680px)}h1{margin:0 0 .25rem;font-size:clamp(2rem,7vw,3.5rem)}p{color:#b9cbd9}nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:28px}a{padding:22px;border-radius:12px;background:#1e425e;color:#fff;text-decoration:none;font-weight:700}a:hover{background:#286087}@media(max-width:440px){nav{grid-template-columns:1fr}}
-</style></head><body><main><h1>Nearby</h1><p>Live views around Twyford, Berkshire.</p><nav><a href="/now">Now</a><a href="/lineside">Lineside</a><a href="/aircraft">Aircraft</a><a href="/trains">Trains</a></nav></main></body></html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Live aircraft and Twyford railway views.">
+    <title>Nearby hub · GDX</title>
+    <style>
+      :root { --navy:#040972; --cyan:#24afed; --paper:#fff; --line:#d8e9f1; }
+      * { box-sizing:border-box; }
+      body { min-width:20rem; min-height:100vh; margin:0; color:var(--navy); background:var(--paper); font-family:ui-sans-serif,system-ui,sans-serif; }
+      main { width:min(100% - 3rem,46rem); margin:0 auto; padding:clamp(3rem,10vw,7rem) 0 4rem; }
+      .masthead { border-bottom:1px solid var(--line); }
+      .logo-lockup { position:relative; height:clamp(5.5rem,14vw,9rem); margin:0 0 clamp(2rem,6vw,3.5rem); overflow:hidden; }
+      .logo-lockup img { position:absolute; top:-179%; left:-25%; width:150%; height:455%; }
+      .destinations { margin-top:1.5rem; }
+      .back-link { display:inline-block; margin-top:1.5rem; color:var(--navy); font-size:.9rem; font-weight:650; text-decoration-color:var(--cyan); text-decoration-thickness:2px; text-underline-offset:.22rem; }
+      .back-link:hover, .back-link:focus-visible { color:var(--cyan); }
+      .back-link:focus-visible { outline:2px solid var(--cyan); outline-offset:.25rem; }
+      .destination { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1.5rem; align-items:center; padding:1.35rem 0; border-bottom:1px solid var(--line); color:inherit; text-decoration:none; }
+      .destination-copy { display:grid; gap:.35rem; }
+      .destination strong { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
+      .destination-copy span { color:#425576; font-size:.9rem; line-height:1.5; }
+      .arrow { color:var(--cyan); font-size:1.5rem; transition:transform .15s ease; }
+      .destination:hover strong, .destination:focus-visible strong { color:var(--cyan); }
+      .destination:hover .arrow, .destination:focus-visible .arrow { transform:translate(.2rem,-.2rem); }
+      .destination:focus-visible { outline:2px solid var(--cyan); outline-offset:.25rem; }
+      @media (max-width:32rem) { main { width:min(100% - 2rem,46rem); } .destination { gap:1rem; } }
+      @media (prefers-reduced-motion:reduce) { .arrow { transition:none; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="masthead">
+        <h1 class="logo-lockup"><img src="https://www.gdx.org.uk/gdxlogo_v4_combined.svg" alt="GDX"></h1>
+      </header>
+
+      <a class="back-link" href="https://www.gdx.org.uk/">← All GDX projects</a>
+
+      <nav class="destinations" aria-label="Nearby hub">
+        <a class="destination" href="/aircraft">
+          <span class="destination-copy">
+            <strong>Aircraft Nearby</strong>
+            <span>Live aircraft positions, routes and details around a chosen location.</span>
+          </span>
+          <span class="arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="destination" href="/now">
+          <span class="destination-copy">
+            <strong>Now</strong>
+            <span>The nearest commercial aircraft alongside the current Twyford railway picture.</span>
+          </span>
+          <span class="arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="destination" href="/lineside">
+          <span class="destination-copy">
+            <strong>Lineside</strong>
+            <span>Live train-describer positions across the Twyford railway corridor.</span>
+          </span>
+          <span class="arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="destination" href="/trains">
+          <span class="destination-copy">
+            <strong>Trains</strong>
+            <span>Approaching and passing trains on the Great Western Main Line at Twyford.</span>
+          </span>
+          <span class="arrow" aria-hidden="true">↗</span>
+        </a>
+      </nav>
+    </main>
+  </body>
+</html>

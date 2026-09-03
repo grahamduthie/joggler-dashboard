@@ -21,15 +21,17 @@ makes the dashboard and nearby-transport views accessible at stable HTTPS URLs.
 | Host | Canonical content | Intended role |
 |---|---|---|
 | `https://dashboard.gdx.org.uk/` | Main `dashboard.html` application | Household dashboard now; responsive desktop/tablet/phone dashboard later |
-| `https://nearby.gdx.org.uk/` | Small index of nearby views | Future location-oriented transport/aircraft application |
-| `https://nearby.gdx.org.uk/now` | `now.html` | Nearby view |
-| `https://nearby.gdx.org.uk/lineside` | `lineside.html` | Lineside view |
-| `https://nearby.gdx.org.uk/aircraft` | `aircraft.html` | Aircraft view |
-| `https://nearby.gdx.org.uk/trains` | `trains.html` | Trains view |
+| `https://nearby.gdx.org.uk/` | `nearby.html` | Public Nearby hub; navigation for Aircraft Nearby and the Twyford views |
+| `https://nearby.gdx.org.uk/now` | `now.html` | Public combined aircraft/Twyford view |
+| `https://nearby.gdx.org.uk/lineside` | `lineside.html` | Public Twyford lineside view |
+| `https://nearby.gdx.org.uk/aircraft` | `aircraft.html` | Public, location-capable aircraft view |
+| `https://nearby.gdx.org.uk/trains` | `trains.html` | Public Twyford trains view |
 
 Requests for the four standalone pages on `dashboard.gdx.org.uk` should redirect to the canonical
-`nearby.gdx.org.uk` URL. The public GDX landing page (`https://www.gdx.org.uk`) will gain links to
-Dashboard and Nearby once the new hosts are working.
+`nearby.gdx.org.uk` URL. The public GDX landing page links directly to Aircraft Nearby
+(`https://nearby.gdx.org.uk/aircraft`). The SSO-protected Internal apps page includes the existing
+Nearby hub as a convenience link, but the hub and every Nearby route remain public and must not
+inherit Internal Apps/Dashboard authentication.
 
 ## Confirmed infrastructure facts (2026-08-16)
 
@@ -77,6 +79,10 @@ Dashboard Nginx vhost returns a successful internal authentication check only fo
 This keeps the Joggler kiosk login-free while retaining Google authentication everywhere else.
 If the WAN address changes, update that one allow-list entry and reload Nginx. Do not broaden this
 to an address range or bypass authentication for arbitrary Internet sources.
+
+Nearby is intentionally different: `nearby.gdx.org.uk` is public for all Internet clients. Its hub
+shares the visual language of `www.gdx.org.uk`, but that is a presentation choice only; it does not
+share the GDX landing site's restrictive CSP or OAuth `auth_request` configuration.
 
 The following protections remain required:
 
@@ -202,7 +208,9 @@ automation will move to the user's forthcoming always-on machine.
 - Create independent site files for `dashboard.gdx.org.uk` and `nearby.gdx.org.uk`.
 - HTTP redirects to HTTPS; each HTTPS server proxies only to `127.0.0.1:8002`.
 - `dashboard` redirects `/now`, `/lineside`, `/aircraft` and `/trains` to `nearby`.
-- `nearby` serves an index at `/` and the four canonical standalone paths.
+- `nearby` serves the public Nearby hub at `/` and the four canonical standalone paths. Do not add
+  an `auth_request` to this vhost: the link's placement in `www.gdx.org.uk/internal.html` does not
+  make its target private.
 - Do not copy the GDX landing page's restrictive CSP wholesale: these pages require external map,
   image, audio and API origins. Add security headers incrementally after browser testing.
 - Validate with `nginx -t` before every reload. Do not alter global Nginx, firewall, or existing
