@@ -896,7 +896,9 @@ def _fetch_passenger_stop(atco, domain, operator_name):
         return []
 
     items = re.findall(r'<li class="departure-board__item".*?</li>', body, re.DOTALL)
-    now = datetime.datetime.now()
+    # Must be Europe/London wall-clock, not server-local: the cloud VM runs in
+    # UTC, so a naive now() put "X mins" countdowns an hour early during BST.
+    now = datetime.datetime.now(_TZ_LONDON)
     now_mins = now.hour * 60 + now.minute
     results = []
 
@@ -911,6 +913,10 @@ def _fetch_passenger_stop(atco, domain, operator_name):
             continue
 
         route  = _html.unescape(route_m.group(1).strip())
+        # Carousel now brands some services with a name ahead of the route
+        # number (e.g. "Riversider 850") — the tile expects a bare route
+        # code, so keep only the last token.
+        route  = route.split()[-1] if route else route
         dest   = _html.unescape(dest_m.group(1).strip()) if dest_m else ''
         disp   = time_m.group(1).strip()
         state  = state_m.group(1) if state_m else ''
