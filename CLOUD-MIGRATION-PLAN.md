@@ -266,6 +266,22 @@ them during this migration.
 
 ## Change log
 
+- **2026-09-11 — nginx crash resilience after a certbot/unattended-upgrades race:** Nginx was down
+  for about 90 minutes (06:56–08:27 UTC), taking Dashboard, Nearby, Cruise Tracker and RailRouter
+  offline together. Cause: `apt-daily-upgrade.service` installed a `libc6` security update and
+  `needrestart` restarted nginx for it at the same moment `certbot.timer` fired its twice-daily
+  renewal check for `cruisetracker.gdx.org.uk`; the two restarts raced for ports 80/443, nginx lost
+  and exited with `bind() ... Address already in use`, and because `nginx.service` had `Restart=no`
+  it just stayed dead — nothing else was actually holding the ports afterward. Both triggers
+  (security patching, cert renewal) are wanted and their exact schedules aren't worth constraining,
+  so the fix targets the failure mode instead: a systemd drop-in
+  (`deployment/nginx.service.override.conf`, installed at
+  `/etc/systemd/system/nginx.service.d/override.conf`) sets `Restart=on-failure` with a 2s backoff,
+  so a future collision self-heals in seconds instead of requiring someone to notice and restart it
+  by hand. `StartLimitBurst`/`StartLimitIntervalUSec` are left at systemd defaults (5 restarts/10s)
+  so a genuine config error still surfaces as `failed` rather than looping silently. Applies to the
+  whole VM (all three apps share nginx), not just Joggler. No app code changed; nothing to release
+  via `cloud-deploy.sh`.
 - **2026-08-16 — VM swap safety net:** Added a 1 GiB `/swapfile` on the ext4 root filesystem,
   enabled immediately and persistently through `/etc/fstab`, and set persistent
   `vm.swappiness=10` in `/etc/sysctl.d/99-joggler-swap.conf`. It is unused after activation. The
