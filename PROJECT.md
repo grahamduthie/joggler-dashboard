@@ -2009,6 +2009,17 @@ the shadow and cutover procedure is in `TRAIN-ACCURACY-PLAN.md`.
 - **Token auto-refresh** — proxy uses `REFRESH_TOKEN_AUTH` flow; no 2FA needed for refresh
 - **Auto-reauth on refresh failure** — proxy calls `hive-setup.py --credentials-file …` as a
   subprocess to perform full SRP re-authentication. Requires `hive-credentials.json` to exist
+- **Login-page configuration parsing (fixed 2026-10-23)** — Hive now serves
+  `window.HiveSSOPoolId = '…'` and `window.HiveSSOPublicCognitoClientId = '…'`.
+  `hive-setup.py` accepts whitespace around `=` and either quote style, including the original
+  compact double-quoted format. Use the public Cognito client ID, not `HiveSSOCognitoClientId`.
+- **Missing indoor temperatures** — check the cloud `/api/hive` endpoint (command below).
+  The weather screen only displays the indoor panel after it receives sensors; a failed request
+  leaves the panel empty after a page load. On 2026-10-23 the endpoint returned HTTP 502:
+  `Invalid Refresh Token` followed by a re-auth configuration-parsing failure. The parser fix
+  restored unattended login using the existing saved credentials; no manual token reset was
+  needed. The screen polls every five minutes while Weather is open; reopening Weather also
+  fetches readings. Regression tests: `python3 -m unittest discover -s tests -p test_hive_auth.py`.
 
 ### WiFi
 Config at `/boot/network.yaml` (EFI partition). `of-netplan` service copies to `/etc/netplan/`
@@ -2356,3 +2367,17 @@ Everything working as of 2026-08-09.
       fight over Chromium (black screen, load ~6), and `pkill -f chromium` over SSH usually
       drops the connection before the rest of the command runs — which is how the duplicate
       watchdog gets created in the first place
+
+### Session 2026-10-23
+
+- [x] Restored the Weather screen's upstairs/downstairs indoor temperatures. Hive's saved
+      refresh token was invalid, and automatic SRP re-authentication failed because the login
+      page had changed to spaced, single-quoted JavaScript configuration assignments.
+- [x] Updated `hive-setup.py` to accept both the current and original configuration formats.
+      Added `tests/test_hive_auth.py` covering both formats, selection of the public client ID,
+      and rejection of a page with missing configuration; both tests passed.
+- [x] Deployed only `hive-setup.py` to `/home/gduthie/joggler/` on the cloud VM. The next
+      `/api/hive` request re-authenticated successfully and returned HTTP 200 with both zones.
+      Refreshed readings through the existing `fetchHiveTemps()` function on the Joggler via
+      its SSH-tunnelled Chromium debugger; confirmed both labels and readings in the DOM and
+      the indoor panel's computed display was `flex` (upstairs 20.1°C, downstairs 21.4°C).

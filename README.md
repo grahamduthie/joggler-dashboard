@@ -118,6 +118,10 @@ The live production backend is on the GDX cloud VM at `dashboard.gdx.org.uk` and
 Read **[CLOUD-MIGRATION-PLAN.md](CLOUD-MIGRATION-PLAN.md)** before changing cloud deployment,
 DNS, Nginx, kiosk URLs, or the public Dashboard/Nearby routes.
 
+If the Weather screen's upstairs/downstairs indoor temperatures disappear, see
+**[Hive / Cognito troubleshooting](PROJECT.md#hive--cognito)**. The 2026-10-23 fix restores
+automatic sign-in after Hive changed its login-page configuration format.
+
 ### Public Nearby navigation
 
 `nearby.gdx.org.uk` is a public, no-login hub. It deliberately separates location-independent

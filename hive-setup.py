@@ -112,8 +112,10 @@ class HiveSRPAuth:
         resp = requests.get(SSO_URL, timeout=10)
         resp.raise_for_status()
         html = resp.text
-        pool   = re.search(r'HiveSSOPoolId="([^"]+)"', html)
-        client = re.search(r'HiveSSOPublicCognitoClientId="([^"]+)"', html)
+        # Hive now serves spaced JavaScript assignments with single quotes.
+        # Also accept the original compact, double-quoted configuration.
+        pool   = re.search(r'''\bHiveSSOPoolId\s*=\s*["']([^"']+)["']''', html)
+        client = re.search(r'''\bHiveSSOPublicCognitoClientId\s*=\s*["']([^"']+)["']''', html)
         if not pool or not client:
             raise RuntimeError('Cannot extract Cognito config from sso.hivehome.com')
         self.pool_id   = pool.group(1)       # e.g. eu-west-1_SamNfoWtf
