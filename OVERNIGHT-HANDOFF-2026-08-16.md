@@ -1,5 +1,8 @@
 # Overnight handoff — 2026-08-16
 
+Historical record: see [HANDOFF.md](HANDOFF.md) for current operational state. The process IDs
+and overnight-only deployment restrictions below describe August 16, not the current service.
+
 ## Leave this running overnight
 
 Keep the browser open at [the train shadow monitor](https://nearby.gdx.org.uk/train-shadow). It polls both models every 10 seconds, keeps the on-demand TD connection active, and appends decisions to the cloud evidence log. Do **not** promote v2, alter model weights, reset the learner, or deploy train-model code overnight.

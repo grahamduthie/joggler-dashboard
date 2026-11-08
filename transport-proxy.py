@@ -4286,6 +4286,27 @@ _nr_cancellations = {}   # headcode -> {'cancelled': bool, 'ts': float, 'reason'
 _nr_identity_lock = threading.Lock()
 _nr_identity_map  = {}   # old_headcode -> {'new_hc': str, 'ts': float}
 
+# A broken STOMP connection can emit many disconnect/heartbeat callbacks at once.
+# They must share one reconnect worker: starting one thread per callback can
+# exhaust the process's thread limit and take down the HTTP server as well.
+_nr_reconnect_lock = threading.Lock()
+_nr_reconnect_thread = None
+
+
+def _nr_schedule_reconnect():
+    """Start at most one STOMP reconnect worker for concurrent callbacks."""
+    global _nr_reconnect_thread
+    if not _nr_running:
+        return
+    with _nr_reconnect_lock:
+        if not _nr_running:
+            return
+        if _nr_reconnect_thread is not None and _nr_reconnect_thread.is_alive():
+            return
+        _nr_reconnect_thread = threading.Thread(
+            target=_nr_stomp_reconnect, daemon=True)
+        _nr_reconnect_thread.start()
+
 # A real UK headcode is always digit + letter + 2 digits (e.g. '9U87', '0Z47',
 # '3T60'). TD's CA/CC 'descr' field usually carries one, but signalling areas
 # occasionally report a non-train administrative/test descriptor in the same
@@ -4315,7 +4336,7 @@ class _NRListener:
 
     def on_heartbeat_timeout(self):
         print('NR STOMP heartbeat timeout; will reconnect')
-        threading.Thread(target=_nr_stomp_reconnect, daemon=True).start()
+        _nr_schedule_reconnect()
 
     def _handle_td(self, msgs):
         """Process Train Describer (TD) messages: CA berth steps, CC berth
@@ -4613,7 +4634,7 @@ class _NRListener:
 
     def on_disconnected(self):
         print('NR STOMP disconnected; will reconnect')
-        threading.Thread(target=_nr_stomp_reconnect, daemon=True).start()
+        _nr_schedule_reconnect()
 
     def on_error(self, frame):
         hdrs = getattr(frame, 'headers', {})

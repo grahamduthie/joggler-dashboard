@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="hls.min.js"></script>
+<script src="vendor/suncalc-1.9.0.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
 <script>
 // Runs before render so the right profile is in place for the first paint.
@@ -382,7 +383,12 @@ applyProfile();
     flex-direction: column;
     justify-content: space-evenly;
   }
-  #wx-sun-arc-wrap { width: 100%; flex-shrink: 0; }
+  #wx-sky { display: flex; align-items: center; width: 100%; flex-shrink: 0; gap: 8px; }
+  #wx-sun-arc-wrap { flex: 1; min-width: 0; }
+  #wx-moon-wrap { width: 94px; flex-shrink: 0; border-left: 1px solid rgba(255,255,255,0.14); padding-left: 8px; text-align: center; }
+  #wx-moon { display: block; width: 40px; height: 40px; margin: 0 auto 4px; }
+  #wx-moon-name { display: block; font-size: 12px; line-height: 14px; color: rgba(255,255,255,0.9); }
+  #wx-moon-lit { display: block; font-size: 11px; line-height: 14px; color: rgba(255,255,255,0.55); }
   #wx-sun-arc { width: 100%; height: 70px; display: block; overflow: visible; }
   #wx-compass-wrap { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   #wx-compass { width: 96px; height: 96px; flex-shrink: 0; }
@@ -2245,7 +2251,7 @@ applyProfile();
     border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;
     flex-direction: column; align-items: center;
   }
-  html.profile-phone-portrait #wx-sun-arc-wrap { width: min(300px, 90%); }
+  html.profile-phone-portrait #wx-sky { width: min(300px, 90%); }
   html.profile-phone-portrait #wx-compass-wrap { justify-content: center; }
 
   /* Weather Today tab: allow horizontal scroll for 800px canvas */
@@ -2487,8 +2493,15 @@ applyProfile();
         </div>
 
         <div id="wx-now-right">
-          <div id="wx-sun-arc-wrap">
-            <svg id="wx-sun-arc" viewBox="0 0 300 110" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="wx-sky">
+            <div id="wx-sun-arc-wrap">
+              <svg id="wx-sun-arc" viewBox="0 0 160 90" role="img" aria-label="Sunrise, sunset and daylight progress" xmlns="http://www.w3.org/2000/svg"></svg>
+            </div>
+            <div id="wx-moon-wrap">
+              <svg id="wx-moon" viewBox="0 0 44 44" role="img" aria-label="Current moon phase" xmlns="http://www.w3.org/2000/svg"></svg>
+              <span id="wx-moon-name"></span>
+              <span id="wx-moon-lit"></span>
+            </div>
           </div>
           <div id="wx-compass-wrap">
             <div id="wx-wind-info"></div>
@@ -3046,23 +3059,59 @@ applyProfile();
     var rL = pad(rise.getHours()) + ':' + pad(rise.getMinutes());
     var sL = pad(set.getHours())  + ':' + pad(set.getMinutes());
     var progress = Math.max(0, Math.min(1, (nowH - riseH) / (setH - riseH)));
-    // Arc center (150,95), rx=140, ry=82
     var theta = Math.PI * (1 - progress);
-    var sunX  = Math.round(150 + 140 * Math.cos(theta));
-    var sunY  = Math.round(95  -  82 * Math.sin(theta));
+    var sunX = (80 + 70 * Math.cos(theta)).toFixed(1);
+    var sunY = (64 - 53 * Math.sin(theta)).toFixed(1);
     var above = nowH >= riseH && nowH <= setH;
     var dot = above
-      ? '<circle cx="' + sunX + '" cy="' + sunY + '" r="7" fill="#f0c040" opacity="0.92"/>' +
-        '<circle cx="' + sunX + '" cy="' + sunY + '" r="11" fill="#f0c040" opacity="0.18"/>'
+      ? '<circle cx="' + sunX + '" cy="' + sunY + '" r="5" fill="#f0c040"/>'
       : '';
     document.getElementById('wx-sun-arc').innerHTML =
-      '<line x1="8" y1="95" x2="292" y2="95" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>' +
-      '<path d="M 10,95 A 140,82 0 0 1 290,95" fill="none" stroke="rgba(255,255,255,0.50)" stroke-width="1.5" stroke-dasharray="5,4"/>' +
+      '<line x1="8" y1="64" x2="152" y2="64" stroke="rgba(255,255,255,0.35)"/>' +
+      '<path d="M 10,64 A 70,53 0 0 1 150,64" fill="none" stroke="rgba(255,255,255,0.50)" stroke-width="1.5" stroke-dasharray="4,3"/>' +
       dot +
-      '<text x="10"  y="108" font-size="10" fill="rgba(255,255,255,0.65)">' + rL + '</text>' +
-      '<text x="290" y="108" font-size="10" fill="rgba(255,255,255,0.65)" text-anchor="end">' + sL + '</text>' +
-      '<line x1="150" y1="10" x2="150" y2="16" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>';
+      '<text x="4" y="85" font-size="19" fill="rgba(255,255,255,0.8)">' + rL + '</text>' +
+      '<text x="156" y="85" font-size="19" fill="rgba(255,255,255,0.8)" text-anchor="end">' + sL + '</text>';
+    document.getElementById('wx-sun-arc').setAttribute('aria-label',
+      'Sunrise ' + rL + ', sunset ' + sL);
   }
+
+  // SunCalc's astronomical illumination calculation; lit side as seen from the UK.
+  function renderMoonPhase() {
+    var moon = SunCalc.getMoonIllumination(new Date());
+    var phase = moon.phase;
+    var names = ['New moon', 'Waxing crescent', 'First quarter', 'Waxing gibbous',
+                 'Full moon', 'Waning gibbous', 'Last quarter', 'Waning crescent'];
+    var name = names[Math.floor(phase * 8 + 0.5) % 8];
+    var lit = Math.round(moon.fraction * 100);
+    var waxing = phase <= 0.5;
+    var curve = Math.cos(phase * 2 * Math.PI);
+    var points = [];
+    // Trace the outer limb, then the elliptical day/night boundary.
+    for (var i = 0; i <= 40; i++) {
+      var y = -19 + 38 * i / 40;
+      var limb = Math.sqrt(Math.max(0, 19 * 19 - y * y));
+      points.push((22 + (waxing ? limb : -limb)).toFixed(2) + ',' + (22 + y).toFixed(2));
+    }
+    for (var j = 40; j >= 0; j--) {
+      var ty = -19 + 38 * j / 40;
+      var tx = curve * Math.sqrt(Math.max(0, 19 * 19 - ty * ty));
+      points.push((22 + (waxing ? tx : -tx)).toFixed(2) + ',' + (22 + ty).toFixed(2));
+    }
+    var path = 'M' + points.join(' L') + ' Z';
+    document.getElementById('wx-moon').innerHTML =
+      '<defs><clipPath id="wx-moon-light"><path d="' + path + '"/></clipPath></defs>' +
+      '<circle cx="22" cy="22" r="19" fill="#253746" stroke="rgba(255,255,255,0.25)" stroke-width="0.7"/>' +
+      '<path d="' + path + '" fill="#e9e9db"/>' +
+      '<g clip-path="url(#wx-moon-light)" fill="#9ca9ae" opacity="0.32">' +
+      '<circle cx="15" cy="15" r="5"/><circle cx="28" cy="13" r="3"/>' +
+      '<circle cx="26" cy="28" r="6"/><circle cx="12" cy="29" r="2"/></g>';
+    document.getElementById('wx-moon').setAttribute('aria-label', name + ', ' + lit + '% illuminated');
+    document.getElementById('wx-moon-name').textContent = name;
+    document.getElementById('wx-moon-lit').textContent = lit + '% illuminated';
+  }
+  renderMoonPhase();
+  setInterval(renderMoonPhase, 10 * 60 * 1000);
 
   // ── Wind compass SVG ──
   function renderCompass(windDir, windSpeed, windGusts) {

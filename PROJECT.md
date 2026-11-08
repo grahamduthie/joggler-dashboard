@@ -2081,7 +2081,16 @@ ssh -i ~/.ssh/id_ed25519 -N -L 9222:127.0.0.1:9222 of@172.16.10.168
 
 It exists because a wedged page could previously only be inspected by restarting Chromium,
 which destroys the state you're trying to diagnose. With CDP you can read the console and
-evaluate JS in the live page. Python's `websockets` works from the Mac but needs
+evaluate JS in the live page. **When attaching Puppeteer to the live kiosk, always pass
+`defaultViewport: null` to `puppeteer.connect()`.** Its default viewport emulation changes the
+page to 800×600 even though the physical display is 800×480; the card profile then adds a 20px
+top margin and clips the bottom. This happened and was repaired on 2026-11-08. Recover with
+`await page.setViewport({width: 800, height: 480, deviceScaleFactor: 1})`, then wait for
+`innerHeight === 480` and the body rectangle's `y === 0`. Verify the body bottom is 480 and
+inspect a screenshot. `Emulation.clearDeviceMetricsOverride` alone did not restore the viewport
+in this session. Keep test viewport emulation confined to local preview browsers.
+
+Python's `websockets` works from the Mac but needs
 `open_timeout=90` — the Atom Z520 is too slow for the default 10 s handshake timeout.
 
 ---
@@ -2381,3 +2390,27 @@ Everything working as of 2026-08-09.
       Refreshed readings through the existing `fetchHiveTemps()` function on the Joggler via
       its SSH-tunnelled Chromium debugger; confirmed both labels and readings in the DOM and
       the indoor panel's computed display was `flex` (upstairs 20.1°C, downstairs 21.4°C).
+
+
+### Session 2026-11-08
+
+- [x] Recovered the cloud Dashboard from HTTP 502. Supervisor still reported RUNNING, but
+      the Python process had 9,386 threads and could no longer serve requests. Network Rail
+      STOMP disconnect/heartbeat callbacks each spawned independent reconnect loops.
+- [x] Added `_nr_schedule_reconnect()` in `transport-proxy.py`: a lock and tracked live thread
+      coalesce callbacks into one worker and suppress reconnects while intentionally idle.
+      Deployed through `deployment/cloud-deploy.sh`; restarted the exhausted process.
+      Dashboard and `/health` returned HTTP 200 afterwards. Long-duration fault testing remains
+      outstanding; the guard does not redesign the full connection lifecycle.
+- [x] Split Weather Now's top-right sun area into a compact sun arc and a moon panel.
+      Sunrise/sunset times render at about 14px on the Joggler; moon phase text is 12px and
+      illumination text 11px. Longer names wrap. SVG shading lights the right side while waxing
+      and left side while waning, as conventionally shown for the UK.
+- [x] Vendored SunCalc 1.9.0 with its BSD license in `vendor/`; phase/illumination calculation
+      runs locally every ten minutes, independent of weather API availability.
+- [x] Browser checks covered 800×480, a 390px phone portrait viewport, and a simulated
+      Waning gibbous label. Fixed the live kiosk viewport after the inspection tool inadvertently
+      emulated 800×600; verified an actual 800×480 screenshot with no margin or clipping.
+- [x] Handoff checks: all 56 unittest cases passed; Python and inline/vendor JS syntax passed;
+      an isolated 100-callback concurrency check started one reconnect worker and suppressed idle
+      reconnect. Current handoff: `HANDOFF.md`; August overnight notes remain historical.

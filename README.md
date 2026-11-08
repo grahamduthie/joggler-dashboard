@@ -22,7 +22,7 @@ USB stick, and repurposes the device as a persistent household display.
 
 | Tile / View | What it shows |
 |-------------|---------------|
-| **Weather** | Current conditions, hourly chart, 7-day forecast. NOW / TODAY / WEEK tabs. Sun arc, wind compass, AQI, indoor temperatures from Hive heating. |
+| **Weather** | Current conditions, hourly chart, 7-day forecast. NOW / TODAY / WEEK tabs. Sun arc with sunrise/sunset, current moon phase and illumination graphic, wind compass, AQI, indoor temperatures from Hive heating. |
 | **Radio** | 30+ stations — Marlow FM (with live SSE now-playing), Bauer/Global/indie streams. Station picker grid. Chromecast casting. |
 | **WagtailCam** | Live MJPEG stream and dated timelapse from a garden wildlife camera. |
 | **Trains** | Next 5 departures from Twyford station (National Rail live feed). Tap for calling points. On the Joggler, the live-departures header also has a **Passing trains** button. |
@@ -109,6 +109,8 @@ Two separate setup guides:
 
 - **[PI-SETUP.md](PI-SETUP.md)** — Legacy Pi setup and the temporary rollback backend. It is no
   longer the normal production deployment target.
+
+See **[HANDOFF.md](HANDOFF.md)** for the latest session state.
 
 See **[PROJECT.md](PROJECT.md)** for the full technical reference — API details, rate limits,
 data formats, deployment commands, and key gotchas.
