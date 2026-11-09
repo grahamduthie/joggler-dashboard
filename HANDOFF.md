@@ -1,15 +1,31 @@
-# Handoff — 2026-11-08
+# Handoff — 2026-11-09
 
 ## Current state
 
 Branch `main`, tracking `origin/main` at `git@github.com:grahamduthie/joggler-dashboard.git`.
-This checkpoint includes the cloud recovery, Weather moon panel, vendor license, and documentation.
-All requested work is implemented and deployed. No unrelated local work is deliberately excluded.
+The cloud recovery and Weather moon panel from the previous checkpoint remain deployed. This session
+adds a departure-tile display change and deploys it to cloud production; the change is not yet
+committed or pushed. No unrelated local work is deliberately excluded.
 
 The Joggler is a thin client at `172.16.10.168` (`of`); production runs under Supervisor program
 `joggler` on `cloud.gdx.org.uk` (`gduthie`), in `/home/gduthie/joggler`. The Pi is rollback-only.
 See [PROJECT.md](PROJECT.md) and [CLOUD-MIGRATION-PLAN.md](CLOUD-MIGRATION-PLAN.md).
 [August overnight notes](OVERNIGHT-HANDOFF-2026-08-16.md) are historical, not current restrictions.
+
+## Current task — Darwin cancellation/ETD discrepancy
+
+The user observed Twyford → Abbey Wood trains marked cancelled on the Joggler despite Darwin ETDs
+and later stops appearing on time. They asked the Train tile to keep Darwin's `etd` visible while
+also indicating that Darwin's `isCancelled` flag is set. `dashboard.html` now displays the ETD as
+before and adds a red `isCancelled: true` marker beneath it whenever `svc.cancelled` is true. The
+status column is colored cancellation red in that case. The cancellation reason remains in the
+expanded row.
+
+Deployed via `./deployment/cloud-deploy.sh`; Supervisor restarted and the loopback health endpoint
+returned `ok`. The live `https://nearby.gdx.org.uk/dashboard.html` contains the new marker. The
+attempt to hard reload Chromium on `of@172.16.10.168` via SSH did not complete (timed out without
+output), so the Joggler may need a manual hard reload with Ctrl+Shift+R before the display updates.
+No tests were run for this small frontend change. Do not assume the physical screen has refreshed.
 
 ## Completed this session
 
@@ -60,12 +76,17 @@ body rectangle `y === 0`, then inspect the screenshot. Reloading alone may retai
 
 ## Next actions and limitations
 
-1. No immediate user request remains. If investigating stability, observe the backend thread count
+1. Commit the scoped `dashboard.html` and `HANDOFF.md` changes on `main`, then push to `origin`
+   if the branch is still fast-forwardable. Check the staged diff before committing.
+2. If useful, confirm the Joggler has refreshed `https://nearby.gdx.org.uk/dashboard.html` (the
+   earlier SSH Ctrl+Shift+R command timed out); verify an on-time ETD can appear beside the red
+   `isCancelled: true` marker.
+3. If investigating stability, observe the backend thread count
    over a longer period and especially through NR feed outages. The guard fixes reconnect
    amplification; it does not redesign cleanup of failed connections or all start/stop races.
-2. For backend health, use `sudo supervisorctl status joggler`, `ps -o pid,nlwp,rss,etime -p PID`,
+4. For backend health, use `sudo supervisorctl status joggler`, `ps -o pid,nlwp,rss,etime -p PID`,
    and `/var/log/supervisor/joggler.err.log` over SSH. Do not infer health from RUNNING alone.
-3. Future display work should preview locally at 800×480, preserve the larger labels, and attach
+5. Future display work should preview locally at 800×480, preserve the larger labels, and attach
    to the live browser with the rule above. Do not deploy ordinary changes to the Pi.
 
 Temporary preview/reload scripts and screenshots are in `/tmp/joggler-*` on the Mac and are not

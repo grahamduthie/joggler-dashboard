@@ -1792,6 +1792,7 @@ applyProfile();
   .tr-status.ontime    { color: #3de03d; }
   .tr-status.delayed   { color: #ff8c00; }
   .tr-status.cancelled { color: #ff3333; }
+  .tr-status .cancel-flag { display: block; font-size: 9px; line-height: 1.1; color: #ff7770; }
   .tr-plat {
     width: 38px; text-align: center; font-size: 15px;
     color: #7fb3d3; flex-shrink: 0;
@@ -5074,8 +5075,8 @@ applyProfile();
       var row = document.createElement('div');
       row.className = 'tr-row' + (i === 0 ? ' first-row expanded' : '');
 
-      var scls = 'ontime', stxt = svc.etd;
-      if (svc.cancelled)          { scls = 'cancelled'; stxt = 'Cancelled'; }
+      var scls = 'ontime', stxt = svc.etd || 'On time';
+      if (svc.cancelled) scls = 'cancelled';
       else if (svc.etd !== 'On time') scls = 'delayed';
 
       var main = document.createElement('div');
@@ -5083,7 +5084,8 @@ applyProfile();
       main.innerHTML =
         '<div class="tr-time">' + svc.std + '</div>' +
         '<div class="tr-dest">' + (svc.destination || '—') + '</div>' +
-        '<div class="tr-status ' + scls + '">' + stxt + '</div>' +
+        '<div class="tr-status ' + scls + '">' + stxt +
+          (svc.cancelled ? '<span class="cancel-flag">isCancelled: true</span>' : '') + '</div>' +
         '<div class="tr-plat">' + (svc.platform || '') + '</div>';
       row.appendChild(main);
 
